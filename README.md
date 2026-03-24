@@ -42,6 +42,12 @@ lib/
       ResultSet.pm              result container
 t/
   creategreen.t                 Perl test suite
+docs/                           public dashboard served via GitHub Pages
+  index.html                    (NOT documentation -- this is the live dashboard)
+worker/                         Cloudflare Worker API proxy
+  worker.js                     auth + parse + CORS proxy
+  wrangler.toml                 Worker config
+  README.md                     Worker deploy instructions
 os1bios-measurements.txt        column spec -- meteo station 1
 os2bios-measurements.txt        column spec -- meteo station 2
 solaxbios-measurements.txt      column spec -- FNE (solar inverter)
@@ -363,3 +369,59 @@ The export script authenticates against the Mars2 REST API:
   records separated by literal `0xa`
 
 See `Mars2 REST API.html` for the full API reference.
+
+
+## 9. Public dashboard
+
+A visual representation of the data and API capabilities is available
+as a live dashboard:
+
+**https://riimak.github.io/creategreen/**
+
+This is not part of the project scope -- it was built as a
+demonstration of the Mars2 API and the data pipeline described in
+this repository.  It visualises real-time measurements from all
+three stations (OS1BIOS, OS2BIOS, SOLAXBIOS) using the same API
+endpoints that `bios-export.sh` consumes.
+
+The `docs/` directory is **not documentation** -- it is a single
+HTML file served by GitHub Pages as the live dashboard.
+
+### What it shows
+
+- KPI cards: temperature, humidity, pressure, solar radiation,
+  air quality (PM2.5, PM10), noise, grid power, AC output, daily energy
+- Time-series charts (Chart.js): temperature/humidity, solar
+  radiation, air quality, grid power/AC output, energy production
+- Time range selector: 6 h / 24 h / 72 h
+- Station tabs: switch between OS1 BIOS and OS2 BIOS meteo stations
+- Auto-refreshes every 5 minutes
+
+### Architecture
+
+```
+Browser (GitHub Pages)  -->  Cloudflare Worker  -->  Mars2 API
+docs/index.html              worker/worker.js       :81/CustomDataExport
+static, no build step        auth + parse + CORS     Bearer token auth
+```
+
+The Cloudflare Worker is a thin proxy that authenticates to the
+Mars2 API using credentials stored as Worker secrets (never
+exposed to the browser), fetches the raw wire-format data, and
+returns clean JSON to the dashboard.
+
+### Deploy the worker
+
+```sh
+cd worker
+npx wrangler deploy
+npx wrangler secret put BIOS_USERNAME
+npx wrangler secret put BIOS_PASSWORD
+```
+
+### Enable GitHub Pages
+
+In the repository settings: **Pages > Source > Deploy from branch >
+`master` > `/docs`**.
+
+See `worker/README.md` for the full worker API documentation.

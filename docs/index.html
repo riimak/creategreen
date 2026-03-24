@@ -21,8 +21,8 @@
   --purple:#a855f7;--pink:#ec4899;
   --radius:12px;
 }
-html{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text)}
-body{min-height:100vh;padding:0}
+html{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);-webkit-text-size-adjust:100%}
+body{min-height:100vh;padding:0;overflow-x:hidden}
 
 header{
   position:sticky;top:0;z-index:50;
@@ -41,7 +41,7 @@ header h1 span{color:var(--green);font-weight:400}
 .range-btns{display:flex;gap:2px;background:var(--card);border-radius:8px;padding:2px}
 .range-btns button{
   background:none;border:none;color:var(--muted);font-size:.8rem;font-weight:500;
-  padding:.4rem .9rem;border-radius:6px;cursor:pointer;transition:all .15s;
+  padding:.5rem 1rem;min-height:44px;border-radius:6px;cursor:pointer;transition:all .15s;
 }
 .range-btns button:hover{color:var(--text)}
 .range-btns button.active{background:var(--accent);color:#fff}
@@ -75,12 +75,12 @@ main{max-width:1440px;margin:0 auto;padding:1.5rem}
 
 .charts-grid{
   display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(400px,1fr));
+  grid-template-columns:repeat(auto-fit,minmax(min(400px,100%),1fr));
   gap:1rem;margin-bottom:2rem;
 }
 .chart-card{
   background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
-  padding:1rem;
+  padding:1rem;overflow:hidden;
 }
 .chart-card h3{font-size:.8rem;font-weight:500;color:var(--muted);margin-bottom:.75rem}
 .chart-card canvas{width:100%!important;height:250px!important}
@@ -100,21 +100,31 @@ main{max-width:1440px;margin:0 auto;padding:1.5rem}
   padding:.75rem 1rem;margin-bottom:1rem;color:var(--red);font-size:.85rem;display:none;
 }
 
-.station-tabs{display:flex;gap:2px;background:var(--card);border-radius:8px;padding:2px;margin-bottom:1rem}
+.station-tabs{display:flex;flex-wrap:wrap;gap:2px;background:var(--card);border-radius:8px;padding:2px;margin-bottom:1rem}
 .station-tabs button{
   background:none;border:none;color:var(--muted);font-size:.8rem;font-weight:500;
-  padding:.4rem .9rem;border-radius:6px;cursor:pointer;transition:all .15s;
+  padding:.5rem 1rem;min-height:44px;border-radius:6px;cursor:pointer;transition:all .15s;flex:1;white-space:nowrap;
 }
 .station-tabs button:hover{color:var(--text)}
 .station-tabs button.active{background:var(--cyan);color:#fff}
 
 footer{text-align:center;padding:2rem 1rem;color:var(--muted);font-size:.75rem;border-top:1px solid var(--border)}
 
-@media(max-width:640px){
+@media(max-width:768px){
   .charts-grid{grid-template-columns:1fr}
-  .kpi-grid{grid-template-columns:repeat(auto-fill,minmax(130px,1fr))}
+  .chart-card canvas{height:200px!important}
+  header h1{font-size:1.1rem}
+}
+@media(max-width:480px){
+  .kpi-grid{grid-template-columns:repeat(2,1fr)}
+  .kpi-value{font-size:1.25rem}
   header{padding:.75rem 1rem}
-  main{padding:1rem}
+  main{padding:.75rem}
+  .header-right{width:100%;justify-content:space-between}
+  .chart-card canvas{height:180px!important}
+  .chart-card{padding:.75rem}
+  .station-tabs button{font-size:.7rem;padding:.4rem .6rem}
+  footer{padding:1.5rem .75rem}
 }
 </style>
 </head>
@@ -260,22 +270,33 @@ function renderSolaxKpis() {
 }
 
 // ── Charts ──────────────────────────────────────────────────────────
+const isMobile = window.innerWidth < 600;
 const CHART_DEFAULTS = {
   responsive: true,
   maintainAspectRatio: false,
   animation: { duration: 400 },
   interaction: { mode: 'index', intersect: false },
   plugins: {
-    legend: { position: 'top', labels: { color: '#8b8fa3', font: { size: 11, family: 'Inter' }, boxWidth: 12, padding: 12 } },
+    legend: {
+      position: 'top',
+      labels: {
+        color: '#8b8fa3',
+        font: { size: isMobile ? 10 : 11, family: 'Inter' },
+        boxWidth: isMobile ? 8 : 12,
+        padding: isMobile ? 6 : 12,
+      },
+    },
     tooltip: { backgroundColor: '#252836', titleColor: '#e4e6f0', bodyColor: '#e4e6f0', borderColor: '#2e3148', borderWidth: 1, padding: 10 },
   },
   scales: {
     x: {
       type: 'time', time: { tooltipFormat: 'MMM d, HH:mm' },
-      grid: { color: 'rgba(46,49,72,.5)' }, ticks: { color: '#8b8fa3', font: { size: 10 }, maxTicksLimit: 8 },
+      grid: { color: 'rgba(46,49,72,.5)' },
+      ticks: { color: '#8b8fa3', font: { size: isMobile ? 9 : 10 }, maxTicksLimit: isMobile ? 5 : 8, maxRotation: 0 },
     },
     y: {
-      grid: { color: 'rgba(46,49,72,.5)' }, ticks: { color: '#8b8fa3', font: { size: 10 } },
+      grid: { color: 'rgba(46,49,72,.5)' },
+      ticks: { color: '#8b8fa3', font: { size: isMobile ? 9 : 10 } },
       position: 'left',
     },
   },

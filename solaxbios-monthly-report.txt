@@ -1,0 +1,1 @@
+SOLAXBIOS;UNIX_TIME_ZA_SVAKI_DAN_U_MESECU_PRORACUNA_SA_VREMENOM_00:00:00;Effective AC Output Time (min);Total Effective AC Output Time (min);Inverter output (kWh);Exported energy (kWh);Imported energy (kWh)

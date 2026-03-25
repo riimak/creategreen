@@ -38,40 +38,46 @@ header h1 span{color:var(--green);font-weight:400}
 .status .dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 
-.range-btns{display:flex;gap:2px;background:var(--card);border-radius:8px;padding:2px}
-.range-btns button{
-  background:none;border:none;color:var(--muted);font-size:.8rem;font-weight:500;
-  padding:.5rem 1rem;min-height:44px;border-radius:6px;cursor:pointer;transition:all .15s;
+.pill-group{display:flex;gap:2px;background:var(--card);border-radius:8px;padding:2px}
+.pill-group button{
+  background:none;border:none;color:var(--muted);font-size:.75rem;font-weight:500;
+  padding:.5rem .75rem;min-height:40px;border-radius:6px;cursor:pointer;transition:all .15s;
+  white-space:nowrap;
 }
-.range-btns button:hover{color:var(--text)}
-.range-btns button.active{background:var(--accent);color:#fff}
+.pill-group button:hover{color:var(--text)}
+.pill-group button.active{background:var(--accent);color:#fff}
+.pill-group.cyan button.active{background:var(--cyan);color:#fff}
 
 main{max-width:1440px;margin:0 auto;padding:1.5rem}
 
+.section-header{
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;
+  margin-bottom:1rem;
+}
 .section-title{
-  font-size:1rem;font-weight:600;margin-bottom:1rem;
+  font-size:1rem;font-weight:600;
   display:flex;align-items:center;gap:.5rem;
 }
-.section-title::before{
-  content:'';width:4px;height:1.2em;border-radius:2px;
-}
+.section-title::before{content:'';width:4px;height:1.2em;border-radius:2px}
 .meteo-title::before{background:var(--cyan)}
 .solar-title::before{background:var(--amber)}
+.device-title::before{background:var(--purple)}
+.station-name{font-size:.8rem;color:var(--muted);font-weight:400;margin-left:.5rem}
 
 .kpi-grid{
   display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
-  gap:.75rem;margin-bottom:1.25rem;
+  grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+  gap:.6rem;margin-bottom:1.25rem;
 }
 .kpi{
   background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
-  padding:1rem;transition:border-color .2s;
+  padding:.85rem;transition:border-color .2s;
 }
 .kpi:hover{border-color:var(--accent)}
-.kpi-label{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.3rem}
-.kpi-value{font-size:1.5rem;font-weight:700;line-height:1.2}
-.kpi-unit{font-size:.75rem;color:var(--muted);font-weight:400;margin-left:.15rem}
-.kpi-sub{font-size:.65rem;color:var(--muted);margin-top:.25rem}
+.kpi-label{font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.25rem}
+.kpi-value{font-size:1.35rem;font-weight:700;line-height:1.2}
+.kpi-unit{font-size:.7rem;color:var(--muted);font-weight:400;margin-left:.1rem}
+.kpi-time{font-size:.6rem;color:var(--muted);margin-top:.2rem}
 
 .charts-grid{
   display:grid;
@@ -100,13 +106,7 @@ main{max-width:1440px;margin:0 auto;padding:1.5rem}
   padding:.75rem 1rem;margin-bottom:1rem;color:var(--red);font-size:.85rem;display:none;
 }
 
-.station-tabs{display:flex;flex-wrap:wrap;gap:2px;background:var(--card);border-radius:8px;padding:2px;margin-bottom:1rem}
-.station-tabs button{
-  background:none;border:none;color:var(--muted);font-size:.8rem;font-weight:500;
-  padding:.5rem 1rem;min-height:44px;border-radius:6px;cursor:pointer;transition:all .15s;flex:1;white-space:nowrap;
-}
-.station-tabs button:hover{color:var(--text)}
-.station-tabs button.active{background:var(--cyan);color:#fff}
+.section-divider{border:none;border-top:1px solid var(--border);margin:1.5rem 0}
 
 footer{text-align:center;padding:2rem 1rem;color:var(--muted);font-size:.75rem;border-top:1px solid var(--border)}
 
@@ -117,13 +117,13 @@ footer{text-align:center;padding:2rem 1rem;color:var(--muted);font-size:.75rem;b
 }
 @media(max-width:480px){
   .kpi-grid{grid-template-columns:repeat(2,1fr)}
-  .kpi-value{font-size:1.25rem}
+  .kpi-value{font-size:1.15rem}
   header{padding:.75rem 1rem}
   main{padding:.75rem}
   .header-right{width:100%;justify-content:space-between}
   .chart-card canvas{height:180px!important}
   .chart-card{padding:.75rem}
-  .station-tabs button{font-size:.7rem;padding:.4rem .6rem}
+  .pill-group button{font-size:.65rem;padding:.4rem .5rem}
   footer{padding:1.5rem .75rem}
 }
 </style>
@@ -139,7 +139,7 @@ footer{text-align:center;padding:2rem 1rem;color:var(--muted);font-size:.75rem;b
       <div class="dot" id="statusDot"></div>
       <span id="statusText">Connecting...</span>
     </div>
-    <div class="range-btns" id="rangeButtons">
+    <div class="pill-group" id="rangeButtons">
       <button data-hours="6">6h</button>
       <button data-hours="24" class="active">24h</button>
       <button data-hours="72">72h</button>
@@ -150,10 +150,10 @@ footer{text-align:center;padding:2rem 1rem;color:var(--muted);font-size:.75rem;b
 <main>
   <div class="error-bar" id="errorBar"></div>
 
-  <div class="section-title meteo-title">Meteo Stations</div>
-  <div class="station-tabs" id="meteoTabs">
-    <button class="active" data-station="OS1BIOS">OS1 BIOS (Kapelska)</button>
-    <button data-station="OS2BIOS">OS2 BIOS (Hadrijana)</button>
+  <!-- Meteo section -->
+  <div class="section-header">
+    <div class="section-title meteo-title">Meteo Stations<span class="station-name" id="meteoStationName"></span></div>
+    <div class="pill-group cyan" id="meteoTabs"></div>
   </div>
   <div class="kpi-grid" id="meteoKpis"></div>
   <div class="charts-grid" id="meteoCharts">
@@ -162,62 +162,136 @@ footer{text-align:center;padding:2rem 1rem;color:var(--muted);font-size:.75rem;b
     <div class="chart-card"><h3>Air Quality (PM2.5 / PM10 / O3)</h3><canvas id="chartAirQ"></canvas></div>
   </div>
 
-  <div class="section-title solar-title">Solar Inverter (SOLAXBIOS)</div>
-  <div class="kpi-grid" id="solaxKpis"></div>
-  <div class="charts-grid" id="solaxCharts">
-    <div class="chart-card"><h3>Grid Power & AC Output</h3><canvas id="chartGrid"></canvas></div>
-    <div class="chart-card"><h3>Daily Energy Production</h3><canvas id="chartEnergy"></canvas></div>
+  <hr class="section-divider">
+
+  <!-- Solar section -->
+  <div class="section-header">
+    <div class="section-title solar-title">Solar Inverters<span class="station-name" id="solarStationName"></span></div>
+    <div class="pill-group" id="solarTabs" style="--active-bg:var(--amber)"></div>
   </div>
+  <div class="kpi-grid" id="solarKpis"></div>
+  <div class="charts-grid" id="solarCharts">
+    <div class="chart-card"><h3>Power</h3><canvas id="chartPower"></canvas></div>
+    <div class="chart-card"><h3>Energy</h3><canvas id="chartEnergy"></canvas></div>
+  </div>
+
+  <hr class="section-divider">
+
+  <!-- Device section -->
+  <div class="section-header">
+    <div class="section-title device-title">Device Inventory</div>
+  </div>
+  <div class="kpi-grid" id="deviceKpis"></div>
 </main>
 
-<footer>CREATEGREEN BIOS Dashboard &middot; Data from Mars2 Platform &middot; Auto-refreshes every 5 min</footer>
+<footer>
+  CREATEGREEN BIOS Dashboard &middot;
+  <span id="stationCount">0</span> stations &middot;
+  Data from Mars2 Platform &middot;
+  Auto-refreshes every 5 min
+</footer>
 
 <script>
-// ── Config ──────────────────────────────────────────────────────────
-const WORKER_URL = 'https://creategreen-api.management-ec5.workers.dev';
-const REFRESH_MS = 5 * 60 * 1000;
+const WORKER = 'https://creategreen-api.management-ec5.workers.dev';
+const REFRESH_MS = 300000;
+const isMobile = window.innerWidth < 600;
 
 let currentHours = 24;
-let activeMeteo = 'OS1BIOS';
+let places = [];
+let meteoStations = [];
+let solarStations = [];
+let activeMeteo = null;
+let activeSolar = null;
 let charts = {};
-let allData = {};
+let stationData = {};
 
-// ── DOM refs ────────────────────────────────────────────────────────
-const $loader = document.getElementById('loader');
-const $error = document.getElementById('errorBar');
-const $status = document.getElementById('statusText');
-const $dot = document.getElementById('statusDot');
+const $ = id => document.getElementById(id);
 
 // ── API ─────────────────────────────────────────────────────────────
-async function fetchStation(station, hours) {
-  const res = await fetch(`${WORKER_URL}/api?station=${station}&hours=${hours}`);
-  if (!res.ok) throw new Error(`${station}: HTTP ${res.status}`);
+async function api(path) {
+  const res = await fetch(`${WORKER}${path}`);
+  if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
   return res.json();
 }
 
-async function fetchAll() {
+// ── Init: discover stations ─────────────────────────────────────────
+async function init() {
   try {
-    $error.style.display = 'none';
-    const [os1, os2, solax] = await Promise.all([
-      fetchStation('OS1BIOS', currentHours),
-      fetchStation('OS2BIOS', currentHours),
-      fetchStation('SOLAXBIOS', currentHours),
-    ]);
-    allData = { OS1BIOS: os1, OS2BIOS: os2, SOLAXBIOS: solax };
-    render();
-    $status.textContent = `Updated ${new Date().toLocaleTimeString()}`;
-    $dot.style.background = 'var(--green)';
+    places = await api('/api/places');
+    meteoStations = places.filter(p =>
+      p.points?.[0]?.variables?.some(v => v.name === 'Temperatura')
+    );
+    solarStations = places.filter(p =>
+      p.points?.[0]?.variables?.some(v =>
+        v.name.includes('Inverter') || v.name.includes('Grid') || v.name.includes('DC_')
+      )
+    );
+
+    buildTabs('meteoTabs', meteoStations, 'cyan', code => { activeMeteo = code; renderMeteo(); });
+    buildTabs('solarTabs', solarStations, 'amber', code => { activeSolar = code; renderSolar(); });
+
+    activeMeteo = meteoStations[0]?.code;
+    activeSolar = solarStations[0]?.code;
+
+    $('stationCount').textContent = places.length;
+    await fetchAllData();
   } catch (e) {
-    $error.textContent = `Error: ${e.message}`;
-    $error.style.display = 'block';
-    $dot.style.background = 'var(--red)';
-    $status.textContent = 'Connection error';
+    $('errorBar').textContent = `Init error: ${e.message}`;
+    $('errorBar').style.display = 'block';
+    $('statusDot').style.background = 'var(--red)';
+    $('statusText').textContent = 'Connection error';
   } finally {
-    $loader.classList.add('hidden');
+    $('loader').classList.add('hidden');
   }
 }
 
-// ── Rendering ───────────────────────────────────────────────────────
+function buildTabs(containerId, stations, color, onClick) {
+  const el = $(containerId);
+  el.className = `pill-group ${color}`;
+  el.innerHTML = stations.map((s, i) =>
+    `<button data-code="${s.code}" class="${i === 0 ? 'active' : ''}">${s.code}</button>`
+  ).join('');
+  el.addEventListener('click', e => {
+    if (e.target.tagName !== 'BUTTON') return;
+    el.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    e.target.classList.add('active');
+    onClick(e.target.dataset.code);
+  });
+}
+
+// ── Data fetching ───────────────────────────────────────────────────
+async function fetchAllData() {
+  try {
+    $('errorBar').style.display = 'none';
+    const allCodes = places.map(p => p.code);
+    const results = await Promise.allSettled(
+      allCodes.map(code => api(`/api/data?station=${encodeURIComponent(code)}&hours=${currentHours}`))
+    );
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled') stationData[allCodes[i]] = r.value;
+    });
+
+    renderMeteo();
+    renderSolar();
+    await fetchDevices();
+
+    $('statusText').textContent = `Updated ${new Date().toLocaleTimeString()}`;
+    $('statusDot').style.background = 'var(--green)';
+  } catch (e) {
+    $('errorBar').textContent = `Error: ${e.message}`;
+    $('errorBar').style.display = 'block';
+    $('statusDot').style.background = 'var(--red)';
+  }
+}
+
+async function fetchDevices() {
+  try {
+    const devices = await api('/api/devices');
+    renderDevices(devices);
+  } catch (e) { /* non-critical */ }
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────
 function last(data, field) {
   if (!data?.data) return null;
   for (let i = data.data.length - 1; i >= 0; i--) {
@@ -227,93 +301,21 @@ function last(data, field) {
   return null;
 }
 
-function fmt(v, decimals = 1) {
+function fmt(v, d = 1) {
   if (v === null || v === undefined) return '--';
-  return Number(v).toFixed(decimals);
+  return Number(v).toFixed(d);
 }
 
-function kpi(label, value, unit, sub) {
-  return `<div class="kpi">
-    <div class="kpi-label">${label}</div>
-    <div class="kpi-value">${value}<span class="kpi-unit">${unit}</span></div>
-    ${sub ? `<div class="kpi-sub">${sub}</div>` : ''}
-  </div>`;
+function kpi(label, value, unit) {
+  return `<div class="kpi"><div class="kpi-label">${label}</div><div class="kpi-value">${value}<span class="kpi-unit">${unit}</span></div></div>`;
 }
-
-function renderMeteoKpis() {
-  const d = allData[activeMeteo];
-  if (!d) return;
-  document.getElementById('meteoKpis').innerHTML = [
-    kpi('Temperature', fmt(last(d, 'Temperatura')), '°C'),
-    kpi('Humidity', fmt(last(d, 'Relativna vlaznost'), 0), '%'),
-    kpi('Pressure', fmt(last(d, 'Tlak zraka')), 'kPa'),
-    kpi('Solar Radiation', fmt(last(d, 'Suncevo zracenje'), 0), 'W/m²'),
-    kpi('UV Index', fmt(last(d, 'UV indeks'), 0), ''),
-    kpi('Rain', fmt(last(d, 'Kisa'), 2), 'mm/min'),
-    kpi('PM2.5', fmt(last(d, 'Lebdece cestice PM2.5')), 'μg/m³'),
-    kpi('PM10', fmt(last(d, 'Lebdece cestice PM10')), 'μg/m³'),
-    kpi('CO2', fmt(last(d, 'CO2'), 0), ''),
-    kpi('Noise', fmt(last(d, 'Buka')), 'dB'),
-  ].join('');
-}
-
-function renderSolaxKpis() {
-  const d = allData.SOLAXBIOS;
-  if (!d) return;
-  document.getElementById('solaxKpis').innerHTML = [
-    kpi('Grid Power', fmt(last(d, 'Grid.power.total'), 2), 'kW'),
-    kpi('AC Output', fmt(last(d, 'Inverter.AC.power.total'), 2), 'kW'),
-    kpi('Daily Energy', fmt(last(d, 'Inverter.AC.energy.out.daily'), 1), 'kWh'),
-    kpi('To Grid (total)', fmt(last(d, 'Grid.energy.toGrid.total'), 0), 'kWh'),
-    kpi('From Grid (total)', fmt(last(d, 'Grid.energy.fromGrid.total'), 0), 'kWh'),
-  ].join('');
-}
-
-// ── Charts ──────────────────────────────────────────────────────────
-const isMobile = window.innerWidth < 600;
-const CHART_DEFAULTS = {
-  responsive: true,
-  maintainAspectRatio: false,
-  animation: { duration: 400 },
-  interaction: { mode: 'index', intersect: false },
-  plugins: {
-    legend: {
-      position: 'top',
-      labels: {
-        color: '#8b8fa3',
-        font: { size: isMobile ? 10 : 11, family: 'Inter' },
-        boxWidth: isMobile ? 8 : 12,
-        padding: isMobile ? 6 : 12,
-      },
-    },
-    tooltip: { backgroundColor: '#252836', titleColor: '#e4e6f0', bodyColor: '#e4e6f0', borderColor: '#2e3148', borderWidth: 1, padding: 10 },
-  },
-  scales: {
-    x: {
-      type: 'time', time: { tooltipFormat: 'MMM d, HH:mm' },
-      grid: { color: 'rgba(46,49,72,.5)' },
-      ticks: { color: '#8b8fa3', font: { size: isMobile ? 9 : 10 }, maxTicksLimit: isMobile ? 5 : 8, maxRotation: 0 },
-    },
-    y: {
-      grid: { color: 'rgba(46,49,72,.5)' },
-      ticks: { color: '#8b8fa3', font: { size: isMobile ? 9 : 10 } },
-      position: 'left',
-    },
-  },
-};
 
 function ts(data, field) {
-  if (!data?.data) return { labels: [], values: [] };
-  const pts = [];
-  for (const r of data.data) {
-    if (r[field] !== null && r[field] !== undefined) {
-      pts.push({ x: new Date(r.timestamp * 1000), y: r[field] });
-    }
-  }
-  return pts;
+  if (!data?.data) return [];
+  return data.data.filter(r => r[field] != null).map(r => ({ x: new Date(r.timestamp * 1000), y: r[field] }));
 }
 
-function makeDataset(label, data, color, yAxisID, fill) {
+function ds(label, data, color, yAxisID, fill) {
   return {
     label, data, borderColor: color, backgroundColor: fill || color + '18',
     borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: !!fill,
@@ -321,88 +323,150 @@ function makeDataset(label, data, color, yAxisID, fill) {
   };
 }
 
-function buildChart(canvasId, datasets, opts = {}) {
-  const ctx = document.getElementById(canvasId);
-  if (charts[canvasId]) charts[canvasId].destroy();
+const CHART_OPTS = () => ({
+  responsive: true, maintainAspectRatio: false,
+  animation: { duration: 300 },
+  interaction: { mode: 'index', intersect: false },
+  plugins: {
+    legend: { position: 'top', labels: { color: '#8b8fa3', font: { size: isMobile ? 10 : 11, family: 'Inter' }, boxWidth: isMobile ? 8 : 12, padding: isMobile ? 6 : 12 } },
+    tooltip: { backgroundColor: '#252836', titleColor: '#e4e6f0', bodyColor: '#e4e6f0', borderColor: '#2e3148', borderWidth: 1, padding: 10 },
+  },
+  scales: {
+    x: { type: 'time', time: { tooltipFormat: 'MMM d, HH:mm' }, grid: { color: 'rgba(46,49,72,.5)' }, ticks: { color: '#8b8fa3', font: { size: isMobile ? 9 : 10 }, maxTicksLimit: isMobile ? 5 : 8, maxRotation: 0 } },
+    y: { grid: { color: 'rgba(46,49,72,.5)' }, ticks: { color: '#8b8fa3', font: { size: isMobile ? 9 : 10 } }, position: 'left' },
+  },
+});
 
-  const config = JSON.parse(JSON.stringify(CHART_DEFAULTS));
+function buildChart(id, datasets, opts = {}) {
+  if (charts[id]) charts[id].destroy();
+  const config = CHART_OPTS();
   if (opts.y2) {
-    config.scales.y2 = {
-      ...config.scales.y,
-      position: 'right',
-      grid: { drawOnChartArea: false, color: 'rgba(46,49,72,.5)' },
-    };
+    config.scales.y2 = { ...config.scales.y, position: 'right', grid: { drawOnChartArea: false, color: 'rgba(46,49,72,.5)' } };
   }
-
-  charts[canvasId] = new Chart(ctx, {
-    type: 'line',
-    data: { datasets },
-    options: config,
-  });
+  charts[id] = new Chart($(id), { type: 'line', data: { datasets }, options: config });
 }
 
-function renderMeteoCharts() {
-  const d = allData[activeMeteo];
-  if (!d) return;
+// ── Meteo rendering ─────────────────────────────────────────────────
+function renderMeteo() {
+  if (!activeMeteo) return;
+  const d = stationData[activeMeteo];
+  const place = places.find(p => p.code === activeMeteo);
+  $('meteoStationName').textContent = place ? `— ${place.name}` : '';
+
+  const fields = place?.points?.[0]?.variables?.map(v => v.name) || [];
+  const hasField = name => fields.some(f => f === name || f.includes(name));
+
+  const kpis = [];
+  if (hasField('Temperatura'))           kpis.push(kpi('Temperature', fmt(last(d, 'Temperatura')), '°C'));
+  if (hasField('Relativna'))             kpis.push(kpi('Humidity', fmt(last(d, 'Relativna vlažnost') ?? last(d, 'Relativna vlaznost'), 0), '%'));
+  if (hasField('Tlak'))                  kpis.push(kpi('Pressure', fmt(last(d, 'Tlak zraka')), 'kPa'));
+  if (hasField('Sunčevo') || hasField('Suncevo'))
+    kpis.push(kpi('Solar Rad.', fmt(last(d, 'Sunčevo zračenje') ?? last(d, 'Suncevo zracenje'), 0), 'W/m²'));
+  if (hasField('UV'))                    kpis.push(kpi('UV', fmt(last(d, 'UV indeks') ?? last(d, 'UV zračenje'), 0), ''));
+  if (hasField('Kiša') || hasField('Kisa'))
+    kpis.push(kpi('Rain', fmt(last(d, 'Kiša') ?? last(d, 'Kisa'), 2), 'mm'));
+  if (hasField('PM2.5'))                 kpis.push(kpi('PM2.5', fmt(last(d, 'Lebdeće čestice PM2.5') ?? last(d, 'Lebdece cestice PM2.5')), 'μg/m³'));
+  if (hasField('PM10'))                  kpis.push(kpi('PM10', fmt(last(d, 'Lebdeće čestice PM10') ?? last(d, 'Lebdece cestice PM10')), 'μg/m³'));
+  if (hasField('CO2'))                   kpis.push(kpi('CO2', fmt(last(d, 'CO2'), 0), ''));
+  if (hasField('Buka'))                  kpis.push(kpi('Noise', fmt(last(d, 'Buka')), 'dB'));
+  $('meteoKpis').innerHTML = kpis.join('');
+
+  // Find field names in data (API may return with or without diacritics)
+  const f = name => {
+    if (!d?.data?.[0]) return name;
+    const keys = Object.keys(d.data[0]);
+    return keys.find(k => k.includes(name)) || name;
+  };
 
   buildChart('chartTempHum', [
-    makeDataset('Temperature (°C)', ts(d, 'Temperatura'), '#ef4444', 'y', '#ef444418'),
-    makeDataset('Humidity (%)', ts(d, 'Relativna vlaznost'), '#3b82f6', 'y2', '#3b82f618'),
+    ds('Temperature (°C)', ts(d, f('Temperatura')), '#ef4444', 'y', '#ef444418'),
+    ds('Humidity (%)', ts(d, f('vlažnost') || f('vlaznost')), '#3b82f6', 'y2', '#3b82f618'),
   ], { y2: true });
 
   buildChart('chartSolar', [
-    makeDataset('Solar Radiation (W/m²)', ts(d, 'Suncevo zracenje'), '#f59e0b', 'y', '#f59e0b18'),
+    ds('Solar Radiation (W/m²)', ts(d, f('zračenje') || f('zracenje')), '#f59e0b', 'y', '#f59e0b18'),
   ]);
 
   buildChart('chartAirQ', [
-    makeDataset('PM2.5 (μg/m³)', ts(d, 'Lebdece cestice PM2.5'), '#a855f7'),
-    makeDataset('PM10 (μg/m³)', ts(d, 'Lebdece cestice PM10'), '#ec4899'),
-    makeDataset('O3 (μg/m³)', ts(d, 'O3'), '#06b6d4'),
+    ds('PM2.5', ts(d, f('PM2.5')), '#a855f7'),
+    ds('PM10', ts(d, f('PM10')), '#ec4899'),
+    ds('O3', ts(d, f('O3')), '#06b6d4'),
   ]);
 }
 
-function renderSolaxCharts() {
-  const d = allData.SOLAXBIOS;
-  if (!d) return;
+// ── Solar rendering ─────────────────────────────────────────────────
+function renderSolar() {
+  if (!activeSolar) return;
+  const d = stationData[activeSolar];
+  const place = places.find(p => p.code === activeSolar);
+  $('solarStationName').textContent = place ? `— ${place.name}` : '';
 
-  buildChart('chartGrid', [
-    makeDataset('Grid Power (kW)', ts(d, 'Grid.power.total'), '#22c55e', 'y', '#22c55e18'),
-    makeDataset('AC Output (kW)', ts(d, 'Inverter.AC.power.total'), '#f59e0b', 'y2'),
-  ], { y2: true });
+  const fields = place?.points?.[0]?.variables?.map(v => v.name) || [];
+  const hasField = name => fields.some(f => f.includes(name));
 
-  buildChart('chartEnergy', [
-    makeDataset('Daily Energy (kWh)', ts(d, 'Inverter.AC.energy.out.daily'), '#3b82f6', 'y', '#3b82f618'),
-  ]);
+  const kpis = [];
+  if (hasField('Grid.power'))       kpis.push(kpi('Grid Power', fmt(last(d, 'Grid.power.total'), 2), 'kW'));
+  if (hasField('AC.power.total'))   kpis.push(kpi('AC Output', fmt(last(d, 'Inverter.AC.power.total'), 2), 'kW'));
+  if (hasField('energy.out.daily')) kpis.push(kpi('Daily Energy', fmt(last(d, 'Inverter.AC.energy.out.daily'), 1), 'kWh'));
+  if (hasField('toGrid.total'))     kpis.push(kpi('To Grid', fmt(last(d, 'Grid.energy.toGrid.total'), 0), 'kWh'));
+  if (hasField('fromGrid.total'))   kpis.push(kpi('From Grid', fmt(last(d, 'Grid.energy.fromGrid.total'), 0), 'kWh'));
+  if (hasField('BMS.energy.SOC'))   kpis.push(kpi('Battery SOC', fmt(last(d, 'BMS.energy.SOC'), 0), '%'));
+
+  // Solarman-style fields
+  if (hasField('Total_AC_Output'))  kpis.push(kpi('AC Output', fmt(last(d, '33_Total_AC_Output_Power_(Active)'), 2), 'kW'));
+  if (hasField('Daily_Production')) kpis.push(kpi('Daily Prod.', fmt(last(d, '35_Daily_Production_(Active)'), 1), 'kWh'));
+  if (hasField('Total_Gen_Power'))  kpis.push(kpi('Total Gen', fmt(last(d, '50_Total_Gen_Power'), 2), 'kW'));
+  if (hasField('Total_Grid_Power')) kpis.push(kpi('Grid Power', fmt(last(d, '36_Total_Grid_Power'), 2), 'kW'));
+
+  $('solarKpis').innerHTML = kpis.length ? kpis.join('') : '<div class="kpi"><div class="kpi-label">No data</div><div class="kpi-value">--</div></div>';
+
+  const powerSets = [];
+  if (hasField('Grid.power'))     powerSets.push(ds('Grid Power (kW)', ts(d, 'Grid.power.total'), '#22c55e', 'y', '#22c55e18'));
+  if (hasField('AC.power.total')) powerSets.push(ds('AC Output (kW)', ts(d, 'Inverter.AC.power.total'), '#f59e0b', powerSets.length ? 'y2' : 'y'));
+  if (hasField('Total_AC_Output'))powerSets.push(ds('AC Output (kW)', ts(d, '33_Total_AC_Output_Power_(Active)'), '#f59e0b', 'y'));
+  buildChart('chartPower', powerSets, { y2: powerSets.length > 1 });
+
+  const energySets = [];
+  if (hasField('energy.out.daily'))  energySets.push(ds('Daily Energy (kWh)', ts(d, 'Inverter.AC.energy.out.daily'), '#3b82f6', 'y', '#3b82f618'));
+  if (hasField('Daily_Production'))  energySets.push(ds('Daily Production (kWh)', ts(d, '35_Daily_Production_(Active)'), '#3b82f6', 'y', '#3b82f618'));
+  buildChart('chartEnergy', energySets);
 }
 
-function render() {
-  renderMeteoKpis();
-  renderSolaxKpis();
-  renderMeteoCharts();
-  renderSolaxCharts();
+// ── Device rendering ────────────────────────────────────────────────
+function renderDevices(devices) {
+  const kpis = devices.map(d => {
+    const counters = d.counters?.length || 0;
+    const lastRead = d.counters?.[0]?.lastRead;
+    const ago = lastRead ? timeAgo(new Date(lastRead)) : '--';
+    return kpi(
+      d.name?.substring(0, 16) || d.nodeId,
+      counters,
+      `sensors`,
+    );
+  });
+  $('deviceKpis').innerHTML = kpis.join('');
+}
+
+function timeAgo(date) {
+  const s = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s/60)}m ago`;
+  if (s < 86400) return `${Math.floor(s/3600)}h ago`;
+  return `${Math.floor(s/86400)}d ago`;
 }
 
 // ── Event handlers ──────────────────────────────────────────────────
-document.getElementById('rangeButtons').addEventListener('click', e => {
+$('rangeButtons').addEventListener('click', e => {
   if (e.target.tagName !== 'BUTTON') return;
-  document.querySelectorAll('#rangeButtons button').forEach(b => b.classList.remove('active'));
+  $('rangeButtons').querySelectorAll('button').forEach(b => b.classList.remove('active'));
   e.target.classList.add('active');
   currentHours = parseInt(e.target.dataset.hours, 10);
-  fetchAll();
+  fetchAllData();
 });
 
-document.getElementById('meteoTabs').addEventListener('click', e => {
-  if (e.target.tagName !== 'BUTTON') return;
-  document.querySelectorAll('#meteoTabs button').forEach(b => b.classList.remove('active'));
-  e.target.classList.add('active');
-  activeMeteo = e.target.dataset.station;
-  renderMeteoKpis();
-  renderMeteoCharts();
-});
-
-// ── Init ────────────────────────────────────────────────────────────
-fetchAll();
-setInterval(fetchAll, REFRESH_MS);
+// ── Go ──────────────────────────────────────────────────────────────
+init();
+setInterval(fetchAllData, REFRESH_MS);
 </script>
 </body>
 </html>

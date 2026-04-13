@@ -1,0 +1,16 @@
+* text=auto
+
+# Shell and Linux-executed scripts must stay LF.
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Source and config files used in Linux toolchains.
+*.pl text eol=lf
+*.pm text eol=lf
+*.t text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf

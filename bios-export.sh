@@ -13,8 +13,14 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 API_BASE="${BIOS_API_BASE:-http://web.mars2.barrage.net:81}"
-USERNAME="${BIOS_USERNAME:?Set BIOS_USERNAME in .env}"
-PASSWORD="${BIOS_PASSWORD:?Set BIOS_PASSWORD in .env}"
+USERNAME="${BIOS_USERNAME:-}"
+PASSWORD="${BIOS_PASSWORD:-}"
+
+# .env may be created on Windows with CRLF; strip CR so WSL/bash
+# does not pass malformed values to curl.
+API_BASE="${API_BASE//$'\r'/}"
+USERNAME="${USERNAME//$'\r'/}"
+PASSWORD="${PASSWORD//$'\r'/}"
 
 STATION_IDS=("OS1BIOS" "OS2BIOS" "SOLAXBIOS")
 OUTPUT_DIR="$(pwd)/output"
@@ -58,6 +64,9 @@ log()  { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >&2; }
 die()  { log "ERROR: $*"; exit 1; }
 
 get_token() {
+    [[ -z "${USERNAME}" ]] && die "Set BIOS_USERNAME in .env"
+    [[ -z "${PASSWORD}" ]] && die "Set BIOS_PASSWORD in .env"
+
     local response
     response=$(curl -sS --connect-timeout 30 --max-time 60 -X POST "${API_BASE}/Token" \
         -H 'Content-Type: application/x-www-form-urlencoded' \

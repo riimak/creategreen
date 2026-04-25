@@ -1,4 +1,4 @@
-# CREATEGREEN API Worker
+# BIOS Multi-level Platform API Worker
 
 Cloudflare Worker that proxies the Mars2 API. Handles authentication,
 parses the wire format, and returns clean JSON. Credentials are stored

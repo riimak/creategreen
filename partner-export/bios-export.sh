@@ -83,13 +83,18 @@ get_token() {
 fetch_data() {
     local token="$1" station="$2" from_utc="$3" to_utc="$4"
     local url="${API_BASE}/api/public/CustomDataExport/BIOS/${station}"
-    local encoded_from encoded_to
-    encoded_from=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$from_utc'))")
-    encoded_to=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$to_utc'))")
+    local request_url from_wire to_wire
+    # Keep request format as plain datetime string (yyyy-MM-dd HH:mm:ss).
+    # Only spaces are escaped for HTTP transport.
+    from_wire="${from_utc// /%20}"
+    to_wire="${to_utc// /%20}"
+    request_url="${url}?fromUTC=${from_wire}&toUTC=${to_wire}"
+
+    log "GET ${url}?fromUTC=${from_utc}&toUTC=${to_utc}"
 
     curl -sS --connect-timeout 30 --max-time 120 \
         -H "Authorization: Bearer ${token}" \
-        "${url}?fromUTC=${encoded_from}&toUTC=${encoded_to}"
+        "${request_url}"
 }
 
 # Parse the API response into semicolon-delimited lines:

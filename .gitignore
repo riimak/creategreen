@@ -1,4 +1,12 @@
 .env
-/output/
+/output/*
+!/output/.gitkeep
 /test-output/
+/bios-multilevel-platform-services/data/*.json
+/project-docs-local/
+/worker/
+*.pdf
+*.doc
+*.docx
+*.xlsx
 *.log

@@ -1,0 +1,9 @@
+{
+  "tasks": {
+    "dev": "deno run --allow-net --allow-read --allow-env main.ts"
+  },
+  "deploy": {
+    "project": "bios-multilevel-platform-services-dashboard",
+    "entrypoint": "main.ts"
+  }
+}

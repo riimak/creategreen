@@ -1,0 +1,84 @@
+# BIOS Multi-level Platform Services
+
+This directory contains two small standalone services that complement the
+BIOS multi-level platform for tracking of meteo data and electricity production:
+
+- `prediction/` -- Predictive Analysis Service for short-term forecasts and
+  anomaly detection.
+- `blockchain/` -- Blockchain Integration Service for compact Stealth event
+  anchoring.
+- `dashboard/` -- Deno/Deno Deploy dashboard for demonstrating the two
+  services without changing the existing Mars2 production-data dashboard.
+
+Both services treat Mars2/BIOS as the source of truth. They do not duplicate
+raw measurement rows. Prediction stores derived forecast/anomaly artifacts;
+blockchain stores only local transaction status and compact payload metadata.
+
+## Run
+
+Recommended local demo with Docker Compose:
+
+```sh
+cd bios-multilevel-platform-services
+docker compose up --build
+```
+
+Open:
+
+```text
+http://localhost:8000
+```
+
+The dashboard proxies to the two services over the Docker network:
+
+- `http://prediction:8091`
+- `http://blockchain:8092`
+
+For direct API checks from your host:
+
+```sh
+curl http://localhost:8091/health
+curl "http://localhost:8091/forecast?source=OS1BIOS&metric=PM2_5&horizon=24"
+curl http://localhost:8092/health
+curl -X POST http://localhost:8092/events \
+  -H "Content-Type: application/json" \
+  -d '{"device_id":"0x0A1C","timestamp":1717699200,"event_code":"ok","value":250}'
+```
+
+Manual local run without Docker:
+
+```sh
+node bios-multilevel-platform-services/prediction/server.js
+node bios-multilevel-platform-services/blockchain/server.js
+```
+
+Run the services dashboard locally with Deno:
+
+```sh
+cd bios-multilevel-platform-services/dashboard
+PREDICTION_SERVICE_URL=http://localhost:8091 \
+BLOCKCHAIN_SERVICE_URL=http://localhost:8092 \
+deno task dev
+```
+
+For Deno Deploy, deploy `bios-multilevel-platform-services/dashboard/main.ts` and configure:
+
+```sh
+PREDICTION_SERVICE_URL=https://your-server.example/prediction
+BLOCKCHAIN_SERVICE_URL=https://your-server.example/blockchain
+```
+
+The existing `docs/index.html` dashboard remains the Mars2 production-data
+demonstration. The Deno dashboard is the delivery/demo surface for prediction
+and blockchain.
+
+The blockchain service defaults to `STEALTH_RELAY_MODE=mock`, so it can be
+tested without Stealth tooling. Use `STEALTH_RELAY_MODE=stealth-lib` when the
+real `stealth-lib` package and credentials are available.
+
+## Mapping To Delivered Technical Solution
+
+- Predictive Analysis Service: short-term forecasting up to 48 hours,
+  anomaly/deviation detection, periodic refresh, and weather input adapter.
+- Blockchain Integration Service: receives critical events, encodes a compact
+  binary payload, submits it to Stealth, and retries transient failures.

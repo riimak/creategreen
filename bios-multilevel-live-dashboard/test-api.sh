@@ -7,7 +7,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ENV_FILE="${SCRIPT_DIR}/.env"
+ENV_FILE="${SCRIPT_DIR}/../.env"
 if [ -f "$ENV_FILE" ]; then . "$ENV_FILE"; fi
 
 API="${BIOS_API_BASE:-http://web.mars2.barrage.net:81}"

@@ -20,7 +20,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 EXPORT="${BIOS_SCRIPT_DIR:-$SCRIPT_DIR}/bios-export.sh"
-OUTPUT_DIR="${BIOS_OUTPUT_DIR:-$SCRIPT_DIR/output}"
+OUTPUT_DIR="${BIOS_OUTPUT_DIR:-$SCRIPT_DIR/../output}"
 
 log() { echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] $*"; }
 

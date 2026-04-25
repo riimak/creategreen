@@ -1,0 +1,70 @@
+services:
+  prediction:
+    build:
+      context: .
+      dockerfile: prediction/Dockerfile
+    environment:
+      PREDICTION_PORT: "8091"
+      BIOS_OUTPUT_DIR: /app/output
+      PREDICTION_DB_PATH: /data/prediction-store.json
+      PREDICTION_INTERVAL_MINUTES: "${PREDICTION_INTERVAL_MINUTES:-0}"
+      PREDICTION_TARGETS: "${PREDICTION_TARGETS:-OS1BIOS:PM2_5}"
+      PREDICTION_DATA_API_BASE: "${PREDICTION_DATA_API_BASE:-}"
+      WEATHER_API_BASE: "${WEATHER_API_BASE:-}"
+      WEATHER_API_KEY: "${WEATHER_API_KEY:-}"
+    volumes:
+      - ../output:/app/output:ro
+      - prediction-data:/data
+    ports:
+      - "8091:8091"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8091/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  blockchain:
+    build:
+      context: .
+      dockerfile: blockchain/Dockerfile
+    environment:
+      BLOCKCHAIN_PORT: "8092"
+      BLOCKCHAIN_DB_PATH: /data/blockchain-store.json
+      BLOCKCHAIN_EVENT_FILTERS: "${BLOCKCHAIN_EVENT_FILTERS:-ok,alarm,export,config,critical_measurement}"
+      BLOCKCHAIN_MAX_RETRIES: "${BLOCKCHAIN_MAX_RETRIES:-3}"
+      BLOCKCHAIN_WALLET_SEED: "${BLOCKCHAIN_WALLET_SEED:-development-seed-change-me}"
+      BLOCKCHAIN_AMQP_MODE: "${BLOCKCHAIN_AMQP_MODE:-off}"
+      STEALTH_RELAY_MODE: "${STEALTH_RELAY_MODE:-mock}"
+      STEALTH_RPC_URL: "${STEALTH_RPC_URL:-}"
+      STEALTH_API_KEY: "${STEALTH_API_KEY:-}"
+    volumes:
+      - blockchain-data:/data
+    ports:
+      - "8092:8092"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8092/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    environment:
+      PREDICTION_SERVICE_URL: http://prediction:8091
+      BLOCKCHAIN_SERVICE_URL: http://blockchain:8092
+    depends_on:
+      - prediction
+      - blockchain
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "deno", "eval", "const r=await fetch('http://localhost:8000/health'); Deno.exit(r.ok ? 0 : 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  prediction-data:
+  blockchain-data:

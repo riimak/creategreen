@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BIOS Multi-level Platform Services Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f1117;--surface:#1a1d29;--card:#252836;--border:#2e3148;
+  --text:#e4e6f0;--muted:#8b8fa3;--accent:#3b82f6;
+  --green:#22c55e;--amber:#f59e0b;--red:#ef4444;--pink:#ec4899;
+}
+body{font-family:Inter,system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+header{border-bottom:1px solid var(--border);padding:1rem 1.5rem;background:rgba(15,17,23,.9)}
+header h1{font-size:1.25rem}
+header p{color:var(--muted);font-size:.85rem;margin-top:.25rem}
+main{max-width:1200px;margin:0 auto;padding:1.5rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(420px,100%),1fr));gap:1rem;margin-bottom:1rem}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1rem}
+.card h2{font-size:1rem;margin-bottom:.5rem}
+.card p{font-size:.82rem;color:var(--muted);line-height:1.5;margin-bottom:.75rem}
+.row{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.75rem}
+input,select,button{
+  border-radius:8px;border:1px solid var(--border);min-height:38px;
+  padding:.55rem .65rem;font:inherit;font-size:.8rem;
+}
+input,select{background:var(--surface);color:var(--text);flex:1;min-width:160px}
+button{background:var(--accent);color:white;border:none;cursor:pointer;font-weight:700}
+canvas{width:100%!important;height:280px!important}
+.result{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:.75rem;min-height:72px}
+.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.74rem;color:var(--muted);word-break:break-all}
+.chip{display:inline-block;border-radius:999px;padding:.2rem .5rem;font-size:.7rem;font-weight:700;background:rgba(139,143,163,.18);color:var(--muted);margin-bottom:.35rem}
+.chip.ok{background:rgba(34,197,94,.16);color:var(--green)}
+.chip.warn{background:rgba(245,158,11,.16);color:var(--amber)}
+.chip.err{background:rgba(239,68,68,.16);color:var(--red)}
+footer{text-align:center;color:var(--muted);font-size:.75rem;padding:2rem 1rem;border-top:1px solid var(--border)}
+</style>
+</head>
+<body>
+<header>
+  <h1>BIOS Multi-level Platform</h1>
+  <p>Tracking of meteo data and electricity production: Prediction Analysis and Stealth Blockchain Integration services.</p>
+</header>
+
+<main>
+  <div class="grid">
+    <section class="card">
+      <h2>Prediction Analysis</h2>
+      <p>Runs a short-term forecast from BIOS/Mars2 data. The service stores only derived forecast artifacts.</p>
+      <div class="row">
+        <input id="predictionBase" aria-label="Prediction service URL">
+        <select id="predictionSource">
+          <option value="OS1BIOS">OS1BIOS</option>
+          <option value="OS2BIOS">OS2BIOS</option>
+          <option value="SOLAXBIOS">SOLAXBIOS</option>
+        </select>
+        <select id="predictionMetric">
+          <option value="PM2_5">PM2.5</option>
+          <option value="Temperatura">Temperature</option>
+          <option value="Inverter_AC_power_total">AC Power</option>
+        </select>
+        <button id="runPrediction">Run Forecast</button>
+      </div>
+      <div class="result" id="predictionSummary">Checking service...</div>
+    </section>
+
+    <section class="card">
+      <h2>Forecast Result</h2>
+      <canvas id="forecastChart"></canvas>
+    </section>
+  </div>
+
+  <div class="grid">
+    <section class="card">
+      <h2>Blockchain Event Anchor</h2>
+      <p>Encodes a compact 13-byte event and relays it to Stealth. Mock mode is suitable for delivery demos.</p>
+      <div class="row">
+        <input id="blockchainBase" aria-label="Blockchain service URL">
+        <input id="blockchainDevice" value="0x0A1C" aria-label="Device id">
+        <input id="blockchainValue" value="250" aria-label="Event value">
+        <button id="anchorEvent">Anchor Event</button>
+      </div>
+      <div class="result" id="blockchainSummary">Checking service...</div>
+    </section>
+
+    <section class="card">
+      <h2>Encoded Payload</h2>
+      <p class="mono">device_id(2) + timestamp(4) + event_code(1) + value(2) + crc(4) = 13 bytes</p>
+      <div class="result mono" id="blockchainPayload">No event anchored yet.</div>
+    </section>
+  </div>
+</main>
+
+<footer>
+  Existing production-data dashboard remains the Mars2 API demonstration. This dashboard is for deployable BIOS multi-level platform services.
+</footer>
+
+<script>
+const DEFAULT_PREDICTION_API = localStorage.getItem('predictionApi') || `${location.origin.replace(/\/$/, '')}/prediction`;
+const DEFAULT_BLOCKCHAIN_API = localStorage.getItem('blockchainApi') || `${location.origin.replace(/\/$/, '')}/blockchain`;
+let chart;
+
+const $ = id => document.getElementById(id);
+
+async function getJson(base, path) {
+  const res = await fetch(`${base.replace(/\/$/, '')}${path}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function postJson(base, path, body) {
+  const res = await fetch(`${base.replace(/\/$/, '')}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+function renderForecast(points) {
+  if (chart) chart.destroy();
+  chart = new Chart($('forecastChart'), {
+    type: 'line',
+    data: {
+      datasets: [
+        { label: 'Forecast', data: points.map(p => ({ x: new Date(p.timestamp * 1000), y: p.value })), borderColor: '#22c55e', backgroundColor: '#22c55e18', fill: true, pointRadius: 0 },
+        { label: 'Lower', data: points.map(p => ({ x: new Date(p.timestamp * 1000), y: p.lower })), borderColor: '#8b8fa3', pointRadius: 0 },
+        { label: 'Upper', data: points.map(p => ({ x: new Date(p.timestamp * 1000), y: p.upper })), borderColor: '#8b8fa3', pointRadius: 0 },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { type: 'time', ticks: { color: '#8b8fa3' }, grid: { color: 'rgba(46,49,72,.5)' } },
+        y: { ticks: { color: '#8b8fa3' }, grid: { color: 'rgba(46,49,72,.5)' } },
+      },
+      plugins: { legend: { labels: { color: '#8b8fa3' } } },
+    },
+  });
+}
+
+async function checkHealth() {
+  try {
+    const prediction = await getJson($('predictionBase').value, '/health');
+    $('predictionSummary').innerHTML = `<span class="chip ok">online</span><div class="mono">${prediction.service}</div>`;
+  } catch (e) {
+    $('predictionSummary').innerHTML = `<span class="chip warn">offline</span><div class="mono">Start prediction service or adjust URL.</div>`;
+  }
+
+  try {
+    const blockchain = await getJson($('blockchainBase').value, '/health');
+    $('blockchainSummary').innerHTML = `<span class="chip ok">online</span><div class="mono">relay=${blockchain.relayMode}</div>`;
+  } catch (e) {
+    $('blockchainSummary').innerHTML = `<span class="chip warn">offline</span><div class="mono">Start blockchain service or adjust URL.</div>`;
+  }
+}
+
+async function runPrediction() {
+  const base = $('predictionBase').value.trim();
+  localStorage.setItem('predictionApi', base);
+  $('predictionSummary').textContent = 'Loading forecast...';
+  try {
+    const result = await getJson(base, `/forecast?source=${encodeURIComponent($('predictionSource').value)}&metric=${encodeURIComponent($('predictionMetric').value)}&horizon=24&hours=72`);
+    $('predictionSummary').innerHTML = [
+      '<span class="chip ok">forecast ready</span>',
+      `<div class="mono">source=${result.source} metric=${result.metric}</div>`,
+      `<div class="mono">model=${result.model} rmse=${result.residualError} points=${result.points.length}</div>`,
+    ].join('');
+    renderForecast(result.points);
+  } catch (e) {
+    $('predictionSummary').innerHTML = `<span class="chip err">error</span><div class="mono">${e.message}</div>`;
+  }
+}
+
+async function anchorEvent() {
+  const base = $('blockchainBase').value.trim();
+  localStorage.setItem('blockchainApi', base);
+  $('blockchainSummary').textContent = 'Anchoring event...';
+  try {
+    const result = await postJson(base, '/events', {
+      device_id: $('blockchainDevice').value.trim(),
+      timestamp: Math.floor(Date.now() / 1000),
+      event_code: 'ok',
+      value: Number($('blockchainValue').value || 0),
+      metadata: { source: 'services-dashboard' },
+    });
+    $('blockchainSummary').innerHTML = [
+      `<span class="chip ok">${result.status}</span>`,
+      `<div class="mono">tx=${result.txId || '--'}</div>`,
+      `<div class="mono">device=${result.deviceId} bytes=${result.bytes}</div>`,
+    ].join('');
+    $('blockchainPayload').innerHTML = [
+      `payload=${result.payloadHex}`,
+      `hash=${result.payloadHash}`,
+      `account=${result.account?.accountId || '--'}`,
+    ].join('<br>');
+  } catch (e) {
+    $('blockchainSummary').innerHTML = `<span class="chip err">error</span><div class="mono">${e.message}</div>`;
+  }
+}
+
+$('predictionBase').value = DEFAULT_PREDICTION_API;
+$('blockchainBase').value = DEFAULT_BLOCKCHAIN_API;
+$('runPrediction').addEventListener('click', runPrediction);
+$('anchorEvent').addEventListener('click', anchorEvent);
+checkHealth();
+</script>
+</body>
+</html>

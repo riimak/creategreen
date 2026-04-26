@@ -1,0 +1,25 @@
+include:
+  - project: devops/ci-template
+    ref: v1.4.3
+    file: GitlabFlow/Deploy-custom.yml
+
+variables:
+  HELM_RELEASE_PREFIX: bios-creategreen
+
+build-bios-creategreen:
+  extends: .build
+  rules:
+    - !reference [.build, rules]
+    - when: on_success
+
+production-bios-creategreen:
+  extends: .production
+  stage: deploy
+  environment:
+    url: https://bios.barrage.net
+  needs:
+    - job: build-bios-creategreen
+      optional: true
+  rules:
+    - !reference [.production, rules]
+    - when: on_success

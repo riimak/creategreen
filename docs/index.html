@@ -1,130 +1,528 @@
 <!DOCTYPE html>
-<!-- BIOS Multi-level Platform Dashboard
-     Visual demonstration of the Mars2 API and data pipeline.
-     Served via GitHub Pages from the docs/ directory.
-     This is NOT documentation — it is the live public dashboard. -->
+<!--
+  BIOS Multi-level Platform Dashboard
+  Live public surface over the Mars2 API and data pipeline.
+  Served via GitHub Pages from the docs/ directory.
+-->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BIOS Multi-level Platform Dashboard</title>
+<title>BIOS Multi-level Platform</title>
+<meta name="description" content="Live environmental and solar monitoring dashboard for the BIOS Multi-level Platform. Grad Osijek.">
+<meta property="og:title" content="BIOS Multi-level Platform">
+<meta property="og:description" content="Live environmental monitoring, solar production, and blockchain traceability.">
+<meta property="og:image" content="og-image.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231a2a35'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='system-ui,-apple-system,sans-serif' font-weight='800' font-size='16' fill='%23fff' letter-spacing='-0.5'%3EB%3C/text%3E%3Ccircle cx='25' cy='7' r='3' fill='%2340d97a'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --bg:#0f1117;--surface:#1a1d29;--card:#252836;--border:#2e3148;
-  --text:#e4e6f0;--muted:#8b8fa3;--accent:#3b82f6;
-  --green:#22c55e;--amber:#f59e0b;--red:#ef4444;--cyan:#06b6d4;
-  --purple:#a855f7;--pink:#ec4899;
-  --radius:12px;
-}
-html{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);-webkit-text-size-adjust:100%}
-body{min-height:100vh;padding:0;overflow-x:hidden}
 
+:root{
+  /* surfaces, deep blue-green tinted neutrals (oklch) */
+  --bg:           oklch(15.5% .015 215);
+  --bg-elev:      oklch(18% .018 215);
+  --surface:      oklch(20% .02 215);
+  --card:         oklch(22% .022 215);
+  --card-hover:   oklch(25% .025 215);
+  --inset:        oklch(17% .015 215);
+  --border:       oklch(28% .025 215);
+  --border-strong:oklch(38% .03 215);
+
+  /* text */
+  --text:         oklch(96% .005 215);
+  --muted:        oklch(67% .017 215);
+  --subtle:       oklch(50% .02 215);
+
+  /* semantic accents */
+  --accent:       oklch(72% .14 220);   /* command blue */
+  --green:        oklch(72% .18 155);   /* signal green, reserved */
+  --amber:        oklch(78% .15 75);
+  --red:          oklch(70% .2 25);
+  --cyan:         oklch(76% .12 200);   /* meteo */
+  --violet:       oklch(70% .16 290);   /* devices */
+  --pink:         oklch(72% .18 350);
+
+  /* type scale, ratio ~1.25 */
+  --fs-xs:    11px;
+  --fs-sm:    13px;
+  --fs-base:  14.5px;
+  --fs-md:    18px;
+  --fs-lg:    24px;
+  --fs-xl:    32px;
+
+  /* spacing */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px;  --sp-4: 16px;
+  --sp-5: 24px; --sp-6: 32px; --sp-7: 48px;
+
+  /* radius */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+
+  /* motion */
+  --ease:      cubic-bezier(.16, 1, .3, 1);
+  --ease-fast: cubic-bezier(.4, 0, .2, 1);
+}
+
+html{
+  font-family:'Inter','Helvetica Neue',system-ui,sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  font-size:var(--fs-base);
+  -webkit-text-size-adjust:100%;
+  -webkit-font-smoothing:antialiased;
+  font-feature-settings:'cv11','ss01';
+}
+body{
+  min-height:100vh;
+  overflow-x:hidden;
+  background:
+    radial-gradient(ellipse 1400px 700px at 50% -150px, oklch(28% .05 215 / .55), transparent 60%),
+    var(--bg);
+  background-attachment:fixed;
+  position:relative;
+}
+/* graph-paper dot grid, very faint */
+body::before{
+  content:'';
+  position:fixed;inset:0;
+  background-image:radial-gradient(circle, oklch(60% .02 215 / .045) 1px, transparent 1.5px);
+  background-size:32px 32px;
+  pointer-events:none;
+  z-index:0;
+}
+
+/* type roles */
+h1,h2,h3,.display{
+  font-family:'Space Grotesk','Inter',sans-serif;
+  font-feature-settings:'ss01';
+}
+.mono,code{
+  font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Consolas,monospace;
+  font-feature-settings:'ss01','zero','tnum';
+}
+
+/* ── header ────────────────────────────────────────────── */
 header{
   position:sticky;top:0;z-index:50;
-  background:rgba(15,17,23,.85);backdrop-filter:blur(12px);
+  background:oklch(15.5% .015 215 / .82);
+  backdrop-filter:blur(20px) saturate(140%);
+  -webkit-backdrop-filter:blur(20px) saturate(140%);
   border-bottom:1px solid var(--border);
-  padding:1rem 1.5rem;
-  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem;
+  padding:14px 24px;
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;
 }
-header h1{font-size:1.25rem;font-weight:700;letter-spacing:-.02em}
-header h1 span{color:var(--green);font-weight:400}
-.header-right{display:flex;align-items:center;gap:1rem;flex-wrap:wrap}
-.status{display:flex;align-items:center;gap:.4rem;font-size:.8rem;color:var(--muted)}
-.status .dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.brand{
+  display:flex;align-items:baseline;gap:10px;min-width:0;
+  font-family:'Space Grotesk',sans-serif;
+}
+.brand .mark{
+  font-size:18px;font-weight:700;
+  letter-spacing:-.025em;
+  color:var(--text);
+}
+.brand .sep{
+  width:4px;height:4px;border-radius:999px;
+  background:var(--border-strong);
+  align-self:center;
+}
+.brand .sub{
+  font-size:13px;font-weight:500;
+  letter-spacing:0;color:var(--muted);
+}
+.header-right{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
 
-.pill-group{display:flex;gap:2px;background:var(--card);border-radius:8px;padding:2px}
+.partners{
+  display:inline-flex;align-items:center;gap:12px;
+  padding:5px 12px 5px 10px;
+  border-radius:var(--r-sm);
+  background:oklch(20% .02 215 / .6);
+  border:1px solid var(--border);
+}
+.partners-label{
+  font-family:'JetBrains Mono',monospace;
+  font-size:9.5px;font-weight:600;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--subtle);
+  user-select:none;
+}
+.partner{
+  display:inline-flex;align-items:center;
+  text-decoration:none;opacity:.88;
+  transition:opacity .2s var(--ease-fast);
+}
+.partner:hover{opacity:1}
+.partner img{height:20px;width:auto;display:block;max-width:130px;object-fit:contain}
+.partner-text{
+  font-family:'Space Grotesk',sans-serif;
+  color:var(--text);font-size:12px;font-weight:600;
+  letter-spacing:0;white-space:nowrap;
+}
+
+.status{
+  display:flex;align-items:center;gap:8px;
+  font-family:'JetBrains Mono',monospace;
+  font-size:11px;color:var(--muted);
+  letter-spacing:.02em;
+}
+.status .dot{
+  width:6px;height:6px;border-radius:999px;
+  background:var(--green);
+  box-shadow:0 0 0 3px oklch(72% .18 155 / .18);
+  animation:pulse-dot 2.4s var(--ease) infinite;
+}
+@keyframes pulse-dot{
+  0%,100%{opacity:1}
+  50%{opacity:.5}
+}
+@media(prefers-reduced-motion:reduce){
+  .status .dot{animation:none}
+}
+
+/* ── pill group ────────────────────────────────────────── */
+.pill-group{
+  display:flex;gap:1px;
+  background:var(--border);
+  border-radius:8px;
+  padding:1px;
+  border:1px solid var(--border-strong);
+}
 .pill-group button{
-  background:none;border:none;color:var(--muted);font-size:.75rem;font-weight:500;
-  padding:.5rem .75rem;min-height:40px;border-radius:6px;cursor:pointer;transition:all .15s;
+  background:var(--card);
+  border:0;
+  color:var(--muted);
+  font-family:'JetBrains Mono',monospace;
+  font-size:11px;font-weight:500;
+  padding:7px 12px;
+  border-radius:7px;
+  cursor:pointer;
+  transition:color .15s var(--ease-fast), background .15s var(--ease-fast);
   white-space:nowrap;
+  letter-spacing:.03em;
+  text-transform:lowercase;
+  font-feature-settings:'tnum';
 }
-.pill-group button:hover{color:var(--text)}
-.pill-group button.active{background:var(--accent);color:#fff}
-.pill-group.cyan button.active{background:var(--cyan);color:#fff}
+.pill-group button:hover{color:var(--text);background:var(--card-hover)}
+.pill-group button.active{
+  background:var(--accent);
+  color:oklch(15.5% .015 215);
+  font-weight:700;
+}
+.pill-group.cyan button.active{background:var(--cyan);color:oklch(15.5% .015 215)}
+.pill-group.amber button.active{background:var(--amber);color:oklch(15.5% .015 215)}
 
-main{max-width:1440px;margin:0 auto;padding:1.5rem}
+/* ── main layout ───────────────────────────────────────── */
+main{
+  max-width:1440px;margin:0 auto;
+  padding:32px 24px 48px;
+  position:relative;z-index:1;
+}
 
+/* section header: eyebrow + title block (no side stripes) */
 .section-header{
-  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;
-  margin-bottom:1rem;
+  display:flex;align-items:flex-end;justify-content:space-between;
+  flex-wrap:wrap;gap:14px;margin-bottom:18px;
 }
+.section-title-block{
+  display:flex;flex-direction:column;gap:3px;min-width:0;
+}
+.section-eyebrow{
+  font-family:'JetBrains Mono',monospace;
+  font-size:10px;font-weight:600;
+  text-transform:uppercase;letter-spacing:.14em;
+  color:var(--subtle);
+  display:flex;align-items:center;gap:10px;
+}
+.section-eyebrow .num{color:var(--text)}
+.section-eyebrow .of{color:var(--subtle);opacity:.6}
 .section-title{
-  font-size:1rem;font-weight:600;
-  display:flex;align-items:center;gap:.5rem;
+  font-family:'Space Grotesk',sans-serif;
+  font-size:var(--fs-md);font-weight:600;
+  letter-spacing:-.012em;
+  display:flex;align-items:center;gap:10px;
+  color:var(--text);
 }
-.section-title::before{content:'';width:4px;height:1.2em;border-radius:2px}
-.meteo-title::before{background:var(--cyan)}
-.solar-title::before{background:var(--amber)}
-.device-title::before{background:var(--purple)}
-.station-name{font-size:.8rem;color:var(--muted);font-weight:400;margin-left:.5rem}
+/* small filled dot before title (a marker, not a side-stripe inside a card) */
+.section-title::before{
+  content:'';
+  width:7px;height:7px;
+  border-radius:999px;
+  background:var(--marker, var(--accent));
+  flex-shrink:0;
+  box-shadow:0 0 0 3px oklch(from var(--marker, var(--accent)) l c h / .18);
+}
+.meteo-title{--marker:var(--cyan)}
+.solar-title{--marker:var(--amber)}
+.device-title{--marker:var(--violet)}
+.station-name{
+  font-family:'JetBrains Mono',monospace;
+  font-size:12px;color:var(--muted);
+  font-weight:500;letter-spacing:.02em;
+}
 
+/* ── KPI grid: variable size, first card is hero ──────── */
 .kpi-grid{
   display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
-  gap:.6rem;margin-bottom:1.25rem;
+  grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));
+  gap:8px;
+  margin-bottom:24px;
 }
-.kpi{
-  background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
-  padding:.85rem;transition:border-color .2s;
-}
-.kpi:hover{border-color:var(--accent)}
-.kpi-label{font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.25rem}
-.kpi-value{font-size:1.35rem;font-weight:700;line-height:1.2}
-.kpi-unit{font-size:.7rem;color:var(--muted);font-weight:400;margin-left:.1rem}
-.kpi-time{font-size:.6rem;color:var(--muted);margin-top:.2rem}
+.kpi-grid .kpi:first-child{grid-column:span 2}
+.kpi-grid .kpi:first-child .kpi-value{font-size:28px}
+.kpi-grid .kpi:first-child .kpi-unit{font-size:13px}
 
+.kpi{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:var(--r-md);
+  padding:12px 14px 11px;
+  transition:border-color .25s var(--ease), background .25s var(--ease);
+  display:flex;flex-direction:column;gap:3px;
+  position:relative;min-width:0;
+}
+.kpi:hover{border-color:var(--border-strong);background:var(--card-hover)}
+
+.kpi-label{
+  font-family:'JetBrains Mono',monospace;
+  font-size:10px;font-weight:600;
+  text-transform:uppercase;letter-spacing:.09em;
+  color:var(--subtle);
+  display:flex;align-items:center;gap:6px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.kpi-value{
+  font-family:'Space Grotesk',sans-serif;
+  font-size:22px;font-weight:600;
+  line-height:1.1;
+  letter-spacing:-.02em;
+  color:var(--text);
+  font-variant-numeric:tabular-nums;
+  font-feature-settings:'tnum';
+}
+.kpi-unit{
+  font-family:'JetBrains Mono',monospace;
+  font-size:11px;font-weight:500;
+  color:var(--muted);
+  margin-left:5px;
+  letter-spacing:0;
+}
+.kpi-stats{
+  display:grid;
+  grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:4px;
+  margin-top:6px;
+  padding-top:8px;
+  border-top:1px solid var(--border);
+  font-family:'JetBrains Mono',monospace;
+  font-size:9.5px;
+  color:var(--subtle);
+  letter-spacing:.05em;
+  text-transform:uppercase;
+}
+.kpi-stats span{display:flex;flex-direction:column;min-width:0}
+.kpi-stats span b{
+  font-family:'Inter',sans-serif;
+  color:var(--text);font-weight:600;font-size:11px;
+  text-transform:none;letter-spacing:0;
+  margin-top:2px;
+  font-variant-numeric:tabular-nums;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.kpi-flag{
+  display:inline-block;
+  font-family:'JetBrains Mono',monospace;
+  font-size:9px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.06em;
+  padding:1px 6px;border-radius:3px;
+  margin-left:auto;
+}
+.kpi-flag.warn{background:oklch(78% .15 75 / .15);color:var(--amber)}
+.kpi-flag.err{background:oklch(70% .2 25 / .15);color:var(--red)}
+.kpi-flag.ok{background:oklch(72% .18 155 / .15);color:var(--green)}
+
+/* ── charts grid ───────────────────────────────────────── */
 .charts-grid{
   display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(min(400px,100%),1fr));
-  gap:1rem;margin-bottom:2rem;
+  grid-template-columns:repeat(auto-fit, minmax(min(420px,100%),1fr));
+  gap:12px;
+  margin-bottom:32px;
 }
 .chart-card{
-  background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
-  padding:1rem;overflow:hidden;
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:var(--r-md);
+  padding:16px;
+  overflow:hidden;
+  transition:border-color .25s var(--ease);
 }
-.chart-card h3{font-size:.8rem;font-weight:500;color:var(--muted);margin-bottom:.75rem}
-.chart-card canvas{width:100%!important;height:250px!important}
+.chart-card:hover{border-color:var(--border-strong)}
+.chart-card h3{
+  font-family:'JetBrains Mono',monospace;
+  font-size:11px;font-weight:600;
+  text-transform:uppercase;letter-spacing:.09em;
+  color:var(--subtle);margin-bottom:10px;
+}
+.chart-card canvas{width:100%!important;height:240px!important}
 
+/* ── loader ────────────────────────────────────────────── */
 .loading-overlay{
-  position:fixed;inset:0;background:var(--bg);display:flex;
-  align-items:center;justify-content:center;z-index:100;
-  transition:opacity .4s;
+  position:fixed;inset:0;background:var(--bg);
+  display:flex;align-items:center;justify-content:center;
+  z-index:100;transition:opacity .4s var(--ease);
 }
 .loading-overlay.hidden{opacity:0;pointer-events:none}
-.spinner{width:40px;height:40px;border:3px solid var(--border);
-  border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+.spinner{
+  width:36px;height:36px;
+  border:2px solid var(--border);
+  border-top-color:var(--accent);
+  border-radius:50%;
+  animation:spin .9s linear infinite;
+}
 @keyframes spin{to{transform:rotate(360deg)}}
 
 .error-bar{
-  background:rgba(239,68,68,.1);border:1px solid var(--red);border-radius:8px;
-  padding:.75rem 1rem;margin-bottom:1rem;color:var(--red);font-size:.85rem;display:none;
+  background:oklch(70% .2 25 / .08);
+  border:1px solid oklch(70% .2 25 / .35);
+  border-radius:var(--r-md);
+  padding:10px 14px;margin-bottom:16px;
+  color:var(--red);font-size:13px;
+  font-family:'JetBrains Mono',monospace;
+  display:none;
 }
 
-.section-divider{border:none;border-top:1px solid var(--border);margin:1.5rem 0}
+/* ── alarms banner ─────────────────────────────────────── */
+.alarms{
+  display:none;
+  background:linear-gradient(180deg, oklch(78% .15 75 / .08), oklch(78% .15 75 / .04));
+  border:1px solid oklch(78% .15 75 / .35);
+  border-radius:var(--r-md);
+  padding:14px 18px;
+  margin-bottom:20px;
+  align-items:flex-start;gap:14px;flex-wrap:wrap;
+}
+.alarms.open{display:flex}
+.alarms.severe{
+  background:linear-gradient(180deg, oklch(70% .2 25 / .1), oklch(70% .2 25 / .04));
+  border-color:oklch(70% .2 25 / .4);
+}
+.alarms-head{
+  display:flex;align-items:center;gap:10px;
+  flex-shrink:0;min-width:180px;
+}
+.alarms-icon{
+  width:28px;height:28px;
+  border-radius:var(--r-sm);
+  background:oklch(78% .15 75 / .2);
+  display:flex;align-items:center;justify-content:center;
+  color:var(--amber);font-weight:700;font-size:14px;
+  font-family:'Space Grotesk',sans-serif;
+}
+.alarms.severe .alarms-icon{
+  background:oklch(70% .2 25 / .2);color:var(--red);
+}
+.alarms-title{
+  font-family:'Space Grotesk',sans-serif;
+  font-size:13.5px;font-weight:600;
+  color:var(--text);letter-spacing:-.005em;
+}
+.alarms-title small{
+  display:block;font-family:'JetBrains Mono',monospace;
+  font-size:10px;font-weight:500;color:var(--subtle);
+  text-transform:uppercase;letter-spacing:.08em;margin-top:1px;
+}
+.alarms-list{
+  display:flex;flex-wrap:wrap;gap:6px 8px;flex:1;min-width:0;
+}
+.alarms-chip{
+  display:inline-flex;align-items:center;gap:6px;
+  background:oklch(20% .02 215 / .6);
+  border:1px solid var(--border);
+  border-radius:999px;
+  padding:4px 10px 4px 8px;
+  font-size:11.5px;color:var(--muted);
+  font-family:'JetBrains Mono',monospace;
+  letter-spacing:.01em;
+}
+.alarms-chip b{
+  color:var(--text);font-weight:600;
+  font-family:'Inter',sans-serif;
+  letter-spacing:0;
+}
+.alarms-chip .dot{
+  width:6px;height:6px;border-radius:999px;
+  background:var(--amber);
+}
+.alarms-chip.severe .dot{background:var(--red)}
+.alarms-empty{
+  font-family:'JetBrains Mono',monospace;font-size:11px;
+  color:var(--subtle);letter-spacing:.05em;text-transform:uppercase;
+}
 
-footer{text-align:center;padding:2rem 1rem;color:var(--muted);font-size:.75rem;border-top:1px solid var(--border)}
+/* per-section last reading time */
+.section-time{
+  font-family:'JetBrains Mono',monospace;
+  font-size:11px;color:var(--subtle);
+  letter-spacing:.04em;margin-left:auto;
+  display:flex;align-items:center;gap:6px;
+  white-space:nowrap;
+}
+.section-time .label{text-transform:uppercase;letter-spacing:.09em;font-size:9.5px;color:var(--subtle)}
+.section-time .val{color:var(--text);font-weight:600;font-feature-settings:'tnum'}
 
+.section-divider{
+  border:0;height:1px;
+  background:linear-gradient(90deg, transparent, var(--border) 25%, var(--border) 75%, transparent);
+  margin:36px 0 24px;
+}
+
+footer{
+  text-align:center;
+  padding:32px 16px;
+  color:var(--muted);
+  font-size:11.5px;
+  font-family:'JetBrains Mono',monospace;
+  border-top:1px solid var(--border);
+  letter-spacing:.02em;
+  position:relative;z-index:1;
+  font-feature-settings:'tnum';
+}
+footer .sep{
+  display:inline-block;
+  margin:0 12px;
+  color:var(--border-strong);
+}
+footer .num{color:var(--text);font-weight:600}
+
+/* ── responsive ────────────────────────────────────────── */
+@media(max-width:900px){
+  .kpi-grid .kpi:first-child{grid-column:span 1}
+  .kpi-grid .kpi:first-child .kpi-value{font-size:22px}
+}
 @media(max-width:768px){
   .charts-grid{grid-template-columns:1fr}
   .chart-card canvas{height:200px!important}
-  header h1{font-size:1.1rem}
+  main{padding:24px 16px 40px}
 }
-@media(max-width:480px){
+@media(max-width:560px){
   .kpi-grid{grid-template-columns:repeat(2,1fr)}
-  .kpi-value{font-size:1.15rem}
-  header{padding:.75rem 1rem}
-  main{padding:.75rem}
+  .kpi-grid .kpi:first-child{grid-column:span 2}
+  .kpi-value{font-size:20px}
+  header{padding:12px 16px}
   .header-right{width:100%;justify-content:space-between}
   .chart-card canvas{height:180px!important}
-  .chart-card{padding:.75rem}
-  .pill-group button{font-size:.65rem;padding:.4rem .5rem}
-  footer{padding:1.5rem .75rem}
+  .chart-card{padding:14px}
+  .pill-group button{font-size:10.5px;padding:6px 9px}
+  .partners{padding:4px 8px;gap:8px}
+  .partner img{height:16px;max-width:100px}
+  .partner-text{font-size:11px}
+  .brand .sub{display:none}
+  footer{padding:24px 12px}
 }
 </style>
 </head>
@@ -133,16 +531,27 @@ footer{text-align:center;padding:2rem 1rem;color:var(--muted);font-size:.75rem;b
 <div class="loading-overlay" id="loader"><div class="spinner"></div></div>
 
 <header>
-  <h1>BIOS <span>Multi-level Platform</span></h1>
+  <div class="brand">
+    <span class="mark">BIOS</span>
+    <span class="sep" aria-hidden="true"></span>
+    <span class="sub">Multi-level Platform</span>
+  </div>
   <div class="header-right">
+    <div class="partners" aria-label="In partnership with">
+      <span class="partners-label">With</span>
+      <a class="partner" href="https://www.osijek.hr" target="_blank" rel="noopener noreferrer" title="Grad Osijek">
+        <img src="https://www.osijek.hr/wp-content/themes/osijek/img/logo.png" alt="Grad Osijek" loading="lazy">
+      </a>
+      <span class="partner-text">Grad Osijek</span>
+    </div>
     <div class="status">
       <div class="dot" id="statusDot"></div>
-      <span id="statusText">Connecting...</span>
+      <span id="statusText">connecting</span>
     </div>
     <div class="pill-group" id="rangeButtons">
-      <button data-hours="6">6h</button>
-      <button data-hours="24" class="active">24h</button>
-      <button data-hours="72">72h</button>
+      <button data-hours="24" class="active">1d</button>
+      <button data-hours="168">7d</button>
+      <button data-hours="720">30d</button>
     </div>
   </div>
 </header>
@@ -150,45 +559,94 @@ footer{text-align:center;padding:2rem 1rem;color:var(--muted);font-size:.75rem;b
 <main>
   <div class="error-bar" id="errorBar"></div>
 
-  <!-- Meteo section -->
-  <div class="section-header">
-    <div class="section-title meteo-title">Meteo Stations<span class="station-name" id="meteoStationName"></span></div>
-    <div class="pill-group cyan" id="meteoTabs"></div>
-  </div>
-  <div class="kpi-grid" id="meteoKpis"></div>
-  <div class="charts-grid" id="meteoCharts">
-    <div class="chart-card"><h3>Temperature & Humidity</h3><canvas id="chartTempHum"></canvas></div>
-    <div class="chart-card"><h3>Solar Radiation</h3><canvas id="chartSolar"></canvas></div>
-    <div class="chart-card"><h3>Air Quality (PM2.5 / PM10 / O3)</h3><canvas id="chartAirQ"></canvas></div>
-  </div>
-
-  <hr class="section-divider">
-
-  <!-- Solar section -->
-  <div class="section-header">
-    <div class="section-title solar-title">Solar Inverters<span class="station-name" id="solarStationName"></span></div>
-    <div class="pill-group" id="solarTabs" style="--active-bg:var(--amber)"></div>
-  </div>
-  <div class="kpi-grid" id="solarKpis"></div>
-  <div class="charts-grid" id="solarCharts">
-    <div class="chart-card"><h3>Power</h3><canvas id="chartPower"></canvas></div>
-    <div class="chart-card"><h3>Energy</h3><canvas id="chartEnergy"></canvas></div>
+  <div class="alarms" id="alarmsBanner" role="status" aria-live="polite">
+    <div class="alarms-head">
+      <div class="alarms-icon" aria-hidden="true">!</div>
+      <div class="alarms-title">
+        Active alarms
+        <small id="alarmsSubtitle">from Mars2 platform</small>
+      </div>
+    </div>
+    <div class="alarms-list" id="alarmsList"></div>
   </div>
 
-  <hr class="section-divider">
+  <section aria-labelledby="meteo-title">
+    <div class="section-header">
+      <div class="section-title-block">
+        <div class="section-eyebrow">
+          <span class="num">01</span> <span class="of">/ 03</span> &nbsp;Environmental sensors
+          <span class="of">·</span> <span id="meteoCount">--</span> stations
+          <span class="of">·</span> <span id="meteoSensorCount">--</span> sensors
+        </div>
+        <div class="section-title meteo-title" id="meteo-title">
+          Meteo stations
+          <span class="station-name" id="meteoStationName"></span>
+        </div>
+      </div>
+      <div class="pill-group cyan" id="meteoTabs"></div>
+      <div class="section-time" id="meteoTime" hidden>
+        <span class="label">Last reading</span>
+        <span class="val"></span>
+      </div>
+    </div>
+    <div class="kpi-grid" id="meteoKpis"></div>
+    <div class="charts-grid" id="meteoCharts">
+      <div class="chart-card"><h3>Temperature &amp; humidity</h3><canvas id="chartTempHum"></canvas></div>
+      <div class="chart-card"><h3>Solar radiation</h3><canvas id="chartSolar"></canvas></div>
+      <div class="chart-card"><h3>Air quality (PM2.5 / PM10 / O3)</h3><canvas id="chartAirQ"></canvas></div>
+    </div>
+  </section>
 
-  <!-- Device section -->
-  <div class="section-header">
-    <div class="section-title device-title">Device Inventory</div>
-  </div>
-  <div class="kpi-grid" id="deviceKpis"></div>
+  <hr class="section-divider" aria-hidden="true">
+
+  <section aria-labelledby="solar-title">
+    <div class="section-header">
+      <div class="section-title-block">
+        <div class="section-eyebrow">
+          <span class="num">02</span> <span class="of">/ 03</span> &nbsp;Photovoltaic plant
+          <span class="of">·</span> <span id="solarCount">--</span> inverters
+          <span class="of">·</span> <span id="solarSensorCount">--</span> sensors
+        </div>
+        <div class="section-title solar-title" id="solar-title">
+          Solar inverters
+          <span class="station-name" id="solarStationName"></span>
+        </div>
+      </div>
+      <div class="pill-group amber" id="solarTabs"></div>
+      <div class="section-time" id="solarTime" hidden>
+        <span class="label">Last reading</span>
+        <span class="val"></span>
+      </div>
+    </div>
+    <div class="kpi-grid" id="solarKpis"></div>
+    <div class="charts-grid" id="solarCharts">
+      <div class="chart-card"><h3>Power</h3><canvas id="chartPower"></canvas></div>
+      <div class="chart-card"><h3>Energy</h3><canvas id="chartEnergy"></canvas></div>
+    </div>
+  </section>
+
+  <hr class="section-divider" aria-hidden="true">
+
+  <section aria-labelledby="device-title">
+    <div class="section-header">
+      <div class="section-title-block">
+        <div class="section-eyebrow">
+          <span class="num">03</span> <span class="of">/ 03</span> &nbsp;Device inventory
+          <span class="of">·</span> <span id="deviceCount">--</span> devices
+        </div>
+        <div class="section-title device-title" id="device-title">Connected devices</div>
+      </div>
+    </div>
+    <div class="kpi-grid" id="deviceKpis"></div>
+  </section>
 </main>
 
 <footer>
-  BIOS Multi-level Platform Dashboard &middot;
-  <span id="stationCount">0</span> stations &middot;
-  Data from Mars2 Platform &middot;
-  Auto-refreshes every 5 min
+  <span class="num" id="stationCount">0</span> stations
+  <span class="sep">·</span>
+  live data from Mars2 platform
+  <span class="sep">·</span>
+  refreshes every <span class="num">5</span> min
 </footer>
 
 <script>
@@ -214,6 +672,10 @@ async function api(path) {
   return res.json();
 }
 
+function sensorCount(stations) {
+  return stations.reduce((sum, p) => sum + (p.points?.[0]?.variables?.length || 0), 0);
+}
+
 // ── Init: discover stations ─────────────────────────────────────────
 async function init() {
   try {
@@ -233,13 +695,18 @@ async function init() {
     activeMeteo = meteoStations[0]?.code;
     activeSolar = solarStations[0]?.code;
 
+    $('meteoCount').textContent = meteoStations.length;
+    $('meteoSensorCount').textContent = sensorCount(meteoStations);
+    $('solarCount').textContent = solarStations.length;
+    $('solarSensorCount').textContent = sensorCount(solarStations);
     $('stationCount').textContent = places.length;
+
     await fetchAllData();
   } catch (e) {
     $('errorBar').textContent = `Init error: ${e.message}`;
     $('errorBar').style.display = 'block';
     $('statusDot').style.background = 'var(--red)';
-    $('statusText').textContent = 'Connection error';
+    $('statusText').textContent = 'connection error';
   } finally {
     $('loader').classList.add('hidden');
   }
@@ -273,22 +740,90 @@ async function fetchAllData() {
 
     renderMeteo();
     renderSolar();
-    await fetchDevices();
+    await Promise.allSettled([fetchDevices(), fetchAlarms()]);
 
-    $('statusText').textContent = `Updated ${new Date().toLocaleTimeString()}`;
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2,'0');
+    const mm = String(now.getMinutes()).padStart(2,'0');
+    $('statusText').textContent = `live · ${hh}:${mm}`;
     $('statusDot').style.background = 'var(--green)';
   } catch (e) {
     $('errorBar').textContent = `Error: ${e.message}`;
     $('errorBar').style.display = 'block';
     $('statusDot').style.background = 'var(--red)';
+    $('statusText').textContent = 'connection error';
   }
 }
 
 async function fetchDevices() {
   try {
     const devices = await api('/api/devices');
+    $('deviceCount').textContent = devices.length;
     renderDevices(devices);
   } catch (e) { /* non-critical */ }
+}
+
+async function fetchAlarms() {
+  try {
+    const alarms = await api('/api/alarms?hours=24&status=Open');
+    renderAlarms(Array.isArray(alarms) ? alarms : []);
+  } catch (e) { renderAlarms([]); }
+}
+
+function renderAlarms(alarms) {
+  const banner = $('alarmsBanner');
+  const list = $('alarmsList');
+  if (!alarms.length) {
+    banner.classList.remove('open', 'severe');
+    return;
+  }
+  // group by station for compact chips
+  const byStation = new Map();
+  let severe = 0;
+  for (const a of alarms) {
+    const station = a.placeCode || a.placeName || a.deviceName || a.source || '—';
+    const sev = String(a.severity || a.priority || '').toLowerCase();
+    if (sev === 'critical' || sev === 'high' || sev === 'error' || sev === 'fault') severe += 1;
+    if (!byStation.has(station)) byStation.set(station, { count: 0, severe: false });
+    const slot = byStation.get(station);
+    slot.count += 1;
+    if (sev === 'critical' || sev === 'high') slot.severe = true;
+  }
+
+  banner.classList.add('open');
+  banner.classList.toggle('severe', severe > 0);
+  $('alarmsSubtitle').textContent = `${alarms.length} ${alarms.length === 1 ? 'alarm' : 'alarms'} in last 24h`;
+
+  const chips = [...byStation.entries()].slice(0, 8).map(([station, info]) => {
+    return `<span class="alarms-chip${info.severe ? ' severe' : ''}">
+      <span class="dot"></span><b>${escapeHtml(station)}</b>${info.count > 1 ? ` · ${info.count}` : ''}
+    </span>`;
+  });
+  if (byStation.size > 8) {
+    chips.push(`<span class="alarms-chip"><span class="dot"></span>+${byStation.size - 8} more</span>`);
+  }
+  list.innerHTML = chips.join('');
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, m => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[m]));
+}
+
+function setSectionTime(id, timestamp) {
+  const el = $(id);
+  if (!el || !timestamp) { if (el) el.hidden = true; return; }
+  const date = new Date(timestamp * 1000);
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  el.querySelector('.val').textContent = `${hh}:${mm}`;
+  el.hidden = false;
+}
+
+function lastTimestamp(data) {
+  if (!data?.data?.length) return null;
+  return data.data[data.data.length - 1]?.timestamp || null;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -301,13 +836,50 @@ function last(data, field) {
   return null;
 }
 
+function stats(data, field) {
+  if (!data?.data) return null;
+  let min = Infinity, max = -Infinity, sum = 0, n = 0;
+  for (const row of data.data) {
+    const v = row[field];
+    if (v === null || v === undefined || !Number.isFinite(v)) continue;
+    if (v < min) min = v;
+    if (v > max) max = v;
+    sum += v; n += 1;
+  }
+  return n ? { min, max, avg: sum / n, count: n } : null;
+}
+
 function fmt(v, d = 1) {
   if (v === null || v === undefined) return '--';
   return Number(v).toFixed(d);
 }
 
-function kpi(label, value, unit) {
-  return `<div class="kpi"><div class="kpi-label">${label}</div><div class="kpi-value">${value}<span class="kpi-unit">${unit}</span></div></div>`;
+function periodLabel() {
+  if (currentHours <= 24) return '24h';
+  if (currentHours <= 168) return '7d';
+  return '30d';
+}
+
+function kpi(label, value, unit, opts = {}) {
+  const flag = opts.flag ? `<span class="kpi-flag ${opts.flag.kind}" title="${opts.flag.title || ''}">${opts.flag.text}</span>` : '';
+  const statsRow = opts.stats
+    ? `<div class="kpi-stats" title="Aggregates over the last ${periodLabel()}">
+         <span>min<b>${fmt(opts.stats.min, opts.d ?? 1)}</b></span>
+         <span>avg<b>${fmt(opts.stats.avg, opts.d ?? 1)}</b></span>
+         <span>max<b>${fmt(opts.stats.max, opts.d ?? 1)}</b></span>
+       </div>`
+    : '';
+  return `<div class="kpi">
+    <div class="kpi-label">${label}${flag}</div>
+    <div class="kpi-value">${value}<span class="kpi-unit">${unit}</span></div>
+    ${statsRow}
+  </div>`;
+}
+
+function kpiWithStats(label, data, field, unit, d = 1) {
+  const lastVal = last(data, field);
+  const s = stats(data, field);
+  return kpi(label, fmt(lastVal, d), unit, { stats: s, d });
 }
 
 function ts(data, field) {
@@ -315,25 +887,55 @@ function ts(data, field) {
   return data.data.filter(r => r[field] != null).map(r => ({ x: new Date(r.timestamp * 1000), y: r[field] }));
 }
 
+// chart series colors, OKLCH for consistency with the UI palette
+const C = {
+  red:    'oklch(70% .2 25)',
+  blue:   'oklch(72% .14 220)',
+  amber:  'oklch(78% .15 75)',
+  cyan:   'oklch(76% .12 200)',
+  violet: 'oklch(70% .16 290)',
+  pink:   'oklch(72% .18 350)',
+  green:  'oklch(72% .18 155)',
+};
+
+function withAlpha(oklchColor, alpha) {
+  return oklchColor.replace(')', ` / ${alpha})`);
+}
+
 function ds(label, data, color, yAxisID, fill) {
   return {
-    label, data, borderColor: color, backgroundColor: fill || color + '18',
-    borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: !!fill,
+    label, data,
+    borderColor: color,
+    backgroundColor: fill || withAlpha(color, 0.12),
+    borderWidth: 1.6,
+    pointRadius: 0,
+    pointHoverRadius: 4,
+    pointHoverBackgroundColor: color,
+    pointHoverBorderColor: 'oklch(15.5% .015 215)',
+    pointHoverBorderWidth: 2,
+    tension: 0.28,
+    fill: !!fill,
     yAxisID: yAxisID || 'y',
   };
 }
 
+const CHART_TICK = 'oklch(67% .017 215)';
+const CHART_GRID = 'oklch(28% .025 215 / .5)';
+const CHART_TIP_BG = 'oklch(20% .02 215)';
+const CHART_TIP_BORDER = 'oklch(38% .03 215)';
+const CHART_TIP_TEXT = 'oklch(96% .005 215)';
+
 const CHART_OPTS = () => ({
   responsive: true, maintainAspectRatio: false,
-  animation: { duration: 300 },
+  animation: { duration: 300, easing: 'easeOutQuart' },
   interaction: { mode: 'index', intersect: false },
   plugins: {
-    legend: { position: 'top', labels: { color: '#8b8fa3', font: { size: isMobile ? 10 : 11, family: 'Inter' }, boxWidth: isMobile ? 8 : 12, padding: isMobile ? 6 : 12 } },
-    tooltip: { backgroundColor: '#252836', titleColor: '#e4e6f0', bodyColor: '#e4e6f0', borderColor: '#2e3148', borderWidth: 1, padding: 10 },
+    legend: { position: 'top', align: 'end', labels: { color: CHART_TICK, font: { size: isMobile ? 10 : 11, family: 'JetBrains Mono', weight: '500' }, boxWidth: isMobile ? 8 : 10, boxHeight: isMobile ? 8 : 10, padding: isMobile ? 6 : 14, usePointStyle: true, pointStyle: 'circle' } },
+    tooltip: { backgroundColor: CHART_TIP_BG, titleColor: CHART_TIP_TEXT, bodyColor: CHART_TIP_TEXT, borderColor: CHART_TIP_BORDER, borderWidth: 1, padding: 12, cornerRadius: 8, titleFont: { family: 'JetBrains Mono', size: 11, weight: '600' }, bodyFont: { family: 'Inter', size: 12 }, displayColors: true, boxPadding: 6 },
   },
   scales: {
-    x: { type: 'time', time: { tooltipFormat: 'MMM d, HH:mm' }, grid: { color: 'rgba(46,49,72,.5)' }, ticks: { color: '#8b8fa3', font: { size: isMobile ? 9 : 10 }, maxTicksLimit: isMobile ? 5 : 8, maxRotation: 0 } },
-    y: { grid: { color: 'rgba(46,49,72,.5)' }, ticks: { color: '#8b8fa3', font: { size: isMobile ? 9 : 10 } }, position: 'left' },
+    x: { type: 'time', time: { tooltipFormat: 'MMM d, HH:mm' }, grid: { color: CHART_GRID, drawTicks: false }, ticks: { color: CHART_TICK, font: { size: isMobile ? 9 : 10, family: 'JetBrains Mono' }, maxTicksLimit: isMobile ? 5 : 8, maxRotation: 0, padding: 6 }, border: { display: false } },
+    y: { grid: { color: CHART_GRID, drawTicks: false }, ticks: { color: CHART_TICK, font: { size: isMobile ? 9 : 10, family: 'JetBrains Mono' }, padding: 8 }, position: 'left', border: { display: false } },
   },
 });
 
@@ -341,7 +943,7 @@ function buildChart(id, datasets, opts = {}) {
   if (charts[id]) charts[id].destroy();
   const config = CHART_OPTS();
   if (opts.y2) {
-    config.scales.y2 = { ...config.scales.y, position: 'right', grid: { drawOnChartArea: false, color: 'rgba(46,49,72,.5)' } };
+    config.scales.y2 = { ...config.scales.y, position: 'right', grid: { drawOnChartArea: false, color: CHART_GRID }, border: { display: false } };
   }
   charts[id] = new Chart($(id), { type: 'line', data: { datasets }, options: config });
 }
@@ -351,24 +953,39 @@ function renderMeteo() {
   if (!activeMeteo) return;
   const d = stationData[activeMeteo];
   const place = places.find(p => p.code === activeMeteo);
-  $('meteoStationName').textContent = place ? `— ${place.name}` : '';
+  $('meteoStationName').textContent = place ? `· ${place.name}` : '';
+  setSectionTime('meteoTime', lastTimestamp(d));
 
   const fields = place?.points?.[0]?.variables?.map(v => v.name) || [];
   const hasField = name => fields.some(f => f === name || f.includes(name));
 
-  const kpis = [];
-  if (hasField('Temperatura'))           kpis.push(kpi('Temperature', fmt(last(d, 'Temperatura')), '°C'));
-  if (hasField('Relativna'))             kpis.push(kpi('Humidity', fmt(last(d, 'Relativna vlažnost') ?? last(d, 'Relativna vlaznost'), 0), '%'));
-  if (hasField('Tlak'))                  kpis.push(kpi('Pressure', fmt(last(d, 'Tlak zraka')), 'kPa'));
-  if (hasField('Sunčevo') || hasField('Suncevo'))
-    kpis.push(kpi('Solar Rad.', fmt(last(d, 'Sunčevo zračenje') ?? last(d, 'Suncevo zracenje'), 0), 'W/m²'));
-  if (hasField('UV'))                    kpis.push(kpi('UV', fmt(last(d, 'UV indeks') ?? last(d, 'UV zračenje'), 0), ''));
-  if (hasField('Kiša') || hasField('Kisa'))
-    kpis.push(kpi('Rain', fmt(last(d, 'Kiša') ?? last(d, 'Kisa'), 2), 'mm'));
-  if (hasField('PM2.5'))                 kpis.push(kpi('PM2.5', fmt(last(d, 'Lebdeće čestice PM2.5') ?? last(d, 'Lebdece cestice PM2.5')), 'μg/m³'));
-  if (hasField('PM10'))                  kpis.push(kpi('PM10', fmt(last(d, 'Lebdeće čestice PM10') ?? last(d, 'Lebdece cestice PM10')), 'μg/m³'));
-  if (hasField('CO2'))                   kpis.push(kpi('CO2', fmt(last(d, 'CO2'), 0), ''));
-  if (hasField('Buka'))                  kpis.push(kpi('Noise', fmt(last(d, 'Buka')), 'dB'));
+  // Find actual field key in data (handles diacritic variations)
+  const fieldKey = (...hints) => {
+    if (!d?.data?.[0]) return null;
+    const keys = Object.keys(d.data[0]);
+    for (const hint of hints) {
+      const found = keys.find(key => key.includes(hint));
+      if (found) return found;
+    }
+    return null;
+  };
+  const kpiFor = (label, unit, decimals, ...hints) => {
+    const key = fieldKey(...hints);
+    return key ? kpiWithStats(label, d, key, unit, decimals) : null;
+  };
+
+  const kpis = [
+    kpiFor('Temperature', '°C', 1, 'Temperatura'),
+    kpiFor('Humidity', '%', 0, 'vlažnost', 'vlaznost'),
+    kpiFor('Pressure', 'kPa', 1, 'Tlak'),
+    kpiFor('Solar Rad.', 'W/m²', 0, 'zračenje', 'zracenje'),
+    kpiFor('UV', '', 0, 'UV indeks', 'UV'),
+    kpiFor('Rain', 'mm', 2, 'Kiša', 'Kisa'),
+    kpiFor('PM2.5', 'μg/m³', 1, 'PM2.5'),
+    kpiFor('PM10', 'μg/m³', 1, 'PM10'),
+    kpiFor('CO2', '', 0, 'CO2'),
+    kpiFor('Noise', 'dB', 1, 'Buka'),
+  ].filter(Boolean);
   $('meteoKpis').innerHTML = kpis.join('');
 
   // Find field names in data (API may return with or without diacritics)
@@ -379,19 +996,92 @@ function renderMeteo() {
   };
 
   buildChart('chartTempHum', [
-    ds('Temperature (°C)', ts(d, f('Temperatura')), '#ef4444', 'y', '#ef444418'),
-    ds('Humidity (%)', ts(d, f('vlažnost') || f('vlaznost')), '#3b82f6', 'y2', '#3b82f618'),
+    ds('Temperature (°C)', ts(d, f('Temperatura')), C.red, 'y', withAlpha(C.red, 0.1)),
+    ds('Humidity (%)', ts(d, f('vlažnost') || f('vlaznost')), C.blue, 'y2', withAlpha(C.blue, 0.08)),
   ], { y2: true });
 
   buildChart('chartSolar', [
-    ds('Solar Radiation (W/m²)', ts(d, f('zračenje') || f('zracenje')), '#f59e0b', 'y', '#f59e0b18'),
+    ds('Solar radiation (W/m²)', ts(d, f('zračenje') || f('zracenje')), C.amber, 'y', withAlpha(C.amber, 0.12)),
   ]);
 
   buildChart('chartAirQ', [
-    ds('PM2.5', ts(d, f('PM2.5')), '#a855f7'),
-    ds('PM10', ts(d, f('PM10')), '#ec4899'),
-    ds('O3', ts(d, f('O3')), '#06b6d4'),
+    ds('PM2.5', ts(d, f('PM2.5')), C.violet),
+    ds('PM10', ts(d, f('PM10')), C.pink),
+    ds('O3', ts(d, f('O3')), C.cyan),
   ]);
+}
+
+// ── Meteo correction ───────────────────────────────────────────────
+// Build an "expected solar output" series from meteo irradiance and the plant's
+// own historical peak ratio (kW out per kW/m² in). Honest baseline, no theoretical
+// assumptions about panel area: uses the max observed ratio in the same period.
+function expectedSolarFromIrradiance(solarData, hasField) {
+  if (!activeMeteo) return [];
+  const meteo = stationData[activeMeteo];
+  if (!meteo?.data?.length || !solarData?.data?.length) return [];
+
+  const radField = Object.keys(meteo.data[0] || {}).find(k => k.includes('zračenje') || k.includes('zracenje'));
+  if (!radField) return [];
+
+  const acField = hasField('AC.power.total') ? 'Inverter.AC.power.total'
+    : hasField('Total_AC_Output') ? '33_Total_AC_Output_Power_(Active)'
+    : null;
+  if (!acField) return [];
+
+  // discover plant baseline: highest observed ratio of AC kW per kW/m²
+  let maxRatio = 0;
+  // index meteo by timestamp bucket for fast pairing
+  const meteoIndex = new Map();
+  for (const r of meteo.data) {
+    const w = r[radField];
+    if (!Number.isFinite(w) || w < 50) continue; // need real sun
+    meteoIndex.set(Math.round(r.timestamp / 600), w); // 10-min buckets
+  }
+  for (const r of solarData.data) {
+    const ac = r[acField];
+    if (!Number.isFinite(ac) || ac <= 0) continue;
+    const w = meteoIndex.get(Math.round(r.timestamp / 600));
+    if (!w) continue;
+    const ratio = ac / (w / 1000);
+    if (ratio > maxRatio) maxRatio = ratio;
+  }
+  if (maxRatio <= 0) return [];
+
+  return meteo.data
+    .filter(r => Number.isFinite(r[radField]))
+    .map(r => ({ x: new Date(r.timestamp * 1000), y: (r[radField] / 1000) * maxRatio }));
+}
+
+// ── Soiling detection ──────────────────────────────────────────────
+// Compares average solar radiation vs average inverter output across the
+// active period. If radiation is high but output is disproportionately low,
+// that is a likely soiling signal (panels need cleaning).
+function detectSoiling() {
+  if (!activeMeteo) return null;
+  const meteo = stationData[activeMeteo];
+  const solar = stationData[activeSolar];
+  if (!meteo?.data || !solar?.data) return null;
+
+  const radField = Object.keys(meteo.data[0] || {}).find(k => k.includes('zračenje') || k.includes('zracenje'));
+  const acField = Object.keys(solar.data[0] || {}).find(k => k.includes('AC.power.total') || k.includes('Total_AC_Output'));
+  if (!radField || !acField) return null;
+
+  const rad = stats(meteo, radField);
+  const ac = stats(solar, acField);
+  if (!rad || !ac || rad.avg < 50) return null; // need enough sun to assess
+
+  // expected ratio: with ~1000 W/m² over a typical PV array we'd see kW output proportional.
+  // Without panel area we use a relative health score: actualKW / radKWm².
+  const ratio = ac.avg / (rad.avg / 1000);
+  // Healthy ratio depends on plant size; compare against the historical max ratio over the same window.
+  const maxRatio = ac.max / Math.max(rad.max / 1000, 0.001);
+  const efficiency = maxRatio > 0 ? Math.min(100, (ratio / maxRatio) * 100) : null;
+
+  let kind = 'ok', flag = 'OK', text = 'panels healthy';
+  if (efficiency != null && efficiency < 60) { kind = 'err'; flag = 'CHECK'; text = 'low yield, possible soiling'; }
+  else if (efficiency != null && efficiency < 80) { kind = 'warn'; flag = 'WATCH'; text = 'yield below baseline'; }
+
+  return { ratio, efficiency, kind, flag, text };
 }
 
 // ── Solar rendering ─────────────────────────────────────────────────
@@ -399,36 +1089,76 @@ function renderSolar() {
   if (!activeSolar) return;
   const d = stationData[activeSolar];
   const place = places.find(p => p.code === activeSolar);
-  $('solarStationName').textContent = place ? `— ${place.name}` : '';
+  $('solarStationName').textContent = place ? `· ${place.name}` : '';
+  setSectionTime('solarTime', lastTimestamp(d));
 
   const fields = place?.points?.[0]?.variables?.map(v => v.name) || [];
   const hasField = name => fields.some(f => f.includes(name));
 
-  const kpis = [];
-  if (hasField('Grid.power'))       kpis.push(kpi('Grid Power', fmt(last(d, 'Grid.power.total'), 2), 'kW'));
-  if (hasField('AC.power.total'))   kpis.push(kpi('AC Output', fmt(last(d, 'Inverter.AC.power.total'), 2), 'kW'));
-  if (hasField('energy.out.daily')) kpis.push(kpi('Daily Energy', fmt(last(d, 'Inverter.AC.energy.out.daily'), 1), 'kWh'));
-  if (hasField('toGrid.total'))     kpis.push(kpi('To Grid', fmt(last(d, 'Grid.energy.toGrid.total'), 0), 'kWh'));
-  if (hasField('fromGrid.total'))   kpis.push(kpi('From Grid', fmt(last(d, 'Grid.energy.fromGrid.total'), 0), 'kWh'));
-  if (hasField('BMS.energy.SOC'))   kpis.push(kpi('Battery SOC', fmt(last(d, 'BMS.energy.SOC'), 0), '%'));
+  const fieldKey = (...hints) => {
+    if (!d?.data?.[0]) return null;
+    const keys = Object.keys(d.data[0]);
+    for (const hint of hints) {
+      const found = keys.find(key => key === hint || key.includes(hint));
+      if (found) return found;
+    }
+    return null;
+  };
+  const kpiFor = (label, unit, decimals, ...hints) => {
+    const key = fieldKey(...hints);
+    return key ? kpiWithStats(label, d, key, unit, decimals) : null;
+  };
 
-  // Solarman-style fields
-  if (hasField('Total_AC_Output'))  kpis.push(kpi('AC Output', fmt(last(d, '33_Total_AC_Output_Power_(Active)'), 2), 'kW'));
-  if (hasField('Daily_Production')) kpis.push(kpi('Daily Prod.', fmt(last(d, '35_Daily_Production_(Active)'), 1), 'kWh'));
-  if (hasField('Total_Gen_Power'))  kpis.push(kpi('Total Gen', fmt(last(d, '50_Total_Gen_Power'), 2), 'kW'));
-  if (hasField('Total_Grid_Power')) kpis.push(kpi('Grid Power', fmt(last(d, '36_Total_Grid_Power'), 2), 'kW'));
+  // soiling KPI as the hero card if available
+  const soiling = detectSoiling();
+  const soilingCard = soiling
+    ? kpi('Plant health', fmt(soiling.efficiency, 0), '%', {
+        flag: { kind: soiling.kind, text: soiling.flag, title: soiling.text },
+      })
+    : null;
 
-  $('solarKpis').innerHTML = kpis.length ? kpis.join('') : '<div class="kpi"><div class="kpi-label">No data</div><div class="kpi-value">--</div></div>';
+  const kpis = [
+    soilingCard,
+    kpiFor('AC output', 'kW', 2, 'Inverter.AC.power.total', '33_Total_AC_Output_Power_(Active)'),
+    kpiFor('Grid power', 'kW', 2, 'Grid.power.total', '36_Total_Grid_Power'),
+    kpiFor('Daily energy', 'kWh', 1, 'Inverter.AC.energy.out.daily', '35_Daily_Production_(Active)'),
+    kpiFor('To grid', 'kWh', 0, 'Grid.energy.toGrid.total'),
+    kpiFor('From grid', 'kWh', 0, 'Grid.energy.fromGrid.total'),
+    kpiFor('Battery SOC', '%', 0, 'BMS.energy.SOC'),
+    kpiFor('Total gen', 'kW', 2, '50_Total_Gen_Power'),
+  ].filter(Boolean);
+
+  $('solarKpis').innerHTML = kpis.length
+    ? kpis.join('')
+    : '<div class="kpi"><div class="kpi-label">No data</div><div class="kpi-value">--</div></div>';
 
   const powerSets = [];
-  if (hasField('Grid.power'))     powerSets.push(ds('Grid Power (kW)', ts(d, 'Grid.power.total'), '#22c55e', 'y', '#22c55e18'));
-  if (hasField('AC.power.total')) powerSets.push(ds('AC Output (kW)', ts(d, 'Inverter.AC.power.total'), '#f59e0b', powerSets.length ? 'y2' : 'y'));
-  if (hasField('Total_AC_Output'))powerSets.push(ds('AC Output (kW)', ts(d, '33_Total_AC_Output_Power_(Active)'), '#f59e0b', 'y'));
-  buildChart('chartPower', powerSets, { y2: powerSets.length > 1 });
+  if (hasField('Grid.power'))     powerSets.push(ds('Grid power (kW)', ts(d, 'Grid.power.total'), C.green, 'y', withAlpha(C.green, 0.1)));
+  if (hasField('AC.power.total')) powerSets.push(ds('AC output (kW)', ts(d, 'Inverter.AC.power.total'), C.amber, powerSets.length ? 'y2' : 'y'));
+  if (hasField('Total_AC_Output'))powerSets.push(ds('AC output (kW)', ts(d, '33_Total_AC_Output_Power_(Active)'), C.amber, 'y'));
+
+  // Meteo correction: derive an "expected" solar output line from irradiance.
+  // Uses the period's max ratio (kW per kW/m²) as the healthy baseline.
+  const expected = expectedSolarFromIrradiance(d, hasField);
+  if (expected.length > 0) {
+    powerSets.push({
+      label: 'Expected from irradiance (kW)',
+      data: expected,
+      borderColor: C.cyan,
+      backgroundColor: 'transparent',
+      borderWidth: 1.4,
+      borderDash: [4, 4],
+      pointRadius: 0,
+      tension: 0.3,
+      fill: false,
+      yAxisID: powerSets.find(s => s.yAxisID === 'y2') ? 'y2' : 'y',
+    });
+  }
+  buildChart('chartPower', powerSets, { y2: powerSets.some(s => s.yAxisID === 'y2') });
 
   const energySets = [];
-  if (hasField('energy.out.daily'))  energySets.push(ds('Daily Energy (kWh)', ts(d, 'Inverter.AC.energy.out.daily'), '#3b82f6', 'y', '#3b82f618'));
-  if (hasField('Daily_Production'))  energySets.push(ds('Daily Production (kWh)', ts(d, '35_Daily_Production_(Active)'), '#3b82f6', 'y', '#3b82f618'));
+  if (hasField('energy.out.daily'))  energySets.push(ds('Daily energy (kWh)', ts(d, 'Inverter.AC.energy.out.daily'), C.blue, 'y', withAlpha(C.blue, 0.1)));
+  if (hasField('Daily_Production'))  energySets.push(ds('Daily production (kWh)', ts(d, '35_Daily_Production_(Active)'), C.blue, 'y', withAlpha(C.blue, 0.1)));
   buildChart('chartEnergy', energySets);
 }
 
@@ -437,11 +1167,16 @@ function renderDevices(devices) {
   const kpis = devices.map(d => {
     const counters = d.counters?.length || 0;
     const lastRead = d.counters?.[0]?.lastRead;
-    const ago = lastRead ? timeAgo(new Date(lastRead)) : '--';
+    const ago = lastRead ? timeAgo(new Date(lastRead)) : null;
+    const fresh = lastRead ? (Date.now() - new Date(lastRead).getTime()) < 30 * 60 * 1000 : false;
+    const flag = ago
+      ? { kind: fresh ? 'ok' : 'warn', text: ago, title: 'last read' }
+      : null;
     return kpi(
-      d.name?.substring(0, 16) || d.nodeId,
+      d.name?.substring(0, 18) || d.nodeId,
       counters,
-      `sensors`,
+      counters === 1 ? 'sensor' : 'sensors',
+      { flag }
     );
   });
   $('deviceKpis').innerHTML = kpis.join('');

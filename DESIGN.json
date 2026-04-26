@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-04-25T20:20:00.000Z",
+  "title": "Design System: BIOS Multi-level Platform",
+  "extensions": {
+    "colorMeta": {
+      "platform-bg": {
+        "role": "neutral",
+        "displayName": "Platform Background",
+        "canonical": "oklch(96.8% .008 155)",
+        "tonalRamp": ["oklch(23% .03 155)", "oklch(50% .026 155)", "oklch(68% .018 155)", "oklch(84.5% .018 155)", "oklch(92.5% .012 155)", "oklch(96.8% .008 155)", "oklch(98.8% .006 155)", "oklch(99.5% .004 155)"]
+      },
+      "signal-green": {
+        "role": "primary",
+        "displayName": "Signal Green",
+        "canonical": "oklch(58% .16 150)",
+        "tonalRamp": ["oklch(28% .09 150)", "oklch(38% .12 150)", "oklch(48% .15 150)", "oklch(58% .16 150)", "oklch(68% .14 150)", "oklch(78% .11 150)", "oklch(88% .09 150)", "oklch(95% .04 150)"]
+      },
+      "warning-amber": {
+        "role": "semantic",
+        "displayName": "Warning Amber",
+        "canonical": "#f59e0b",
+        "tonalRamp": ["#451a03", "#78350f", "#92400e", "#b45309", "#d97706", "#f59e0b", "#fcd34d", "#fef3c7"]
+      },
+      "relay-pink": {
+        "role": "secondary",
+        "displayName": "Relay Pink",
+        "canonical": "#ec4899",
+        "tonalRamp": ["#500724", "#831843", "#9d174d", "#be185d", "#db2777", "#ec4899", "#f9a8d4", "#fce7f3"]
+      }
+    },
+    "typographyMeta": {
+      "title": {
+        "displayName": "Panel Title",
+        "purpose": "Panel headings and section labels."
+      },
+      "body": {
+        "displayName": "Operational Body",
+        "purpose": "Short explanatory copy and stable dashboard text."
+      },
+      "mono": {
+        "displayName": "Audit Mono",
+        "purpose": "Hashes, payloads, tx ids, timestamps, and compact evidence."
+      }
+    },
+    "shadows": [
+      {
+        "name": "update-glow",
+        "value": "0 0 0 1px rgba(34,197,94,.18), 0 0 32px rgba(34,197,94,.12)",
+        "purpose": "Temporary state feedback for real data updates."
+      }
+    ],
+    "motion": [
+      {
+        "name": "update-sweep",
+        "value": "900ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Short card update confirmation without layout movement."
+      },
+      {
+        "name": "signal-trace",
+        "value": "1100ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Header signal trace for meaningful backend events."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "single-column",
+        "value": "420px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Operational Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Primary dashboard surface for service status, SLA, payloads, and chain panels.",
+      "html": "<section class=\"ds-card\"><h2>Prediction Analysis</h2><p>Always-on forecast worker over BIOS/Mars2 data.</p><div class=\"ds-result\">ready</div></section>",
+      "css": ".ds-card{background:#252836;color:#e4e6f0;border:1px solid #2e3148;border-radius:12px;padding:16px;font-family:Inter,system-ui,sans-serif}.ds-card h2{font-size:1rem;font-weight:700;margin:0 0 8px}.ds-card p{color:#8b8fa3;font-size:.82rem;line-height:1.5;margin:0 0 12px}.ds-result{background:#1a1d29;border:1px solid #2e3148;border-radius:8px;padding:12px;color:#8b8fa3;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.74rem}"
+    },
+    {
+      "name": "Status Chip",
+      "kind": "chip",
+      "refersTo": "chip-ok",
+      "description": "Text-first status label for ready, stale, mock, confirmed, and failed states.",
+      "html": "<span class=\"ds-chip-ok\">ready</span>",
+      "css": ".ds-chip-ok{display:inline-block;border-radius:999px;padding:3px 8px;background:rgba(34,197,94,.16);color:#22c55e;font:700 .7rem/1.2 Inter,system-ui,sans-serif}.ds-chip-warn{background:rgba(245,158,11,.16);color:#f59e0b}.ds-chip-err{background:rgba(239,68,68,.16);color:#ef4444}"
+    },
+    {
+      "name": "Relay Flow",
+      "kind": "custom",
+      "description": "Compact system map showing Prediction to Blockchain Relay to Stealth.",
+      "html": "<div class=\"ds-relay\"><div class=\"ds-node\"><strong>Prediction</strong><span>cycle ready</span></div><div class=\"ds-arrow\"></div><div class=\"ds-node\"><strong>Blockchain Relay</strong><span>event confirmed</span></div><div class=\"ds-arrow\"></div><div class=\"ds-node\"><strong>Stealth</strong><span>tx visible</span></div></div>",
+      "css": ".ds-relay{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;align-items:center;gap:10px;font-family:Inter,system-ui,sans-serif}.ds-node{background:#252836;border:1px solid #2e3148;border-radius:12px;padding:12px;color:#8b8fa3;font-size:.78rem}.ds-node strong{display:block;color:#e4e6f0;font-size:.85rem;margin-bottom:3px}.ds-arrow{height:2px;width:34px;background:linear-gradient(90deg,#2e3148,#22c55e)}"
+    },
+    {
+      "name": "Live Signal",
+      "kind": "custom",
+      "description": "Header proof-of-life trace that animates only on meaningful backend state changes.",
+      "html": "<svg class=\"ds-signal\" viewBox=\"0 0 420 58\"><path d=\"M0 34 H54 L66 34 L76 12 L91 48 L107 28 H157 L170 28 L182 20 L196 37 L211 30 H271 L288 30 L300 18 L318 42 L335 31 H420\" /></svg>",
+      "css": ".ds-signal{width:420px;height:58px}.ds-signal path{fill:none;stroke:#22c55e;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 0 8px rgba(34,197,94,.35))}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Grid Station",
+    "overview": "The visual system should feel like an energy infrastructure control station in a bright review room: steady, legible, and quietly alive. It is a product dashboard for reviewers and operators, not a marketing surface and not a crypto spectacle.",
+    "keyCharacteristics": [
+      "Calm operational density.",
+      "Clear state labels before visual drama.",
+      "Subtle live signal accents.",
+      "Audit-friendly blockchain details.",
+      "Reviewer-friendly hierarchy."
+    ],
+    "rules": [
+      {
+        "name": "The Signal Scarcity Rule",
+        "body": "Signal Green is reserved for live, healthy, or confirmed state. Do not use it as decoration.",
+        "section": "colors"
+      },
+      {
+        "name": "The Readout Rule",
+        "body": "Use monospace only for technical evidence: hashes, payloads, transaction ids, timestamps, and compact logs.",
+        "section": "typography"
+      },
+      {
+        "name": "The Pulse Is State Rule",
+        "body": "Glow appears only when a service update changes visible state.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do show operational truth first: stale data, mock mode, unconfigured RPC, duplicates, and relay failures must be visible.",
+      "Do pair every color state with text.",
+      "Do keep real-time motion subtle, short, and tied to a real state change.",
+      "Do preserve audit context for blockchain events: source, payload, hash, tx id, relay mode, and verification state."
+    ],
+    "donts": [
+      "Don't use crypto casino or neon hype aesthetics.",
+      "Don't drift into a generic dark SaaS dashboard look.",
+      "Don't create an overanimated NOC wallboard that distracts from data.",
+      "Don't make it feel like a dry academic prototype with no product polish.",
+      "Don't use marketing landing page language or layout.",
+      "Don't animate the whole layout or repaint stable panels on heartbeat."
+    ]
+  }
+}

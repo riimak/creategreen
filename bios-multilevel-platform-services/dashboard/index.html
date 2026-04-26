@@ -3,212 +3,2002 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BIOS Multi-level Platform Services Dashboard</title>
+<title>BIOS Platform</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231a2a35'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='system-ui,-apple-system,sans-serif' font-weight='800' font-size='16' fill='%23fff' letter-spacing='-0.5'%3EB%3C/text%3E%3Ccircle cx='25' cy='7' r='3' fill='%2340d97a'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
 :root{
-  --bg:#0f1117;--surface:#1a1d29;--card:#252836;--border:#2e3148;
-  --text:#e4e6f0;--muted:#8b8fa3;--accent:#3b82f6;
-  --green:#22c55e;--amber:#f59e0b;--red:#ef4444;--pink:#ec4899;
+  --bg:oklch(96.8% .008 155);
+  --surface:oklch(94.2% .012 155);
+  --card:oklch(99% .005 155);
+  --inset:oklch(93% .014 155);
+  --border:oklch(86% .016 155);
+  --border-strong:oklch(78% .02 155);
+  --text:oklch(23% .03 155);
+  --muted:oklch(48% .026 155);
+  --subtle:oklch(62% .02 155);
+  --accent:oklch(54% .17 245);
+  --green:oklch(56% .16 150);
+  --green-soft:oklch(92% .04 150);
+  --amber:oklch(66% .15 70);
+  --amber-soft:oklch(93% .06 75);
+  --red:oklch(56% .18 25);
+  --red-soft:oklch(93% .045 25);
+  --pink:oklch(60% .18 345);
+  --pink-soft:oklch(94% .04 345);
+  --grid:oklch(82% .015 155);
+  --ease:cubic-bezier(.16,1,.3,1);
 }
-body{font-family:Inter,system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
-header{border-bottom:1px solid var(--border);padding:1rem 1.5rem;background:rgba(15,17,23,.9)}
-header h1{font-size:1.25rem}
-header p{color:var(--muted);font-size:.85rem;margin-top:.25rem}
-main{max-width:1200px;margin:0 auto;padding:1.5rem}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(420px,100%),1fr));gap:1rem;margin-bottom:1rem}
-.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1rem}
-.card h2{font-size:1rem;margin-bottom:.5rem}
-.card p{font-size:.82rem;color:var(--muted);line-height:1.5;margin-bottom:.75rem}
-.row{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.75rem}
-input,select,button{
-  border-radius:8px;border:1px solid var(--border);min-height:38px;
-  padding:.55rem .65rem;font:inherit;font-size:.8rem;
+
+/* ── viewport contract ─────────────────────────────────────
+   The dashboard is a single-screen control surface. It must
+   fit a 1366×768 laptop, a 1920×1080 desktop, and a 4K TV
+   (3840×2160) without page-level scrolling. Internal panels
+   fit without page-level or panel-level scrolling.
+   ──────────────────────────────────────────────────────── */
+html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text)}
+body{
+  font:14px/1.45 'Inter','Helvetica Neue',system-ui,-apple-system,'Segoe UI',sans-serif;
+  -webkit-font-smoothing:antialiased;
+  font-feature-settings:'cv11','ss01','tnum';
+  display:grid;grid-template-rows:auto minmax(0,1fr);
+  height:100vh;min-height:0;
 }
-input,select{background:var(--surface);color:var(--text);flex:1;min-width:160px}
-button{background:var(--accent);color:white;border:none;cursor:pointer;font-weight:700}
-canvas{width:100%!important;height:280px!important}
-.result{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:.75rem;min-height:72px}
-.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.74rem;color:var(--muted);word-break:break-all}
-.chip{display:inline-block;border-radius:999px;padding:.2rem .5rem;font-size:.7rem;font-weight:700;background:rgba(139,143,163,.18);color:var(--muted);margin-bottom:.35rem}
-.chip.ok{background:rgba(34,197,94,.16);color:var(--green)}
-.chip.warn{background:rgba(245,158,11,.16);color:var(--amber)}
-.chip.err{background:rgba(239,68,68,.16);color:var(--red)}
-footer{text-align:center;color:var(--muted);font-size:.75rem;padding:2rem 1rem;border-top:1px solid var(--border)}
+
+/* display font for headings, brand mark */
+h1,h2,h3,header.app .brand .mark,.tile .head .name{
+  font-family:'Space Grotesk','Inter',sans-serif;
+  font-feature-settings:'ss01';
+}
+/* mono for technical data */
+.mono,code,pre,.tile .meta,.proof .grid,.ledger .counts,.list,
+header.app .live,header.app .partners-label,.tile .label,
+.card h3,.card h2{
+  font-feature-settings:'tnum','ss01';
+}
+.tile .meta code,.proof .grid dd code,.proof .grid dd,.ledger .tx-list .id,
+.ledger .tx-list .when,.ledger .counts,.metric-picker button{
+  font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Consolas,monospace;
+}
+
+a{color:inherit}
+
+/* ── header ───────────────────────────────────────────────── */
+header.app{
+  display:flex;align-items:center;justify-content:space-between;gap:1.5rem;
+  padding:10px 22px;border-bottom:1px solid var(--border);
+  background:var(--card);min-height:0;
+}
+header.app .brand{display:flex;align-items:baseline;gap:.55rem;font-weight:700;letter-spacing:-0.018em}
+header.app .brand .mark{font-size:15.5px}
+header.app .brand .sub{color:var(--muted);font-size:12.5px;font-weight:500;font-family:'Inter',sans-serif;letter-spacing:0}
+header.app .header-right{display:flex;align-items:center;gap:18px;min-width:0}
+header.app .live{display:flex;align-items:center;gap:.55rem;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+header.app .live .dot{width:7px;height:7px;border-radius:999px;background:var(--amber);box-shadow:0 0 0 3px oklch(66% .15 70 / .15)}
+header.app .live .dot.on{background:var(--green);box-shadow:0 0 0 3px oklch(56% .16 150 / .18)}
+header.app .live .dot.off{background:var(--red);box-shadow:0 0 0 3px oklch(56% .18 25 / .15)}
+
+/* ── partners badge (dark pill so the white logos render) ── */
+header.app .partners{
+  display:inline-flex;align-items:center;gap:14px;
+  padding:5px 12px 5px 10px;border-radius:8px;
+  background:oklch(26% .025 155);
+  border:1px solid oklch(34% .025 155);
+}
+header.app .partners-label{
+  font-size:9.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  color:oklch(72% .015 155);margin-right:2px;user-select:none;
+}
+header.app .partner{display:inline-flex;align-items:center;line-height:0;text-decoration:none;opacity:.92;transition:opacity .2s var(--ease)}
+header.app .partner:hover,header.app .partner:focus-visible{opacity:1;outline:none}
+header.app .partner:focus-visible{box-shadow:0 0 0 2px oklch(54% .17 245 / .55);border-radius:3px}
+header.app .partner img{height:22px;width:auto;display:block;max-width:140px;object-fit:contain}
+header.app .partner-labeled{gap:6px}
+header.app .partner-name{font-size:11.5px;font-weight:700;color:oklch(88% .01 155);letter-spacing:.02em;white-space:nowrap}
+
+/* ── language switcher ────────────────────────────────────
+   Compact two-button toggle in the header. HR is on the left because
+   it's the default; click to flip to EN. Active button is filled. */
+header.app .lang-switch{
+  display:inline-flex;background:var(--inset);border:1px solid var(--border);
+  border-radius:7px;padding:1px;gap:1px;
+}
+header.app .lang-switch button{
+  background:transparent;border:0;cursor:pointer;
+  font:inherit;font-size:11px;font-weight:600;letter-spacing:.04em;
+  color:var(--muted);padding:4px 9px;border-radius:5px;
+  transition:color .15s var(--ease), background .15s var(--ease);
+}
+header.app .lang-switch button:hover{color:var(--text)}
+header.app .lang-switch button.active{background:var(--accent);color:#fff}
+header.app .lang-switch button:focus-visible{outline:2px solid oklch(54% .17 245 / .55);outline-offset:1px}
+
+/* ── main grid ────────────────────────────────────────────── */
+main{
+  display:grid;
+  grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);
+  grid-template-rows:auto minmax(0,1fr) auto;
+  grid-template-areas:
+    "strip   strip"
+    "signal  ledger"
+    "side    ledger";
+  gap:12px;
+  padding:12px 22px 14px;
+  min-height:0;overflow:hidden;
+}
+
+/* ── status strip ────────────────────────────────────────── */
+.strip{
+  grid-area:strip;
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;
+  background:var(--border);border:1px solid var(--border);border-radius:10px;overflow:hidden;
+}
+/* Each tile uses a 4-row grid so all four tiles align row-by-row regardless
+   of how much meta their renderers emit. Slots: label, head, meta-1, meta-2.
+   Empty slots reserve space rather than collapse. */
+.tile{
+  background:var(--card);padding:11px 14px 12px;
+  display:grid;
+  grid-template-rows:auto auto 1fr auto;
+  gap:5px;
+  border:0;min-width:0;
+}
+.tile .label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--subtle)}
+.tile .head{display:flex;align-items:center;gap:8px;min-height:22px;min-width:0}
+.tile .head .name{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
+.tile .meta{
+  font-size:12px;color:var(--muted);
+  font-variant-numeric:tabular-nums;
+  display:flex;gap:10px;align-items:baseline;
+  flex-wrap:nowrap;overflow:hidden;min-width:0;
+  white-space:nowrap;text-overflow:ellipsis;
+  line-height:1.4;
+}
+.tile .meta-1{align-self:start}
+.tile .meta-2{align-self:end;color:var(--subtle);font-size:11.5px}
+.tile .meta-2:empty::before{content:'\00a0';display:inline-block}
+.tile .meta b{font-weight:600;color:var(--text)}
+.tile .meta a{color:inherit;text-decoration:none;border-bottom:1px dotted var(--border-strong)}
+.tile .meta a:hover{color:var(--accent);border-bottom-color:var(--accent)}
+.tile .meta code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11.5px;background:var(--inset);padding:0 4px;border-radius:3px;border:1px solid var(--border)}
+.proof .grid dd a{color:inherit;text-decoration:none}
+.proof .grid dd a:hover code{color:var(--accent)}
+
+/* ── pill ────────────────────────────────────────────────── */
+.pill{
+  display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;letter-spacing:.02em;
+  padding:2px 8px 2px 6px;border-radius:999px;
+  background:var(--inset);color:var(--muted);border:1px solid var(--border);
+  font-variant-numeric:tabular-nums;
+}
+.pill::before{content:"";width:6px;height:6px;border-radius:999px;background:var(--subtle)}
+.pill.ok{background:var(--green-soft);color:oklch(36% .12 150);border-color:oklch(78% .08 150)}
+.pill.ok::before{background:var(--green)}
+.pill.warn{background:var(--amber-soft);color:oklch(40% .12 70);border-color:oklch(80% .09 70)}
+.pill.warn::before{background:var(--amber)}
+.pill.err{background:var(--red-soft);color:oklch(40% .14 25);border-color:oklch(80% .1 25)}
+.pill.err::before{background:var(--red)}
+.pill.info{background:oklch(94% .04 245);color:oklch(38% .15 245);border-color:oklch(80% .08 245)}
+.pill.info::before{background:var(--accent)}
+.pill.relay{background:var(--pink-soft);color:oklch(38% .14 345);border-color:oklch(80% .09 345)}
+.pill.relay::before{background:var(--pink)}
+
+/* ── card ────────────────────────────────────────────────── */
+.card{
+  background:var(--card);border:1px solid var(--border);border-radius:10px;
+  padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0;min-height:0;
+  transition:border-color .9s var(--ease);
+}
+.card.changed{border-color:var(--accent);transition-duration:0s}
+
+/* Subtle loading indicator for cards waiting on a per-metric fetch.
+   A thin shimmer slides across the top edge so the user knows fresh
+   data is incoming. The card content stays visible the whole time. */
+.card.loading{position:relative;overflow:hidden}
+.card.loading::after{
+  content:'';
+  position:absolute;left:0;top:0;height:2px;width:30%;
+  background:linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation:card-loading 1.1s var(--ease) infinite;
+  pointer-events:none;
+  z-index:2;
+}
+@keyframes card-loading{
+  0%   { transform:translateX(-100%); }
+  100% { transform:translateX(380%);  }
+}
+.card .head{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;min-height:20px}
+.card h2{font-size:13.5px;font-weight:600;letter-spacing:-0.005em}
+.card h3{font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--subtle);margin-bottom:6px}
+.card .head .meta{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+
+/* ── metric picker ─────────────────────────────────────── */
+.metric-picker{display:flex;gap:1px;background:var(--border);border-radius:7px;overflow:hidden;flex-shrink:0}
+.metric-picker button{
+  background:var(--inset);border:none;color:var(--muted);font-size:11px;font-weight:500;
+  padding:4px 10px;cursor:pointer;transition:all .15s var(--ease);white-space:nowrap;
+  font-family:inherit;line-height:1.3;
+}
+.metric-picker button:hover{color:var(--text);background:var(--card)}
+.metric-picker button.active{background:var(--green);color:#fff;font-weight:600}
+
+/* ── signal (forecast + rationale) ──────────────────────── */
+.signal{grid-area:signal;display:grid;grid-template-columns:minmax(0,1.7fr) minmax(220px,260px);grid-template-rows:auto minmax(0,1fr);gap:0;padding:0;overflow:hidden}
+/* Stable 2-row header: row 1 has title + meta (right-aligned, ellipsis),
+   row 2 has the metric picker. No flex-wrap, so changing metric never
+   reflows the header height. */
+.signal>.head{
+  padding:12px 18px 10px;border-bottom:1px solid var(--border);grid-column:1 / -1;
+  display:flex;flex-direction:column;gap:8px;min-width:0;
+}
+.signal>.head .head-row{display:flex;align-items:center;gap:12px;min-width:0}
+.signal>.head .head-row-top h2{flex-shrink:0}
+.signal>.head .head-row-top .meta{
+  margin-left:auto;font-size:12.5px;color:var(--muted);
+  font-variant-numeric:tabular-nums;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;
+}
+.signal>.head .head-row-bottom{align-items:center;flex-wrap:nowrap;overflow:hidden}
+.signal .chart-wrap{grid-column:1;grid-row:2;padding:8px 14px 14px;min-width:0;min-height:0;display:flex}
+.signal canvas{width:100%!important;height:100%!important;min-height:0;flex:1}
+.signal .rationale{
+  grid-column:2;grid-row:2;
+  background:var(--inset);border-left:1px solid var(--border);
+  padding:14px 16px;display:flex;flex-direction:column;gap:8px;min-width:0;min-height:0;
+  font-size:13px;overflow:hidden;
+}
+.signal .rationale h3{margin-bottom:2px;flex:0 0 auto}
+.signal .rationale .decision{font-size:12.5px;line-height:1.5;color:var(--text)}
+.signal .rationale .decision:empty{display:none}
+.signal .rationale .decision code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11.5px;background:var(--card);padding:1px 5px;border-radius:4px;border:1px solid var(--border)}
+.signal .rationale .decision .model-name{
+  font-style:normal;font-weight:600;color:var(--text);
+  border-bottom:1px dotted var(--border-strong);
+  cursor:help;
+}
+.signal .rationale .decision b{font-weight:600;color:var(--text);font-variant-numeric:tabular-nums}
+.signal .rationale dl.meta{display:grid;grid-template-columns:1fr auto;row-gap:4px;column-gap:10px;font-variant-numeric:tabular-nums;margin-top:auto;padding-top:8px;border-top:1px solid var(--border)}
+.signal .rationale dl.meta dt{color:var(--muted);font-size:12px;align-self:center}
+.signal .rationale dl.meta dd{font-size:12.5px;font-weight:500;text-align:right}
+
+/* ── side (input + anomalies side by side) ─────────────── */
+.side{
+  grid-area:side;display:grid;grid-template-columns:1fr 1fr;gap:12px;min-height:0;overflow:hidden;
+}
+.side .card{padding:12px 14px;overflow:hidden}
+.list{display:flex;flex-direction:column;gap:5px;font-variant-numeric:tabular-nums;font-size:12.5px;color:var(--text);min-height:0;overflow:hidden}
+.list .row{display:flex;align-items:baseline;gap:8px;justify-content:space-between}
+.list .row .k{color:var(--muted);font-size:12px}
+.list .row .v{font-weight:500}
+.list .row .v.dim{color:var(--muted);font-weight:400}
+
+/* ── ledger ─────────────────────────────────────────────── */
+.ledger{grid-area:ledger;display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:0;padding:0;overflow:hidden}
+.ledger>.head{padding:14px 16px 10px;border-bottom:1px solid var(--border)}
+.ledger .counts{display:flex;gap:14px;font-variant-numeric:tabular-nums;font-size:12.5px;color:var(--muted);margin-top:4px;flex-wrap:wrap}
+.ledger .counts b{font-weight:600;color:var(--text);font-size:14px;margin-right:2px}
+.ledger .breakdown{display:flex;gap:6px 8px;flex-wrap:wrap;margin-top:8px;align-items:center;font-variant-numeric:tabular-nums}
+.ledger .breakdown:empty{display:none}
+.ledger .breakdown .break-label{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--subtle);margin-right:4px}
+.ledger .breakdown .break-label:not(:first-child){margin-left:8px}
+.ledger .breakdown .break-chip{font-size:11.5px;color:var(--muted);background:var(--inset);border:1px solid var(--border);border-radius:6px;padding:2px 7px;display:inline-flex;align-items:center;gap:5px;cursor:help}
+.ledger .breakdown .break-chip b{color:var(--text);font-weight:600}
+.ledger .breakdown .break-chip i{font-style:italic;color:var(--amber);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em}
+.ledger .breakdown .break-chip.warn{background:var(--amber-soft);border-color:oklch(80% .09 70);color:oklch(40% .12 70)}
+.ledger .breakdown .break-chip.warn b{color:oklch(36% .14 70)}
+.ledger .breakdown .break-chip.err{background:var(--red-soft);border-color:oklch(80% .1 25);color:oklch(40% .14 25)}
+.ledger .breakdown .break-chip.err b{color:oklch(36% .16 25)}
+.ledger .breakdown .break-chip.info{background:oklch(94% .04 245);border-color:oklch(82% .07 245);color:oklch(40% .15 245)}
+.ledger .breakdown .break-chip.info b{color:oklch(36% .17 245)}
+
+/* tx list: parent grid + subgrid rows so all pill columns align across rows */
+.ledger .tx-list{
+  list-style:none;padding:0;margin:0;
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr) auto auto;
+  gap:0;column-gap:10px;
+  overflow:hidden;min-height:0;align-content:start;
+}
+.ledger .tx-list li{
+  display:grid;
+  grid-template-columns:subgrid;
+  grid-column:1 / -1;
+  align-items:center;
+  padding:9px 16px;border-bottom:1px solid var(--border);
+  font-variant-numeric:tabular-nums;font-size:12.5px;
+}
+.ledger .tx-list li:last-child{border-bottom:0}
+.ledger .tx-list li.empty{
+  grid-column:1 / -1;
+  display:flex;justify-content:center;
+  color:var(--muted);text-align:center;padding:24px 16px;
+}
+.ledger .tx-list .when{color:var(--muted);font-size:12px;min-width:54px}
+.ledger .tx-list .id{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.ledger .tx-list .id .src{color:var(--muted);margin-left:8px;font-size:11.5px}
+.ledger .tx-list .id .src.demo{color:oklch(40% .12 70);font-weight:600;background:var(--amber-soft);padding:0 4px;border-radius:3px;font-size:10.5px;letter-spacing:.04em;text-transform:uppercase}
+/* Force a consistent min-width on pills inside tx rows so the column they
+   live in stays the same width across all rows (subgrid handles alignment,
+   min-width handles short labels like "sent" vs "confirmed"). */
+.ledger .tx-list .pill{align-self:center;min-width:88px;justify-content:center}
+
+.proof{
+  border-top:1px solid var(--border);background:var(--inset);
+  padding:10px 16px 10px;display:flex;flex-direction:column;gap:6px;
+}
+.proof .head{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.proof .grid{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:12.5px;font-variant-numeric:tabular-nums}
+.proof .grid dt{color:var(--muted);font-size:12px}
+.proof .grid dd{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.proof .grid dd code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11.5px}
+.proof .proof-links{display:flex;flex-wrap:wrap;gap:14px;margin-top:2px}
+.proof .external{color:var(--accent);font-weight:600;font-size:12.5px;text-decoration:none;display:inline-flex;align-items:center;gap:4px}
+.proof .external:hover{text-decoration:underline}
+.proof .grid dt[title]{cursor:help;border-bottom:1px dotted var(--border-strong);width:max-content}
+
+/* ── responsive budgets ─────────────────────────────────────
+   No-scroll constraint: every breakpoint must fit 100vh.
+   All content must fit without scrolling. Type and spacing scale with viewport
+   so 4K TVs and 1366×768 laptops are both legible.
+   ───────────────────────────────────────────────────────── */
+
+/* tight rationale at narrow desktops */
+@media(max-width:1399px){
+  .signal{grid-template-columns:minmax(0,1.5fr) minmax(210px,240px)}
+}
+
+/* narrow laptop (< 1366×768) — tighten paddings, keep no-scroll */
+@media(max-width:1366px) and (max-height:820px){
+  body{font-size:13px}
+  main{padding:10px 18px 12px;gap:10px}
+  header.app{padding:7px 18px}
+  header.app .partners{padding:4px 10px 4px 8px;gap:11px}
+  header.app .partner img{height:18px;max-width:118px}
+  header.app .partner-name{font-size:10px}
+  header.app .partners-label{font-size:9px}
+  .tile{padding:9px 12px 10px}
+  .card{padding:12px 14px}
+  .signal>.head{padding:11px 14px 6px}
+  .signal .chart-wrap{padding:6px 10px 10px}
+  .signal .rationale{padding:11px 14px;gap:6px}
+  .signal .rationale dl{row-gap:3px}
+  .ledger>.head{padding:11px 14px 8px}
+  .ledger .tx-list li{padding:7px 14px;font-size:12px}
+  .proof{padding:8px 14px 8px}
+  .proof .grid{gap:3px 10px}
+}
+
+/* desktop default — already covered above */
+
+/* large desktop (~1600–1899) — a touch more air */
+@media(min-width:1600px){
+  body{font-size:14.5px}
+  main{padding:14px 28px 18px;gap:14px}
+  header.app{padding:14px 28px}
+  .card{padding:16px 18px}
+  .tile{padding:13px 16px 14px}
+  .ledger .tx-list li{padding:10px 18px;font-size:13px}
+}
+
+/* TV / wallboard (≥1900) — readable from a step back */
+@media(min-width:1900px){
+  body{font-size:15.5px}
+  main{padding:18px 32px 22px;gap:16px}
+  header.app{padding:14px 32px}
+  header.app .brand .mark{font-size:17px}
+  header.app .brand .sub{font-size:14px}
+  header.app .live{font-size:13.5px}
+  header.app .partners{padding:6px 14px 6px 12px;gap:18px}
+  header.app .partner img{height:28px;max-width:170px}
+  header.app .partner-name{font-size:13px}
+  header.app .partners-label{font-size:10.5px}
+  .tile{padding:14px 18px 16px;gap:6px}
+  .tile .label{font-size:12px}
+  .tile .head .name{font-size:15px}
+  .tile .meta{font-size:13px;gap:14px}
+  .card{padding:18px 20px;gap:12px;border-radius:12px}
+  .card h2{font-size:15px}
+  .card h3{font-size:12.5px}
+  .pill{font-size:12px;padding:3px 10px 3px 8px}
+  .pill::before{width:7px;height:7px}
+  .signal>.head{padding:18px 22px 10px}
+  .signal .chart-wrap{padding:10px 18px 18px}
+  .signal{grid-template-columns:minmax(0,1.7fr) minmax(280px,320px)}
+  .metric-picker button{font-size:12px;padding:5px 12px}
+  .signal .rationale{padding:18px 20px;font-size:14px;gap:10px}
+  .signal .rationale p.lede{font-size:13.5px}
+  .signal .rationale dt{font-size:13px}
+  .signal .rationale dd{font-size:13.5px}
+  .ledger>.head{padding:18px 20px 12px}
+  .ledger .counts{font-size:13.5px}
+  .ledger .counts b{font-size:16px}
+  .ledger .tx-list li{padding:12px 20px;font-size:13.5px;gap:14px}
+  .ledger .tx-list .when{font-size:13px;min-width:64px}
+  .proof{padding:14px 20px 18px;gap:10px}
+  .proof .grid{font-size:13.5px;gap:6px 14px}
+  .proof .external{font-size:13.5px}
+  .list{font-size:13.5px;gap:7px}
+  .list .row .k{font-size:13px}
+}
+
+/* 4K TV (≥2600) — generous, designed to be read across a room */
+@media(min-width:2600px){
+  body{font-size:18px}
+  main{padding:24px 44px 28px;gap:22px}
+  header.app{padding:18px 44px}
+  header.app .brand .mark{font-size:21px}
+  header.app .brand .sub{font-size:17px}
+  header.app .live{font-size:16px}
+  header.app .partners{padding:8px 18px 8px 16px;gap:22px;border-radius:10px}
+  header.app .partner img{height:36px;max-width:220px}
+  header.app .partner-name{font-size:15px}
+  header.app .partners-label{font-size:12px}
+  .tile{padding:18px 24px 20px;gap:8px}
+  .tile .label{font-size:14px;letter-spacing:.08em}
+  .tile .head .name{font-size:18px}
+  .tile .meta{font-size:15.5px;gap:18px}
+  .card{padding:22px 26px;gap:14px;border-radius:14px}
+  .card h2{font-size:18px}
+  .card h3{font-size:14.5px}
+  .pill{font-size:13.5px;padding:4px 12px 4px 10px}
+  .pill::before{width:8px;height:8px}
+  .signal>.head{padding:22px 28px 14px}
+  .signal .chart-wrap{padding:14px 24px 24px}
+  .signal{grid-template-columns:minmax(0,1.8fr) minmax(360px,420px)}
+  .metric-picker button{font-size:14px;padding:6px 14px}
+  .signal .rationale{padding:22px 26px;font-size:16px;gap:12px}
+  .signal .rationale p.lede{font-size:15.5px;line-height:1.55}
+  .signal .rationale dt{font-size:15px}
+  .signal .rationale dd{font-size:15.5px}
+  .ledger>.head{padding:22px 26px 14px}
+  .ledger .counts{font-size:16px;gap:18px}
+  .ledger .counts b{font-size:19px}
+  .ledger .tx-list li{padding:14px 26px;font-size:15.5px;gap:18px}
+  .ledger .tx-list .when{font-size:15px;min-width:78px}
+  .proof{padding:18px 26px 24px;gap:12px}
+  .proof .grid{font-size:15.5px;gap:8px 18px}
+  .proof .external{font-size:15.5px}
+  .list{font-size:15.5px;gap:9px}
+  .list .row .k{font-size:15px}
+}
+
+/* tablet / single-column fallback (<1100) — scrolling allowed,
+   the no-scroll contract only applies to laptop+ widths */
+@media(max-width:1100px){
+  html,body{height:auto;overflow:auto}
+  body{height:auto}
+  main{grid-template-columns:1fr;grid-template-rows:auto auto auto auto;
+    grid-template-areas:"strip" "signal" "side" "ledger";
+    overflow:visible;padding-bottom:18px}
+  .signal{grid-template-columns:1fr;grid-template-rows:auto minmax(240px,42vh) auto}
+  .signal .rationale{grid-column:1;grid-row:auto;border-left:0;border-top:1px solid var(--border)}
+  .ledger{min-height:420px}
+}
+@media(max-width:720px){
+  header.app{flex-direction:column;align-items:flex-start;gap:8px}
+  header.app .header-right{flex-direction:row-reverse;flex-wrap:wrap;width:100%;justify-content:space-between;gap:10px}
+  header.app .partners{padding:4px 10px}
+  header.app .partner img{height:18px;max-width:110px}
+  header.app .partner-name{font-size:10px}
+  .strip{grid-template-columns:1fr 1fr}
+  .side{grid-template-columns:1fr}
+}
+@media(prefers-reduced-motion:reduce){
+  .card.changed{transition-duration:.01ms}
+  .card.loading::after{animation:none;opacity:.4}
+}
+
+.muted{color:var(--muted)}
+.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.skeleton{color:var(--subtle);font-style:italic;font-size:12.5px}
 </style>
 </head>
 <body>
-<header>
-  <h1>BIOS Multi-level Platform</h1>
-  <p>Tracking of meteo data and electricity production: Prediction Analysis and Stealth Blockchain Integration services.</p>
+<header class="app">
+  <div class="brand">
+    <span class="mark">BIOS Multi-level Platform</span>
+  </div>
+  <div class="header-right">
+    <div class="partners" aria-label="In partnership with">
+      <span class="partners-label" data-i18n="partners.with">with</span>
+      <a class="partner" href="https://inkubator.hr" target="_blank" rel="noopener noreferrer" title="Inkubator Osijek">
+        <img src="https://inkubator.hr/assets/logo-85a430495012aa1dbf09d6cddc6ee72b86aa6707cb25016e86c988c6b90c7c7b.png" alt="Inkubator Osijek" loading="lazy">
+      </a>
+      <a class="partner partner-labeled" href="https://www.osijek.hr" target="_blank" rel="noopener noreferrer" title="Grad Osijek">
+        <img src="https://www.osijek.hr/wp-content/themes/osijek/img/logo.png" alt="Grad Osijek" loading="lazy">
+        <span class="partner-name">Grad Osijek</span>
+      </a>
+    </div>
+    <div class="lang-switch" role="group" aria-label="Language">
+      <button type="button" data-lang="hr">HR</button>
+      <button type="button" data-lang="en">EN</button>
+    </div>
+    <div class="live"><span class="dot" id="liveDot"></span><span id="liveStatus" data-i18n="live.connecting">connecting</span></div>
+  </div>
 </header>
 
 <main>
-  <div class="grid">
-    <section class="card">
-      <h2>Prediction Analysis</h2>
-      <p>Runs a short-term forecast from BIOS/Mars2 data. The service stores only derived forecast artifacts.</p>
-      <div class="row">
-        <input id="predictionBase" aria-label="Prediction service URL">
-        <select id="predictionSource">
-          <option value="OS1BIOS">OS1BIOS</option>
-          <option value="OS2BIOS">OS2BIOS</option>
-          <option value="SOLAXBIOS">SOLAXBIOS</option>
-        </select>
-        <select id="predictionMetric">
-          <option value="PM2_5">PM2.5</option>
-          <option value="Temperatura">Temperature</option>
-          <option value="Inverter_AC_power_total">AC Power</option>
-        </select>
-        <button id="runPrediction">Run Forecast</button>
-      </div>
-      <div class="result" id="predictionSummary">Checking service...</div>
-    </section>
+  <section class="strip" aria-label="System status">
+    <article class="tile" id="tileSource">
+      <span class="label" data-i18n="tile.source.label">Source data</span>
+      <div class="head"><span class="name" data-i18n="tile.source.name">Mars2 sensors</span><span id="srcPill" class="pill" data-i18n="pill.checking">checking</span></div>
+      <div class="meta meta-1" id="srcMeta1"><span class="skeleton" data-i18n="skeleton.first_cycle">awaiting first cycle</span></div>
+      <div class="meta meta-2" id="srcMeta2"></div>
+    </article>
+    <article class="tile" id="tilePrediction">
+      <span class="label" data-i18n="tile.forecasting.label">Forecasting</span>
+      <div class="head"><span class="name" data-i18n="tile.forecasting.name">Forecast cycle</span><span id="predPill" class="pill" data-i18n="pill.checking">checking</span></div>
+      <div class="meta meta-1" id="predMeta1"><span class="skeleton" data-i18n="skeleton.first_cycle">awaiting first cycle</span></div>
+      <div class="meta meta-2" id="predMeta2"></div>
+    </article>
+    <article class="tile" id="tileBlockchain">
+      <span class="label" data-i18n="tile.relay.label">Audit relay</span>
+      <div class="head"><span class="name" data-i18n="tile.relay.name">Anchor cycle</span><span id="bcPill" class="pill" data-i18n="pill.checking">checking</span></div>
+      <div class="meta meta-1" id="bcMeta1"><span class="skeleton" data-i18n="skeleton.first_cycle">awaiting first cycle</span></div>
+      <div class="meta meta-2" id="bcMeta2"></div>
+    </article>
+    <article class="tile" id="tileStealth">
+      <span class="label" data-i18n="tile.ledger.label">Audit ledger</span>
+      <div class="head"><span class="name" data-i18n="tile.ledger.name">Stealth mainnet</span><span id="chPill" class="pill" data-i18n="pill.checking">checking</span></div>
+      <div class="meta meta-1" id="chMeta1"><span class="skeleton" data-i18n="skeleton.ledger">awaiting ledger</span></div>
+      <div class="meta meta-2" id="chMeta2"></div>
+    </article>
+  </section>
 
-    <section class="card">
-      <h2>Forecast Result</h2>
-      <canvas id="forecastChart"></canvas>
+  <section class="card signal" id="cardSignal" aria-label="Forecast">
+    <header class="head">
+      <div class="head-row head-row-top">
+        <h2 data-i18n="card.forecast.title">Forecast</h2>
+        <div class="meta" id="signalMeta" data-i18n="card.forecast.empty">no metric loaded</div>
+      </div>
+      <div class="head-row head-row-bottom">
+        <div class="metric-picker" id="metricPicker"></div>
+      </div>
+    </header>
+    <div class="chart-wrap"><canvas id="forecastChart" role="img" aria-label="Forecast chart with confidence bounds"></canvas></div>
+    <aside class="rationale" aria-label="Method">
+      <h3 data-i18n="card.method.title">How this was computed</h3>
+      <div class="decision" id="ratSummary"><span class="skeleton" data-i18n="rationale.first_cycle">awaiting first cycle</span></div>
+      <dl class="meta">
+        <dt data-i18n="card.method.computed">Last computed</dt><dd id="rationaleComputed"><span class="skeleton">--</span></dd>
+        <dt data-i18n="card.method.next">Next cycle</dt><dd id="rationaleNext"><span class="skeleton">--</span></dd>
+      </dl>
+    </aside>
+  </section>
+
+  <div class="side">
+    <section class="card" id="cardQuality" aria-label="Input data">
+      <div class="head"><h2 data-i18n="card.input.title">Input data</h2><span id="qualityPill" class="pill" data-i18n="pill.checking">checking</span></div>
+      <div class="list" id="qualityList"><div class="skeleton" data-i18n="skeleton.first_cycle">awaiting first cycle</div></div>
+    </section>
+    <section class="card" id="cardAnomalies" aria-label="Anomalies">
+      <div class="head"><h2 data-i18n="card.anomalies.title">Anomalies</h2><span id="anomalyPill" class="pill" data-i18n="pill.checking">checking</span></div>
+      <div class="list" id="anomalyList"><div class="skeleton" data-i18n="skeleton.first_scan">awaiting first scan</div></div>
     </section>
   </div>
 
-  <div class="grid">
-    <section class="card">
-      <h2>Blockchain Event Anchor</h2>
-      <p>Encodes a compact 13-byte event and relays it to Stealth. Mock mode is suitable for delivery demos.</p>
-      <div class="row">
-        <input id="blockchainBase" aria-label="Blockchain service URL">
-        <input id="blockchainDevice" value="0x0A1C" aria-label="Device id">
-        <input id="blockchainValue" value="250" aria-label="Event value">
-        <button id="anchorEvent">Anchor Event</button>
+  <section class="card ledger" id="cardLedger" aria-label="Audit ledger">
+    <header class="head">
+      <h2 data-i18n="card.ledger.title">Audit ledger</h2>
+      <div class="counts" id="ledgerCounts"><span class="skeleton" data-i18n="skeleton.first_anchor">awaiting first anchor</span></div>
+      <div class="breakdown" id="ledgerBreakdown" aria-label="Anchored entries broken down by event kind and source"></div>
+    </header>
+    <ol class="tx-list" id="txList"><li class="empty" data-i18n="ledger.no_entries">no proofs anchored yet</li></ol>
+    <aside class="proof" id="proofPanel">
+      <div class="head">
+        <h3 style="margin:0" data-i18n="card.proof.title">Latest proof</h3>
+        <span id="proofPill" class="pill">--</span>
       </div>
-      <div class="result" id="blockchainSummary">Checking service...</div>
-    </section>
-
-    <section class="card">
-      <h2>Encoded Payload</h2>
-      <p class="mono">device_id(2) + timestamp(4) + event_code(1) + value(2) + crc(4) = 13 bytes</p>
-      <div class="result mono" id="blockchainPayload">No event anchored yet.</div>
-    </section>
-  </div>
+      <dl class="grid" id="proofGrid">
+        <dt data-i18n="proof.value">value</dt><dd id="proofValue">--</dd>
+        <dt data-i18n="proof.confirmed">confirmed</dt><dd id="proofConfirmedTs">--</dd>
+        <dt data-i18n="proof.tx">tx</dt><dd id="proofTx">--</dd>
+        <dt data-i18n="proof.block">block</dt><dd id="proofBlock">--</dd>
+      </dl>
+      <div class="proof-links">
+        <a class="external" id="monitorLink" href="#" target="_blank" rel="noopener noreferrer" hidden data-i18n="proof.open_tx">Open tx in Stealth Monitor →</a>
+        <a class="external" id="blockMonitorLink" href="#" target="_blank" rel="noopener noreferrer" hidden data-i18n="proof.open_block">Open block →</a>
+      </div>
+    </aside>
+  </section>
 </main>
 
-<footer>
-  Existing production-data dashboard remains the Mars2 API demonstration. This dashboard is for deployable BIOS multi-level platform services.
-</footer>
-
 <script>
-const DEFAULT_PREDICTION_API = localStorage.getItem('predictionApi') || `${location.origin.replace(/\/$/, '')}/prediction`;
-const DEFAULT_BLOCKCHAIN_API = localStorage.getItem('blockchainApi') || `${location.origin.replace(/\/$/, '')}/blockchain`;
-let chart;
-
 const $ = id => document.getElementById(id);
+const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
-async function getJson(base, path) {
-  const res = await fetch(`${base.replace(/\/$/, '')}${path}`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+const chartState = { instance: null, label: '', unit: '' };
+const stableSig = new Map();
+const counts = { tx: { total: 0, confirmed: 0, sent: 0 } };
+
+/* ── i18n ──────────────────────────────────────────────────
+ * Two-language support (Croatian / English). Croatian is the default
+ * because the operators are based in Osijek. The switcher in the header
+ * lets anyone reading over their shoulder flip to English on demand.
+ * Strings live under flat keys; `t(key, params)` does {placeholder} fills.
+ * Static HTML carries `data-i18n` attributes so a single applyStatic()
+ * pass updates the DOM on language toggle without re-rendering data. */
+const I18N = {
+  hr: {
+    // header / shell
+    'partners.with':        'partneri',
+    'live.connecting':      'spajanje',
+    'live.last_update':     'uživo · ažurirano u {time}',
+    'live.disconnected':    'prekinuto u {time}, ponovni pokušaj',
+    'lang.label':           'Jezik',
+
+    // tiles
+    'tile.source.label':    'Izvor podataka',
+    'tile.source.name':     'Mars2 senzori',
+    'tile.forecasting.label':'Predikcija',
+    'tile.forecasting.name': 'Ciklus predikcije',
+    'tile.relay.label':     'Zapisivanje',
+    'tile.relay.name':      'Ciklus zapisa',
+    'tile.ledger.label':    'Registar zapisa',
+    'tile.ledger.name':     'Stealth mainnet',
+
+    // cards
+    'card.forecast.title':  'Predikcija',
+    'card.forecast.empty':  'metrika nije učitana',
+    'card.method.title':    'Kako je izračunato',
+    'card.method.computed': 'Izračunato',
+    'card.method.next':     'Sljedeći ciklus',
+    'card.input.title':     'Ulazni podaci',
+    'card.anomalies.title': 'Zdravlje senzora',
+    'card.ledger.title':    'Registar zapisa',
+    'card.proof.title':     'Posljednji zapis',
+
+    // pills / status
+    'pill.checking':        'provjera',
+    'pill.live':            'uživo',
+    'pill.partial':         'djelomično',
+    'pill.warming_up':      'pokretanje',
+    'pill.behind':          'zaostatak {age}',
+    'pill.out_of_sla':      'izvan SLA · {age}',
+    'pill.awaiting':        'na čekanju',
+    'pill.demo':            'demo',
+    'pill.offline':         'nedostupno',
+    'pill.throttled':       'usporeno {seconds}s',
+    'pill.clear':           'sve u redu',
+    'pill.flagged_one':     '{n} metrika označena',
+    'pill.flagged_many':    '{n} metrika označeno',
+    'pill.signals_one':     '{n} upozorenje',
+    'pill.signals_many':    '{n} upozorenja',
+
+    // skeletons
+    'skeleton.first_cycle': 'čekam prvi ciklus',
+    'skeleton.first_scan':  'čekam prvi skeniranje',
+    'skeleton.first_anchor':'čekam prvi zapis',
+    'skeleton.ledger':      'čekam stanje',
+
+    // source tile
+    'source.stations':      '{n} postaja',
+    'source.samples':       '{got}/{expected} uzoraka · {gap}% gap',
+    'source.last_reading':  'zadnje očitanje prije {age}',
+    'source.offline_files': 'koristim offline datoteke',
+    'source.past_sla':      'izvan 24h SLA',
+
+    // forecasting tile
+    'forecast.metrics':     'praćenih {n}',
+    'forecast.every':       'svakih {interval}m',
+    'forecast.last':        'zadnje {time}',
+    'forecast.next':        'sljedeće {time}',
+
+    // relay tile
+    'relay.anchors_one':    '{n} zapis',
+    'relay.anchors_many':   '{n} zapisa',
+    'relay.confirmed':      '{c} potvrđeno · {s} poslano',
+    'relay.every_s':        'svakih {interval}s',
+    'relay.last':           'zadnje {time}',
+
+    // ledger tile
+    'ledger.block':         'blok #{height}',
+    'ledger.seen':          'viđeno prije {time}',
+    'ledger.no_head':       'još nema vrha lanca',
+    'ledger.recovering':    'oporavak',
+    'ledger.anchoring_live':'zapisivanje aktivno',
+    'ledger.anchoring_armed':'zapisivanje spremno',
+    'ledger.broadcast_off': ', emitiranje isključeno',
+    'ledger.no_balance':    ', nema raspoloživog stanja',
+    'ledger.anchoring_off': 'zapisivanje nije spremno',
+    'ledger.no_connection': 'veza nije podešena',
+    'ledger.demo_mode':     'demo način',
+
+    // input data card
+    'input.source':         'izvor',
+    'input.last_reading':   'zadnje očitanje',
+    'input.samples':        'uzoraka',
+    'input.expected':       'očekivano',
+    'input.gap':            'praznine',
+    'input.sla_window':     'SLA prozor',
+    'input.sla_format':     '{window} · {pct}% dostupnost',
+    'input.action':         'napomena',
+    'input.note':           'info',
+    'input.action.out_files':'Posljednje očitanje je staro {age}, izvan 24h SLA. Čitam offline datoteke; podesite live Mars2 API za svježe podatke.',
+    'input.action.out':     'Posljednje očitanje je staro {age}, izvan 24h SLA. Postaje su možda offline.',
+    'input.note.behind':    'Posljednje očitanje je staro {age}. Unutar 24h SLA prozora; cilj svježine je 30m. Podaci se osvježavaju automatski sa svakim izvještajem postaje.',
+
+    // anomalies
+    'anomalies.clear':      'svi senzori rade normalno',
+    'anomalies.count_one':  '{n} očitanje',
+    'anomalies.count_many': '{n} očitanja',
+    'anomalies.soiling_warn':'inverter kasni {min}m za senzorima zračenja',
+    'anomalies.soiling_err':'inverter kasni {min}m za senzorima zračenja, moguć kvar',
+    'anomalies.soiling_label':'Solarna elektrana · čišćenje panela',
+
+    // ledger card
+    'ledger.proofs_total_one':'{n} zapis ukupno',
+    'ledger.proofs_total_many':'{n} zapisa ukupno',
+    'ledger.confirmed_count':'{n} potvrđeno',
+    'ledger.sent_count':    '{n} poslano',
+    'ledger.relay':         'relej {mode}',
+    'ledger.by_kind':       'po vrsti',
+    'ledger.by_source':     'po izvoru',
+    'ledger.no_entries':    'još nema zapisa',
+    'ledger.demo':          'demo',
+    'ledger.demo_tooltip':  'Sintetički demo događaji s tvrdo kodiranim vrijednostima, generirani svaki ciklus. Postavite BLOCKCHAIN_EVENT_SOURCE=prediction da onemogućite.',
+
+    // event labels
+    'event.data_sample':    'uzorak podataka',
+    'event.quality_change': 'promjena kvalitete',
+    'event.forecast':       'prognoza',
+    'event.anomaly':        'anomalija',
+    'event.sla_breach':     'SLA prekršaj',
+    'event.sla_recovered':  'SLA oporavljen',
+    'event.export_refresh': 'osvježenje izvoza',
+    'event.ok_ping':        'ok ping',
+    'event.alarm':          'alarm',
+    'event.export':         'izvoz',
+    'event.config':         'konfiguracija',
+    'event.critical':       'kritično',
+
+    // proof
+    'proof.value':          'vrijednost',
+    'proof.confirmed':      'potvrđeno',
+    'proof.tx':             'tx',
+    'proof.block':          'blok',
+    'proof.awaiting_block': 'čekam blok',
+    'proof.pending':        'na čekanju',
+    'proof.failed':         'neuspjeh',
+    'proof.sent':           'poslano',
+    'proof.confirmations':  '{n}x',
+    'proof.no_payload':     'nema podataka',
+    'proof.open_tx':        'Otvori tx u Stealth Monitoru →',
+    'proof.open_block':     'Otvori blok →',
+
+    // tx status (per-row pills in the ledger)
+    'tx.status.queued':       'red čekanja',
+    'tx.status.submitting':   'šalje se',
+    'tx.status.sent':         'poslano',
+    'tx.status.confirmed':    'potvrđeno',
+    'tx.status.failed':       'neuspjeh',
+    'tx.status.retrying':     'pokušaj',
+    'tx.status.encoded':      'kodirano',
+    'tx.status.pending':      'na čekanju',
+    'tx.status.deferred':     'odgođeno',
+
+    // rationale
+    'rationale.first_cycle':'čekam prvi ciklus',
+    'rationale.flat_mean':  'Zadržano na prosjeku ulaza. Tek {n} očitanja, premalo za testiranje alternativa.',
+    'rationale.picked_with_loser': 'Odabran model {winner} ispred modela {loser} s {lift} manjom pogreškom (±{error}).',
+    'rationale.picked':     'Odabran model {winner} (pogreška ±{error}).',
+    'rationale.trained':    'Treniran na {n} očitanja kroz {span}h{holdout}.',
+    'rationale.holdout':    '; {n} zadržano za bodovanje',
+    'rationale.next':       'Sljedećih {h}h: {min} do {max}.',
+    'rationale.range':      'Raspon {min} do {max}.',
+
+    // model labels (friendly Croatian names)
+    'model.daily':          'dnevni ritam',
+    'model.trend':          'trend linija',
+    'model.flat':           'ravan prosjek',
+
+    // metric picker (friendly names)
+    'metric.PM2_5':         'Kvaliteta zraka (PM2.5)',
+    'metric.PM10':          'Čestice (PM10)',
+    'metric.CAQI':          'Indeks kvalitete zraka',
+    'metric.Temperatura':   'Temperatura',
+    'metric.Grid_power_total':       'Mrežna snaga',
+    'metric.Inverter_AC_power_total':'Solarna snaga',
+
+    // footer / misc
+    'misc.unknown_source':  'nepoznat izvor',
+    'misc.connection_error':'greška u vezi',
+  },
+  en: {
+    'partners.with':        'with',
+    'live.connecting':      'connecting',
+    'live.last_update':     'live · last update {time}',
+    'live.disconnected':    'disconnected at {time}, retrying',
+    'lang.label':           'Language',
+
+    'tile.source.label':    'Source data',
+    'tile.source.name':     'Mars2 sensors',
+    'tile.forecasting.label':'Forecasting',
+    'tile.forecasting.name':'Forecast cycle',
+    'tile.relay.label':     'Audit relay',
+    'tile.relay.name':      'Anchor cycle',
+    'tile.ledger.label':    'Audit ledger',
+    'tile.ledger.name':     'Stealth mainnet',
+
+    'card.forecast.title':  'Forecast',
+    'card.forecast.empty':  'no metric loaded',
+    'card.method.title':    'How this was computed',
+    'card.method.computed': 'Last computed',
+    'card.method.next':     'Next cycle',
+    'card.input.title':     'Input data',
+    'card.anomalies.title': 'Sensor health',
+    'card.ledger.title':    'Audit ledger',
+    'card.proof.title':     'Latest proof',
+
+    'pill.checking':        'checking',
+    'pill.live':            'live',
+    'pill.partial':         'partial',
+    'pill.warming_up':      'warming up',
+    'pill.behind':          '{age} behind',
+    'pill.out_of_sla':      'out of SLA · {age}',
+    'pill.awaiting':        'awaiting',
+    'pill.demo':            'demo',
+    'pill.offline':         'offline',
+    'pill.throttled':       'throttled {seconds}s',
+    'pill.clear':           'all clear',
+    'pill.flagged_one':     '{n} metric flagged',
+    'pill.flagged_many':    '{n} metrics flagged',
+    'pill.signals_one':     '{n} warning',
+    'pill.signals_many':    '{n} warnings',
+
+    'skeleton.first_cycle': 'awaiting first cycle',
+    'skeleton.first_scan':  'awaiting first scan',
+    'skeleton.first_anchor':'awaiting first anchor',
+    'skeleton.ledger':      'awaiting ledger',
+
+    'source.stations':      '{n} stations',
+    'source.samples':       '{got}/{expected} samples · {gap}% gap',
+    'source.last_reading':  'last reading {age} ago',
+    'source.offline_files': 'using offline files',
+    'source.past_sla':      'past 24h SLA',
+
+    'forecast.metrics':     '{n} tracked',
+    'forecast.every':       'every {interval}m',
+    'forecast.last':        'last {time}',
+    'forecast.next':        'next {time}',
+
+    'relay.anchors_one':    '{n} anchor',
+    'relay.anchors_many':   '{n} anchors',
+    'relay.confirmed':      '{c} confirmed · {s} sent',
+    'relay.every_s':        'every {interval}s',
+    'relay.last':           'last {time}',
+
+    'ledger.block':         'block #{height}',
+    'ledger.seen':          'seen {time} ago',
+    'ledger.no_head':       'no chain head yet',
+    'ledger.recovering':    'awaiting recovery',
+    'ledger.anchoring_live':'anchoring live',
+    'ledger.anchoring_armed':'anchoring armed',
+    'ledger.broadcast_off': ', broadcast disabled',
+    'ledger.no_balance':    ', no spendable balance',
+    'ledger.anchoring_off': 'anchoring not ready',
+    'ledger.no_connection': 'connection not configured',
+    'ledger.demo_mode':     'demo mode',
+
+    'input.source':         'source',
+    'input.last_reading':   'last reading',
+    'input.samples':        'samples',
+    'input.expected':       'expected',
+    'input.gap':            'gap',
+    'input.sla_window':     'SLA window',
+    'input.sla_format':     '{window} · {pct}% available',
+    'input.action':         'action',
+    'input.note':           'note',
+    'input.action.out_files':'Latest reading is {age} old, beyond the 24h SLA. Reading offline export files; configure live Mars2 API for fresh data.',
+    'input.action.out':     'Latest reading is {age} old, beyond the 24h SLA. Stations may be offline.',
+    'input.note.behind':    'Latest reading is {age} old. Within the 24h SLA window; live target is 30m. Data refreshes automatically with each station report.',
+
+    'anomalies.clear':      'all sensors reporting normally',
+    'anomalies.count_one':  '{n} reading',
+    'anomalies.count_many': '{n} readings',
+    'anomalies.soiling_warn':'inverter {min}m behind irradiance sensors',
+    'anomalies.soiling_err':'inverter {min}m behind irradiance sensors, possible fault',
+    'anomalies.soiling_label':'Solar plant · panel soiling check',
+
+    'ledger.proofs_total_one':'{n} proof total',
+    'ledger.proofs_total_many':'{n} proofs total',
+    'ledger.confirmed_count':'{n} confirmed',
+    'ledger.sent_count':    '{n} sent',
+    'ledger.relay':         'relay {mode}',
+    'ledger.by_kind':       'by kind',
+    'ledger.by_source':     'by source',
+    'ledger.no_entries':    'no proofs anchored yet',
+    'ledger.demo':          'demo',
+    'ledger.demo_tooltip':  'Synthetic demo events with hardcoded values, generated every cycle. Set BLOCKCHAIN_EVENT_SOURCE=prediction to disable.',
+
+    'event.data_sample':    'data sample',
+    'event.quality_change': 'quality change',
+    'event.forecast':       'forecast',
+    'event.anomaly':        'anomaly',
+    'event.sla_breach':     'SLA breach',
+    'event.sla_recovered':  'SLA recovered',
+    'event.export_refresh': 'export refresh',
+    'event.ok_ping':        'ok ping',
+    'event.alarm':          'alarm',
+    'event.export':         'export',
+    'event.config':         'config',
+    'event.critical':       'critical',
+
+    'proof.value':          'value',
+    'proof.confirmed':      'confirmed',
+    'proof.tx':             'tx',
+    'proof.block':          'block',
+    'proof.awaiting_block': 'awaiting block',
+    'proof.pending':        'pending',
+    'proof.failed':         'failed',
+    'proof.sent':           'sent',
+    'proof.confirmations':  '{n}x',
+    'proof.no_payload':     'no payload',
+    'proof.open_tx':        'Open tx in Stealth Monitor →',
+    'proof.open_block':     'Open block →',
+
+    'tx.status.queued':       'queued',
+    'tx.status.submitting':   'submitting',
+    'tx.status.sent':         'sent',
+    'tx.status.confirmed':    'confirmed',
+    'tx.status.failed':       'failed',
+    'tx.status.retrying':     'retrying',
+    'tx.status.encoded':      'encoded',
+    'tx.status.pending':      'pending',
+    'tx.status.deferred':     'deferred',
+
+    'rationale.first_cycle':'awaiting first cycle',
+    'rationale.flat_mean':  'Held flat at the input mean. Only {n} readings so far, not enough to test alternatives.',
+    'rationale.picked_with_loser': 'Picked the {winner} model over the {loser} model with {lift} lower error (±{error}).',
+    'rationale.picked':     'Picked the {winner} model (error ±{error}).',
+    'rationale.trained':    'Trained on {n} readings over {span}h{holdout}.',
+    'rationale.holdout':    '; {n} held back for scoring',
+    'rationale.next':       'Next {h}h: {min} to {max}.',
+    'rationale.range':      'Range {min} to {max}.',
+
+    'model.daily':          'daily-rhythm',
+    'model.trend':          'trend-line',
+    'model.flat':           'flat average',
+
+    'metric.PM2_5':         'Air quality (PM2.5)',
+    'metric.PM10':          'Particles (PM10)',
+    'metric.CAQI':          'Air quality index',
+    'metric.Temperatura':   'Temperature',
+    'metric.Grid_power_total':       'Grid power',
+    'metric.Inverter_AC_power_total':'Solar output',
+
+    'misc.unknown_source':  'unknown source',
+    'misc.connection_error':'connection error',
+  },
+};
+
+let currentLang = (() => {
+  try { return localStorage.getItem('bios.lang') || 'hr'; } catch { return 'hr'; }
+})();
+
+function t(key, params) {
+  const dict = I18N[currentLang] || I18N.hr;
+  let str = dict[key];
+  if (str === undefined) str = I18N.en[key] !== undefined ? I18N.en[key] : key;
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      str = str.split(`{${k}}`).join(String(v));
+    }
+  }
+  return str;
 }
 
-async function postJson(base, path, body) {
-  const res = await fetch(`${base.replace(/\/$/, '')}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+// Apply translations to all elements with data-i18n attributes. Called on
+// load and on every language switch. Static-only; dynamic strings are
+// re-rendered through the regular rerender* paths.
+function applyStaticTranslations() {
+  document.documentElement.lang = currentLang;
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    el.textContent = t(key);
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  document.querySelectorAll('[data-i18n-title]').forEach(el => {
+    const key = el.getAttribute('data-i18n-title');
+    el.title = t(key);
+  });
+  // Update language switcher active state
+  document.querySelectorAll('[data-lang]').forEach(b => {
+    b.classList.toggle('active', b.dataset.lang === currentLang);
+  });
 }
 
-function renderForecast(points) {
-  if (chart) chart.destroy();
-  chart = new Chart($('forecastChart'), {
-    type: 'line',
-    data: {
-      datasets: [
-        { label: 'Forecast', data: points.map(p => ({ x: new Date(p.timestamp * 1000), y: p.value })), borderColor: '#22c55e', backgroundColor: '#22c55e18', fill: true, pointRadius: 0 },
-        { label: 'Lower', data: points.map(p => ({ x: new Date(p.timestamp * 1000), y: p.lower })), borderColor: '#8b8fa3', pointRadius: 0 },
-        { label: 'Upper', data: points.map(p => ({ x: new Date(p.timestamp * 1000), y: p.upper })), borderColor: '#8b8fa3', pointRadius: 0 },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      scales: {
-        x: { type: 'time', ticks: { color: '#8b8fa3' }, grid: { color: 'rgba(46,49,72,.5)' } },
-        y: { ticks: { color: '#8b8fa3' }, grid: { color: 'rgba(46,49,72,.5)' } },
+function setLanguage(lang) {
+  if (lang !== 'hr' && lang !== 'en') return;
+  currentLang = lang;
+  try { localStorage.setItem('bios.lang', lang); } catch {}
+  applyStaticTranslations();
+  // Rebuild metric picker labels (friendly names depend on lang)
+  pickerBuilt = false;
+  if (snap.predictionStatus?.targets) buildPicker(snap.predictionStatus.targets);
+  // Re-run all dynamic renderers so their inline strings get translated
+  rerenderTiles();
+  rerenderSignal();
+  rerenderSide();
+  rerenderLedger();
+}
+
+const FRIENDLY_METRICS = {
+  'PM2_5':        'Air quality (PM2.5)',
+  'PM10':         'Particles (PM10)',
+  'CAQI':         'Air quality index',
+  'Temperatura':  'Temperature',
+  'Relativna_vlaznost': 'Humidity',
+  'Suncevo_zracenje':   'Solar radiation',
+  'O3':           'Ozone',
+  'Buka':         'Noise level',
+  'Grid_power_total':   'Grid power',
+  'Inverter_AC_power_total': 'Solar output',
+  'Inverter_AC_energy_out_daily': 'Daily solar energy',
+};
+const PICKER_METRICS = ['PM2_5','CAQI','Temperatura','Grid_power_total','Inverter_AC_power_total'];
+let activeTarget = null;
+let pickerBuilt = false;
+
+const VOLATILE = new Set(['computedAt','checkedAt','lastPollAt','receivedAt','nextRunAt','startedAt']);
+
+function escapeHtml(value){
+  return String(value ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function plural(n, one, many){
+  const num = Number(n) || 0;
+  return `${num} ${num === 1 ? one : (many || one + 's')}`;
+}
+
+function relativeTime(isoOrSec){
+  if (!isoOrSec && isoOrSec !== 0) return '--';
+  const ms = typeof isoOrSec === 'number' ? isoOrSec * 1000 : Date.parse(isoOrSec);
+  if (!Number.isFinite(ms)) return '--';
+  const diff = Math.round((ms - Date.now()) / 1000);
+  const abs = Math.abs(diff);
+  const future = diff > 0;
+  let value, unit;
+  if (abs < 60) { value = abs; unit = 's'; }
+  else if (abs < 3600) { value = Math.round(abs / 60); unit = 'm'; }
+  else if (abs < 86400) { value = Math.round(abs / 3600); unit = 'h'; }
+  else { value = Math.round(abs / 86400); unit = 'd'; }
+  return future ? `in ${value}${unit}` : `${value}${unit} ago`;
+}
+
+function shorten(text, head = 6, tail = 4){
+  const s = String(text || '');
+  if (s.length <= head + tail + 1) return s;
+  return `${s.slice(0, head)}…${s.slice(-tail)}`;
+}
+
+function stableClone(value){
+  if (Array.isArray(value)) return value.map(stableClone);
+  if (value && typeof value === 'object'){
+    const out = {};
+    for (const [k, v] of Object.entries(value)){
+      if (VOLATILE.has(k)) continue;
+      out[k] = stableClone(v);
+    }
+    return out;
+  }
+  return value;
+}
+
+function changedSince(type, payload){
+  const sig = JSON.stringify(stableClone(payload));
+  const previous = stableSig.get(type);
+  stableSig.set(type, sig);
+  // The first arrival of a type is a "fill" not a "change". Return false
+  // so the initial cascade from SSE-cached events does not flash every
+  // card on page load. Genuine state changes after settle still return true.
+  if (previous === undefined) return false;
+  return previous !== sig;
+}
+
+function flashCard(id){
+  const el = $(id);
+  if (!el || reduceMotion.matches) return;
+  el.classList.add('changed');
+  // Trigger reflow so the transition restarts on rapid back-to-back changes.
+  void el.offsetWidth;
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.remove('changed')));
+}
+
+function setPill(id, text, kind){
+  const el = $(id);
+  if (!el) return;
+  el.className = `pill ${kind || ''}`.trim();
+  el.textContent = text;
+}
+
+function setText(id, text){
+  const el = $(id);
+  if (el) el.textContent = text;
+}
+
+function setHtml(id, html){
+  const el = $(id);
+  if (el) el.innerHTML = html;
+}
+
+function pillKindFromLifecycle(value){
+  const v = String(value || '').toLowerCase();
+  if (v === 'ready' || v === 'ok') return 'ok';
+  if (v === 'degraded' || v === 'failed') return 'err';
+  if (v === 'initializing' || v === 'partial' || v === 'stale' || v === 'insufficient_data') return 'warn';
+  return '';
+}
+
+// Translate raw lifecycle value to localized pill text.
+const LIFECYCLE_KEY = {
+  ready: 'pill.live',
+  ok: 'pill.live',
+  initializing: 'pill.warming_up',
+  partial: 'pill.partial',
+  degraded: 'pill.offline',
+  failed: 'pill.offline',
+};
+function lifecyclePillText(value){
+  const key = LIFECYCLE_KEY[String(value || '').toLowerCase()];
+  return key ? t(key) : (value || t('pill.checking'));
+}
+
+function formatAge(minutes){
+  if (minutes == null || !Number.isFinite(minutes)) return null;
+  const m = Math.round(minutes);
+  if (m < 60) return `${m}m`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.round(h / 24);
+  return `${d}d`;
+}
+
+function slaWindowMinutes(sla){
+  // "24h", "1h", "30m", etc. Default to 24h if missing.
+  const w = String(sla?.window || '24h').trim().toLowerCase();
+  const m = /^(\d+)([hmd])$/.exec(w);
+  if (!m) return 24 * 60;
+  const n = Number(m[1]);
+  return m[2] === 'd' ? n * 1440 : m[2] === 'h' ? n * 60 : n;
+}
+
+// Translate the prediction service's quality status into an honest pill.
+// Within the SLA window, "stale" is downgraded to a neutral "Nh behind"
+// chip, because the operator agreed that data inside 24h is acceptable.
+// Outside the SLA window, the pill flips to a real warning.
+function qualityPillFor(quality, sla){
+  const status = quality?.status;
+  const ageMin = quality?.input?.dataAgeMinutes;
+  const slaMin = slaWindowMinutes(sla);
+
+  if (status === 'ok') return { text: t('pill.live'), kind: 'ok' };
+  if (status === 'partial') return { text: t('pill.partial'), kind: 'warn' };
+  if (status === 'insufficient_data') return { text: t('pill.warming_up'), kind: 'warn' };
+
+  if (status === 'stale'){
+    const age = formatAge(ageMin);
+    if (ageMin == null) return { text: t('pill.behind', { age: '?' }), kind: 'warn' };
+    if (ageMin <= slaMin) return { text: t('pill.behind', { age }), kind: '' };
+    return { text: t('pill.out_of_sla', { age }), kind: 'warn' };
+  }
+  return { text: t('pill.awaiting'), kind: '' };
+}
+
+/* ── status strip renderers ─────────────────────────────── */
+// Each tile writes exactly two meta lines: meta-1 (primary facts) and meta-2
+// (timing / context). Empty meta-2 still reserves space so all four tiles
+// are the same height regardless of which has more to say.
+
+function renderSourceTile(forecast, quality, status){
+  const inputSource = (forecast?.inputSource) || (quality?.inputSource) || (status?.inputSource);
+  const label = inputSource?.label || t('misc.unknown_source');
+  const isExportFiles = inputSource?.type === 'partner-export-files';
+  const ageMin = quality?.input?.dataAgeMinutes;
+  const samples = quality?.input?.observedSamples;
+  const expected = quality?.input?.expectedSamples;
+  const missing = quality?.input?.missingRatio;
+  const stations = (status?.targets || []).map(target => target.source).filter(Boolean);
+  const uniqueStations = [...new Set(stations)];
+  const slaMin = slaWindowMinutes(snap.sla);
+  const outOfSla = ageMin != null && ageMin > slaMin;
+
+  const pill = qualityPillFor(quality, snap.sla);
+  setPill('srcPill', pill.text, pill.kind);
+
+  const m1 = [];
+  if (uniqueStations.length) m1.push(`<span><b>${t('source.stations', { n: uniqueStations.length })}</b></span>`);
+  if (samples !== undefined && samples !== null && expected) {
+    m1.push(`<span>${t('source.samples', { got: samples, expected, gap: missing != null ? (missing * 100).toFixed(0) : '0' })}</span>`);
+  }
+  setHtml('srcMeta1', m1.join('') || `<span><b>${escapeHtml(label)}</b></span>`);
+
+  const m2 = [];
+  const ageLabel = formatAge(ageMin);
+  if (ageLabel) m2.push(`<span>${t('source.last_reading', { age: `<b>${ageLabel}</b>` })}</span>`);
+  if (outOfSla && isExportFiles) m2.push(`<span class="muted" title="Reading offline export files. Configure PREDICTION_DATA_API_BASE for live data.">${t('source.offline_files')}</span>`);
+  else if (outOfSla) m2.push(`<span class="muted">${t('source.past_sla')}</span>`);
+  else m2.push(`<span class="muted">${escapeHtml(label)}</span>`);
+  setHtml('srcMeta2', m2.join(''));
+}
+
+function renderPredictionTile(status, forecast){
+  setPill('predPill', lifecyclePillText(status?.lifecycle), pillKindFromLifecycle(status?.lifecycle));
+  const targets = status?.targets || [];
+  const interval = status?.intervalMinutes;
+  const computed = forecast?.computedAt;
+  const next = status?.nextRunAt;
+
+  const m1 = [];
+  m1.push(`<span><b>${t('forecast.metrics', { n: targets.length })}</b></span>`);
+  if (interval) m1.push(`<span>${t('forecast.every', { interval })}</span>`);
+  setHtml('predMeta1', m1.join(''));
+
+  const m2 = [];
+  if (computed) m2.push(`<span>${t('forecast.last', { time: `<b><time datetime="${escapeHtml(computed)}">${relativeTime(computed)}</time></b>` })}</span>`);
+  if (next) m2.push(`<span>${t('forecast.next', { time: `<b><time datetime="${escapeHtml(next)}">${relativeTime(next)}</time></b>` })}</span>`);
+  setHtml('predMeta2', m2.join(''));
+}
+
+function renderBlockchainTile(status, txPayload){
+  setPill('bcPill', lifecyclePillText(status?.lifecycle), pillKindFromLifecycle(status?.lifecycle));
+  const interval = status?.intervalSeconds;
+  const last = status?.lastCycle?.finishedAt;
+  const c = txPayload?.counts || counts.tx;
+
+  const m1 = [];
+  const total = c.total ?? 0;
+  m1.push(`<span><b>${t(total === 1 ? 'relay.anchors_one' : 'relay.anchors_many', { n: total })}</b></span>`);
+  if (c.confirmed !== undefined) m1.push(`<span>${t('relay.confirmed', { c: c.confirmed, s: c.sent })}</span>`);
+  setHtml('bcMeta1', m1.join(''));
+
+  const m2 = [];
+  if (interval) m2.push(`<span>${t('relay.every_s', { interval })}</span>`);
+  if (last) m2.push(`<span>${t('relay.last', { time: `<b><time datetime="${escapeHtml(last)}">${relativeTime(last)}</time></b>` })}</span>`);
+  setHtml('bcMeta2', m2.join(''));
+}
+
+function renderStealthTile(chainStatus, blocks, feeless){
+  const ok = chainStatus?.ok !== false;
+  const cooldown = chainStatus?.rpcCache?.cooldownSecondsRemaining || 0;
+  const isMock = chainStatus?.relayMode === 'mock';
+
+  // Pill answers a single question: is the chain link healthy?
+  // No protocol names; "live" / "offline" / "cooling" tell the story.
+  let pillText, pillKind;
+  if (cooldown > 0) { pillText = t('pill.throttled', { seconds: cooldown }); pillKind = 'warn'; }
+  else if (!ok) { pillText = t('pill.offline'); pillKind = 'err'; }
+  else if (isMock) { pillText = t('pill.demo'); pillKind = 'warn'; }
+  else { pillText = t('pill.live'); pillKind = 'ok'; }
+  setPill('chPill', pillText, pillKind);
+
+  const blockData = blocks?.data || [];
+  const best = blockData[0];
+  const height = chainStatus?.latestBlock?.height ?? best?.height;
+  const blockTime = chainStatus?.latestBlock?.time ?? best?.time;
+  const blockHash = chainStatus?.latestBlock?.hash ?? best?.hash ?? best?.blockhash;
+
+  const m1 = [];
+  if (height !== undefined && height !== null){
+    const heightHtml = t('ledger.block', { height: `<b>${height}</b>` });
+    m1.push(blockHash
+      ? `<span><a href="${stealthBlockUrl(blockHash)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(blockHash)}">${heightHtml}</a></span>`
+      : `<span>${heightHtml}</span>`);
+  } else if (cooldown > 0) {
+    m1.push(`<span class="muted">${t('ledger.recovering')}</span>`);
+  } else {
+    m1.push(`<span class="muted">${t('ledger.no_head')}</span>`);
+  }
+  if (blockTime){
+    const iso = new Date(Number(blockTime) * 1000).toISOString();
+    m1.push(`<span>${t('ledger.seen', { time: `<b><time datetime="${iso}">${relativeTime(Number(blockTime))}</time></b>` })}</span>`);
+  }
+  setHtml('chMeta1', m1.join(''));
+
+  // Plain-language second line. No protocol jargon.
+  const fp = feeless?.payload || chainStatus?.feeless || {};
+  const m2 = [];
+  if (chainStatus?.rpcConfigured === false) {
+    m2.push(`<span class="muted">${t('ledger.no_connection')}</span>`);
+  } else if (fp.configured && fp.realBroadcastEnabled) {
+    m2.push(`<span><b>${t('ledger.anchoring_live')}</b></span>`);
+  } else if (fp.configured) {
+    m2.push(`<span><b>${t('ledger.anchoring_armed')}</b><span class="muted" title="Wallet, balance, and connection are ready, but real broadcast is disabled. Set STEALTH_ENABLE_REAL_BROADCAST=true to submit.">${t('ledger.broadcast_off')}</span></span>`);
+  } else if (fp.rpcConfigured) {
+    m2.push(`<span><b>${t('ledger.anchoring_off')}</b><span class="muted" title="A spendable balance is required to broadcast proofs. The service still records and signs them locally.">${t('ledger.no_balance')}</span></span>`);
+  } else {
+    m2.push(`<span class="muted">${t('ledger.demo_mode')}</span>`);
+  }
+  setHtml('chMeta2', m2.join(''));
+}
+
+/* ── forecast chart + rationale ────────────────────────── */
+function renderForecast(forecast){
+  const points = forecast?.points || [];
+  const meta = forecast?.metricInfo || {};
+  chartState.label = meta.label || forecast?.metric || '';
+  chartState.unit = meta.unit || '';
+  const hasMeta = forecast?.source || forecast?.metric;
+  const headline = hasMeta
+    ? `${forecast?.source || '--'} · ${chartState.label || forecast?.metric || '--'}${chartState.unit ? ` · ${chartState.unit}` : ''}`
+    : 'no forecast loaded';
+  setText('signalMeta', headline);
+
+  if (!points.length){
+    if (chartState.instance){ chartState.instance.destroy(); chartState.instance = null; }
+    return;
+  }
+
+  const datasets = [
+    { label: 'Forecast', data: points.map(p => ({ x: new Date(p.timestamp * 1000), y: p.value })),
+      borderColor: cssVar('--green'), backgroundColor: 'oklch(56% .16 150 / .12)', borderWidth: 1.6, fill: true, pointRadius: 0, tension: 0.18 },
+    { label: 'Lower', data: points.map(p => ({ x: new Date(p.timestamp * 1000), y: p.lower })),
+      borderColor: cssVar('--subtle'), borderDash:[3,3], borderWidth: 1, pointRadius: 0 },
+    { label: 'Upper', data: points.map(p => ({ x: new Date(p.timestamp * 1000), y: p.upper })),
+      borderColor: cssVar('--subtle'), borderDash:[3,3], borderWidth: 1, pointRadius: 0 },
+  ];
+
+  // Animate the transition only when the visible metric changed. Updates from
+  // the regular poll cycle (same metric, slightly newer points) skip the
+  // animation so the chart never jitters on background refreshes.
+  const sig = `${forecast?.source}:${forecast?.metric}`;
+  const metricChanged = chartState.lastSig && chartState.lastSig !== sig;
+  chartState.lastSig = sig;
+
+  if (chartState.instance){
+    chartState.instance.data.datasets = datasets;
+    chartState.instance.update(metricChanged ? undefined : 'none');
+  } else {
+    chartState.instance = new Chart($('forecastChart'), {
+      type: 'line',
+      data: { datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        animation: { duration: reduceMotion.matches ? 0 : 350, easing: 'easeOutQuart' },
+        interaction: { mode: 'nearest', intersect: false },
+        plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+        scales: {
+          x: { type: 'time', ticks: { color: cssVar('--muted'), font: { size: 11 } }, grid: { color: cssVar('--grid'), drawTicks: false } },
+          y: { ticks: { color: cssVar('--muted'), font: { size: 11 } }, grid: { color: cssVar('--grid'), drawTicks: false } },
+        },
       },
-      plugins: { legend: { labels: { color: '#8b8fa3' } } },
-    },
-  });
-}
-
-async function checkHealth() {
-  try {
-    const prediction = await getJson($('predictionBase').value, '/health');
-    $('predictionSummary').innerHTML = `<span class="chip ok">online</span><div class="mono">${prediction.service}</div>`;
-  } catch (e) {
-    $('predictionSummary').innerHTML = `<span class="chip warn">offline</span><div class="mono">Start prediction service or adjust URL.</div>`;
-  }
-
-  try {
-    const blockchain = await getJson($('blockchainBase').value, '/health');
-    $('blockchainSummary').innerHTML = `<span class="chip ok">online</span><div class="mono">relay=${blockchain.relayMode}</div>`;
-  } catch (e) {
-    $('blockchainSummary').innerHTML = `<span class="chip warn">offline</span><div class="mono">Start blockchain service or adjust URL.</div>`;
-  }
-}
-
-async function runPrediction() {
-  const base = $('predictionBase').value.trim();
-  localStorage.setItem('predictionApi', base);
-  $('predictionSummary').textContent = 'Loading forecast...';
-  try {
-    const result = await getJson(base, `/forecast?source=${encodeURIComponent($('predictionSource').value)}&metric=${encodeURIComponent($('predictionMetric').value)}&horizon=24&hours=72`);
-    $('predictionSummary').innerHTML = [
-      '<span class="chip ok">forecast ready</span>',
-      `<div class="mono">source=${result.source} metric=${result.metric}</div>`,
-      `<div class="mono">model=${result.model} rmse=${result.residualError} points=${result.points.length}</div>`,
-    ].join('');
-    renderForecast(result.points);
-  } catch (e) {
-    $('predictionSummary').innerHTML = `<span class="chip err">error</span><div class="mono">${e.message}</div>`;
-  }
-}
-
-async function anchorEvent() {
-  const base = $('blockchainBase').value.trim();
-  localStorage.setItem('blockchainApi', base);
-  $('blockchainSummary').textContent = 'Anchoring event...';
-  try {
-    const result = await postJson(base, '/events', {
-      device_id: $('blockchainDevice').value.trim(),
-      timestamp: Math.floor(Date.now() / 1000),
-      event_code: 'ok',
-      value: Number($('blockchainValue').value || 0),
-      metadata: { source: 'services-dashboard' },
     });
-    $('blockchainSummary').innerHTML = [
-      `<span class="chip ok">${result.status}</span>`,
-      `<div class="mono">tx=${result.txId || '--'}</div>`,
-      `<div class="mono">device=${result.deviceId} bytes=${result.bytes}</div>`,
-    ].join('');
-    $('blockchainPayload').innerHTML = [
-      `payload=${result.payloadHex}`,
-      `hash=${result.payloadHash}`,
-      `account=${result.account?.accountId || '--'}`,
-    ].join('<br>');
-  } catch (e) {
-    $('blockchainSummary').innerHTML = `<span class="chip err">error</span><div class="mono">${e.message}</div>`;
   }
 }
 
-$('predictionBase').value = DEFAULT_PREDICTION_API;
-$('blockchainBase').value = DEFAULT_BLOCKCHAIN_API;
-$('runPrediction').addEventListener('click', runPrediction);
-$('anchorEvent').addEventListener('click', anchorEvent);
-checkHealth();
+function describeShape(forecast){
+  const points = forecast?.points || [];
+  if (points.length === 0) return null;
+  const unit = forecast.metricInfo?.unit || '';
+  const fmt = value => `${Number(value).toFixed(2)}${unit ? ' ' + unit : ''}`;
+  const fmtTime = ts => new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  const first = points[0];
+  const last = points[points.length - 1];
+  const hoursSpan = Math.max(0.001, (last.timestamp - first.timestamp) / 3600);
+  const min = points.reduce((acc, point) => point.value < acc.value ? point : acc, first);
+  const max = points.reduce((acc, point) => point.value > acc.value ? point : acc, first);
+  const slopePerHour = (last.value - first.value) / hoursSpan;
+  const peakToTrough = max.value - min.value;
+  return { first, last, hoursSpan, min, max, slopePerHour, peakToTrough, fmt, fmtTime, unit };
+}
+
+// Friendly names for the prediction service's internal model identifiers.
+// Keeps the rationale readable for non-technical viewers; the technical id
+// is preserved as a tooltip for the curious.
+const MODEL_KEY = {
+  'seasonal-hourly-baseline': 'model.daily',
+  'linear-regression':        'model.trend',
+  'mean-baseline':            'model.flat',
+};
+function modelLabel(name){
+  const key = MODEL_KEY[name];
+  return key ? t(key) : String(name || '').replace(/[-_]/g, ' ');
+}
+function modelSpan(name){
+  if (!name) return '';
+  const friendly = modelLabel(name);
+  return `<i class="model-name" title="${escapeHtml(name)}">${escapeHtml(friendly)}</i>`;
+}
+
+function renderRationale(forecast, status){
+  const model = forecast?.model;
+  const error = forecast?.residualError;
+  const samples = forecast?.input?.count;
+  const horizon = forecast?.horizonHours;
+  const computed = forecast?.computedAt;
+  const next = status?.nextRunAt;
+  const fromTs = forecast?.input?.from;
+  const toTs = forecast?.input?.to;
+  const comparisons = forecast?.modelComparisons || [];
+  const unit = forecast?.metricInfo?.unit || '';
+  const unitLabel = unit ? ` ${unit}` : '';
+  const shape = describeShape(forecast);
+
+  let summary;
+  if (!model){
+    summary = `<span class="skeleton">${t('rationale.first_cycle')}</span>`;
+  } else if (model === 'mean-baseline'){
+    summary = t('rationale.flat_mean', { n: `<b>${samples ?? '0'}</b>` });
+  } else {
+    const lines = [];
+    const winner = modelSpan(model);
+    if (comparisons.length > 0){
+      const loser = comparisons[0];
+      const lift = error > 0 && loser.error > 0 ? `${(((loser.error - error) / loser.error) * 100).toFixed(0)}%` : '';
+      lines.push(t('rationale.picked_with_loser', {
+        winner, loser: modelSpan(loser.name),
+        lift: lift ? `<b>${lift}</b>` : '?',
+        error: `<b>${error}${unitLabel}</b>`,
+      }));
+    } else {
+      lines.push(t('rationale.picked', { winner, error: `<b>${error}${unitLabel}</b>` }));
+    }
+    if (samples && fromTs && toTs){
+      const span = Math.max(1, Math.round((toTs - fromTs) / 3600));
+      const holdout = forecast?.holdoutSize || 0;
+      const train = forecast?.trainSize || (samples - holdout);
+      lines.push(t('rationale.trained', {
+        n: `<b>${train}</b>`,
+        span: `<b>${span}</b>`,
+        holdout: holdout ? t('rationale.holdout', { n: `<b>${holdout}</b>` }) : '',
+      }));
+    } else if (samples){
+      lines.push(t('rationale.trained', { n: `<b>${samples}</b>`, span: '?', holdout: '' }));
+    }
+    if (shape && horizon){
+      lines.push(t('rationale.next', {
+        h: `<b>${horizon}</b>`,
+        min: `<b>${shape.fmt(shape.min.value)}</b>`,
+        max: `<b>${shape.fmt(shape.max.value)}</b>`,
+      }));
+    } else if (shape){
+      lines.push(t('rationale.range', {
+        min: `<b>${shape.fmt(shape.min.value)}</b>`,
+        max: `<b>${shape.fmt(shape.max.value)}</b>`,
+      }));
+    }
+    summary = lines.join(' ');
+  }
+
+  setHtml('ratSummary', summary);
+
+  setHtml('rationaleComputed', computed
+    ? `<time datetime="${escapeHtml(computed)}" title="${escapeHtml(computed)}">${relativeTime(computed)}</time>`
+    : '<span class="skeleton">--</span>');
+  setHtml('rationaleNext', next
+    ? `<time datetime="${escapeHtml(next)}" title="${escapeHtml(next)}">${relativeTime(next)}</time>`
+    : '<span class="skeleton">--</span>');
+}
+
+/* ── input data state + anomalies ──────────────────────── */
+function renderQuality(quality, sla){
+  const pill = qualityPillFor(quality, sla);
+  setPill('qualityPill', pill.text, pill.kind);
+
+  const inputSrc = quality?.inputSource;
+  const isExportFiles = inputSrc?.type === 'partner-export-files';
+  const ageMin = quality?.input?.dataAgeMinutes;
+  const slaMin = slaWindowMinutes(sla);
+  const outOfSla = ageMin != null && ageMin > slaMin;
+
+  const rows = [];
+  if (inputSrc?.label) rows.push([t('input.source'), `<span class="v">${escapeHtml(inputSrc.label)}</span>`]);
+  if (quality?.input){
+    const { observedSamples, expectedSamples, missingRatio, latestTimestamp } = quality.input;
+    if (latestTimestamp) rows.push([t('input.last_reading'), `<span class="v"><time datetime="${new Date(latestTimestamp*1000).toISOString()}" title="${new Date(latestTimestamp*1000).toLocaleString()}">${relativeTime(Number(latestTimestamp))}</time></span>`]);
+    if (observedSamples !== undefined) rows.push([t('input.samples'), `<span class="v">${observedSamples} <span class="dim">/ ${expectedSamples ?? '--'} ${t('input.expected')}</span></span>`]);
+    if (missingRatio !== undefined) rows.push([t('input.gap'), `<span class="v">${(missingRatio * 100).toFixed(1)}%</span>`]);
+  }
+  if (sla?.aggregate){
+    rows.push([t('input.sla_window'), `<span class="v">${t('input.sla_format', { window: sla.window || '24h', pct: sla.aggregate.availabilityPercent })}</span>`]);
+  }
+
+  // Status hint, calibrated to where the data sits relative to SLA.
+  // Within SLA: factual, not alarming. Outside SLA: actionable.
+  if (quality?.status === 'stale' || outOfSla){
+    const ageLabel = formatAge(ageMin) || '?';
+    if (outOfSla){
+      const hint = isExportFiles
+        ? t('input.action.out_files', { age: ageLabel })
+        : t('input.action.out', { age: ageLabel });
+      rows.push([t('input.action'), `<span class="v dim">${hint}</span>`]);
+    } else if (ageMin != null && ageMin > 30){
+      const hint = t('input.note.behind', { age: ageLabel });
+      rows.push([t('input.note'), `<span class="v dim">${hint}</span>`]);
+    }
+  }
+
+  if (rows.length === 0){
+    setHtml('qualityList', `<div class="skeleton">${t('skeleton.first_cycle')}</div>`);
+    return;
+  }
+  setHtml('qualityList', rows.map(([k, v]) => `<div class="row"><span class="k">${escapeHtml(k)}</span>${v}</div>`).join(''));
+}
+
+async function checkSoiling(){
+  // Pull latest forecasts for solar radiation and inverter output, compare averages.
+  // Returns null when either side is missing; never blocks the anomaly card.
+  try {
+    const params = (source, metric) => `source=${encodeURIComponent(source)}&metric=${encodeURIComponent(metric)}`;
+    const [rad, ac] = await Promise.all([
+      getJson(`/prediction/data-quality/latest?${params('OS2BIOS', 'Suncevo_zracenje')}`).catch(() => null),
+      getJson(`/prediction/data-quality/latest?${params('SOLAXBIOS', 'Inverter_AC_power_total')}`).catch(() => null),
+    ]);
+    if (!rad?.input || !ac?.input) return null;
+    const radSamples = rad.input.observedSamples || 0;
+    const acSamples = ac.input.observedSamples || 0;
+    const radAge = rad.input.dataAgeMinutes ?? 0;
+    const acAge = ac.input.dataAgeMinutes ?? 0;
+    if (radSamples === 0 || acSamples === 0) return null;
+    const skew = acAge - radAge;
+    if (skew > 60) return { kind: 'err', skew };
+    if (skew > 20) return { kind: 'warn', skew };
+    return null;
+  } catch { return null; }
+}
+
+let lastSoilingHint = null;
+
+// Friendly station label: "SOLAXBIOS" → "Solarna elektrana" (HR) / "Solar plant" (EN).
+const STATION_LABEL = {
+  hr: { SOLAXBIOS: 'Solarna elektrana', OS1BIOS: 'Meteo postaja 1', OS2BIOS: 'Meteo postaja 2' },
+  en: { SOLAXBIOS: 'Solar plant', OS1BIOS: 'Meteo station 1', OS2BIOS: 'Meteo station 2' },
+};
+function stationLabel(code){
+  return STATION_LABEL[currentLang]?.[code] || code;
+}
+
+function renderAnomalies(anomalies){
+  const data = anomalies?.data || [];
+  const flagged = data.filter(row => (row.anomalies?.length || 0) > 0);
+  const extras = lastSoilingHint ? [lastSoilingHint] : [];
+
+  if (flagged.length === 0 && extras.length === 0){
+    setPill('anomalyPill', t('pill.clear'), 'ok');
+    setHtml('anomalyList', `<div class="muted" style="font-size:12.5px">${t('anomalies.clear')}</div>`);
+    return;
+  }
+
+  // Show exactly the count that matches what's rendered.
+  const visibleCount = flagged.length + extras.length;
+  setPill('anomalyPill',
+    t(visibleCount === 1 ? 'pill.signals_one' : 'pill.signals_many', { n: visibleCount }),
+    extras.some(x => x.kind === 'err') ? 'err' : 'warn');
+
+  const flaggedRows = flagged.map(row => {
+    const label = row.metricInfo?.label || row.metric;
+    const pointN = row.anomalies?.length || 0;
+    const count = t(pointN === 1 ? 'anomalies.count_one' : 'anomalies.count_many', { n: pointN });
+    const when = row.computedAt ? relativeTime(row.computedAt) : '';
+    const station = stationLabel(row.source);
+    return `<div class="row"><span class="k">${escapeHtml(station)} · ${escapeHtml(label)}</span><span class="v">${count}<span class="dim"> · ${escapeHtml(when)}</span></span></div>`;
+  });
+  const extraRows = extras.map(x => {
+    const txt = x.kind === 'err'
+      ? t('anomalies.soiling_err', { min: x.skew })
+      : t('anomalies.soiling_warn', { min: x.skew });
+    return `<div class="row"><span class="k">${t('anomalies.soiling_label')}</span><span class="v" style="color:var(--${x.kind === 'err' ? 'red' : 'amber'})">${escapeHtml(txt)}</span></div>`;
+  });
+  setHtml('anomalyList', [...extraRows, ...flaggedRows].join(''));
+}
+
+// background soiling check, runs every 60s, updates the last hint, never blocks
+async function refreshSoiling(){
+  lastSoilingHint = await checkSoiling();
+  if (snap.anomalies) renderAnomalies(snap.anomalies);
+}
+
+/* ── ledger ─────────────────────────────────────────────── */
+const EVENT_KIND_KEY = {
+  data_batch_seen:        'event.data_sample',
+  data_quality_changed:   'event.quality_change',
+  prediction_generated:   'event.forecast',
+  anomaly_detected:       'event.anomaly',
+  sla_breached:           'event.sla_breach',
+  sla_recovered:          'event.sla_recovered',
+  export_file_refreshed:  'event.export_refresh',
+  ok:                     'event.ok_ping',
+  alarm:                  'event.alarm',
+  export:                 'event.export',
+  config:                 'event.config',
+  critical_measurement:   'event.critical',
+};
+
+function eventKindLabel(name){
+  const key = EVENT_KIND_KEY[name];
+  return key ? t(key) : name;
+}
+
+function renderLedger(txPayload){
+  const data = txPayload?.data || [];
+  const c = txPayload?.counts || counts.tx;
+  counts.tx = c;
+
+  /* headline counts */
+  const head = [];
+  const total = c.total ?? 0;
+  head.push(`<span>${t(total === 1 ? 'ledger.proofs_total_one' : 'ledger.proofs_total_many', { n: `<b>${total}</b>` })}</span>`);
+  if (c.confirmed !== undefined) head.push(`<span>${t('ledger.confirmed_count', { n: c.confirmed })}</span>`);
+  if (c.sent !== undefined) head.push(`<span>${t('ledger.sent_count', { n: c.sent })}</span>`);
+  if (txPayload?.relayMode) head.push(`<span>${t('ledger.relay', { mode: `<b>${escapeHtml(txPayload.relayMode)}</b>` })}</span>`);
+  setHtml('ledgerCounts', head.join(''));
+
+  /* breakdown: what is actually being anchored */
+  const byEvent = c.byEvent || {};
+  const bySource = c.bySource || {};
+  const byEventEntries = Object.entries(byEvent).sort((a, b) => b[1] - a[1]);
+  const bySourceEntries = Object.entries(bySource).sort((a, b) => b[1] - a[1]);
+  const breakdown = [];
+  if (byEventEntries.length){
+    breakdown.push(
+      `<span class="break-label">${t('ledger.by_kind')}</span>` +
+      byEventEntries.map(([name, count]) => {
+        const kind = name === 'data_batch_seen' ? 'info'
+          : name === 'data_quality_changed' || name === 'sla_breached' ? 'warn'
+          : name === 'anomaly_detected' ? 'err'
+          : '';
+        return `<span class="break-chip ${kind}" title="${escapeHtml(name)}"><b>${count}</b> ${escapeHtml(eventKindLabel(name))}</span>`;
+      }).join('')
+    );
+  }
+  if (bySourceEntries.length){
+    breakdown.push(
+      `<span class="break-label">${t('ledger.by_source')}</span>` +
+      bySourceEntries.map(([name, count]) => {
+        const isDemo = name === 'bios-data-window';
+        return `<span class="break-chip ${isDemo ? 'warn' : ''}" title="${isDemo ? t('ledger.demo_tooltip') : escapeHtml(name)}"><b>${count}</b> ${escapeHtml(name)}${isDemo ? ` <i>${t('ledger.demo')}</i>` : ''}</span>`;
+      }).join('')
+    );
+  }
+  setHtml('ledgerBreakdown', breakdown.join(''));
+
+  /* per-tx list */
+  if (!data.length){
+    setHtml('txList', `<li class="empty">${t('ledger.no_entries')}</li>`);
+    return;
+  }
+  const items = data.slice(0, 5).map(tx => {
+    const when = tx.confirmedAt || tx.submittedAt || tx.createdAt;
+    const statusKind = tx.status === 'confirmed' ? 'ok' : tx.status === 'sent' ? 'info' : 'warn';
+    const id = tx.txId || tx.id || '--';
+    const evtName = tx.eventName || (tx.eventCode !== undefined ? `0x${Number(tx.eventCode).toString(16).padStart(2,'0')}` : '');
+    const evtKind = evtName === 'data_batch_seen' ? 'info'
+      : evtName === 'data_quality_changed' || evtName === 'sla_breached' ? 'warn'
+      : evtName === 'anomaly_detected' ? 'err'
+      : '';
+    const isDemo = tx.sourceKind === 'bios-data-window';
+    const sourceKind = tx.sourceKind ? `<span class="src${isDemo ? ' demo' : ''}" title="${isDemo ? 'demo / synthetic' : escapeHtml(tx.sourceKind)}">${escapeHtml(tx.sourceKind)}${isDemo ? ' demo' : ''}</span>` : '';
+    const statusKey = tx.status ? `tx.status.${tx.status}` : null;
+    const statusText = statusKey && I18N[currentLang]?.[statusKey] ? t(statusKey) : (tx.status || '--');
+    return `<li>
+      <span class="when"><time datetime="${escapeHtml(when || '')}" title="${escapeHtml(when || '')}">${when ? relativeTime(when) : '--'}</time></span>
+      <span class="id" title="${escapeHtml(id)}">${escapeHtml(shorten(id, 10, 6))}${sourceKind}</span>
+      <span class="pill ${evtKind}" title="event_code ${evtName}">${escapeHtml(eventKindLabel(evtName))}</span>
+      <span class="pill ${statusKind}">${escapeHtml(statusText)}</span>
+    </li>`;
+  });
+  setHtml('txList', items.join(''));
+}
+
+function stealthTxUrl(txId){
+  return `https://www.stealthmonitor.org/transactions/${encodeURIComponent(txId)}`;
+}
+function stealthBlockUrl(hash){
+  return `https://www.stealthmonitor.org/blocks/${encodeURIComponent(hash)}`;
+}
+
+function renderProof(decode, eventLatest){
+  const proof = decode || {};
+  const event = eventLatest || {};
+  const value = proof.value ?? event.value;
+  const txId = event.txId;
+  const status = event.status;
+  const confirmedAt = event.confirmedAt;
+  const blockHash = event.blockHash;
+
+  const statusLabel = status === 'confirmed' ? t('proof.confirmed')
+    : status === 'sent' ? t('proof.sent')
+    : status === 'failed' ? t('proof.failed')
+    : status ? status : t('proof.pending');
+  setPill('proofPill', statusLabel, status === 'confirmed' ? 'ok' : status === 'sent' ? 'info' : status === 'failed' ? 'err' : 'warn');
+  setHtml('proofValue', value !== undefined ? `${value}` : '--');
+  setHtml('proofConfirmedTs', confirmedAt
+    ? `<time datetime="${escapeHtml(confirmedAt)}" title="${escapeHtml(confirmedAt)}">${relativeTime(confirmedAt)}</time>${event.confirmations ? ` <span class="muted">(${t('proof.confirmations', { n: event.confirmations })})</span>` : ''}`
+    : (status === 'sent' ? `<span class="muted">${t('proof.awaiting_block')}</span>` : '--'));
+  setHtml('proofTx', txId
+    ? `<a href="${stealthTxUrl(txId)}" target="_blank" rel="noopener noreferrer"><code title="${escapeHtml(txId)}">${escapeHtml(shorten(txId, 12, 8))}</code></a>`
+    : '--');
+  setHtml('proofBlock', blockHash
+    ? `<a href="${stealthBlockUrl(blockHash)}" target="_blank" rel="noopener noreferrer"><code title="${escapeHtml(blockHash)}">${escapeHtml(shorten(blockHash, 10, 6))}</code></a>`
+    : '<span class="muted">--</span>');
+
+  const txLink = $('monitorLink');
+  if (txId) { txLink.href = stealthTxUrl(txId); txLink.hidden = false; } else { txLink.hidden = true; }
+
+  const blockLink = $('blockMonitorLink');
+  if (blockHash) { blockLink.href = stealthBlockUrl(blockHash); blockLink.hidden = false; } else { blockLink.hidden = true; }
+}
+
+/* ── snapshot store ────────────────────────────────────── */
+const snap = {
+  predictionStatus: null,
+  forecast: null,
+  quality: null,
+  sla: null,
+  anomalies: null,
+  blockchainStatus: null,
+  tx: null,
+  blocks: null,
+  chainStatus: null,
+  feeless: null,
+  decode: null,
+  eventLatest: null,
+};
+
+let pickerListenerBound = false;
+function buildPicker(targets){
+  if (pickerBuilt || !targets?.length) return;
+  const el = $('metricPicker');
+  if (!el) return;
+  const available = PICKER_METRICS.filter(m => targets.some(target => target.metric === m));
+  if (!available.length) return;
+  el.innerHTML = available.map(metric => {
+    // Try translated label first (metric.PM2_5, etc.), then fall back to FRIENDLY_METRICS.
+    const i18nKey = `metric.${metric}`;
+    const i18nLabel = I18N[currentLang]?.[i18nKey];
+    const label = i18nLabel || FRIENDLY_METRICS[metric] || metric;
+    const target = targets.find(tgt => tgt.metric === metric);
+    return `<button data-source="${escapeHtml(target.source)}" data-metric="${escapeHtml(metric)}" title="${escapeHtml(target.source)} · ${escapeHtml(metric)}">${escapeHtml(label)}</button>`;
+  }).join('');
+  // Bind the click delegation only once on the container, so rebuilds (e.g.
+  // on language toggle) don't stack duplicate listeners.
+  if (!pickerListenerBound) {
+    el.addEventListener('click', e => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      el.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      activeTarget = { source: btn.dataset.source, metric: btn.dataset.metric };
+      fetchMetricForecast(activeTarget.source, activeTarget.metric);
+    });
+    pickerListenerBound = true;
+  }
+  if (!activeTarget){
+    const pm25 = el.querySelector('[data-metric="PM2_5"]') || el.querySelector('button');
+    if (pm25){
+      pm25.classList.add('active');
+      activeTarget = { source: pm25.dataset.source, metric: pm25.dataset.metric };
+      // Drop any stale snapshot from earlier SSE pushes that don't match.
+      // matchesActive() will gate future events; we kick off the correct fetch.
+      if (snap.forecast && (snap.forecast.source !== activeTarget.source || snap.forecast.metric !== activeTarget.metric)) {
+        snap.forecast = null;
+      }
+      if (snap.quality && (snap.quality.source !== activeTarget.source || snap.quality.metric !== activeTarget.metric)) {
+        snap.quality = null;
+      }
+      fetchMetricForecast(activeTarget.source, activeTarget.metric);
+    }
+  } else {
+    const cur = el.querySelector(`[data-metric="${activeTarget.metric}"]`);
+    if (cur) cur.classList.add('active');
+  }
+  pickerBuilt = true;
+}
+
+function setMetricLoading(on){
+  $('cardSignal')?.classList.toggle('loading', on);
+  $('cardQuality')?.classList.toggle('loading', on);
+}
+
+async function fetchMetricForecast(source, metric){
+  const params = `source=${encodeURIComponent(source)}&metric=${encodeURIComponent(metric)}`;
+  setMetricLoading(true);
+  try {
+    const forecast = await getJson(`/prediction/forecasts/latest?${params}`);
+    // Guard against late-arriving fetch when user clicked a different metric.
+    if (activeTarget && (activeTarget.source !== source || activeTarget.metric !== metric)) return;
+    snap.forecast = forecast;
+    rerenderSignal();
+    rerenderTiles();
+  } catch {}
+  try {
+    const quality = await getJson(`/prediction/data-quality/latest?${params}`);
+    if (activeTarget && (activeTarget.source !== source || activeTarget.metric !== metric)) return;
+    snap.quality = quality;
+    rerenderSide();
+    rerenderTiles();
+  } catch {}
+  setMetricLoading(false);
+}
+
+function rerenderTiles(){
+  renderSourceTile(snap.forecast, snap.quality, snap.predictionStatus);
+  renderPredictionTile(snap.predictionStatus, snap.forecast);
+  renderBlockchainTile(snap.blockchainStatus, snap.tx);
+  renderStealthTile(snap.chainStatus, snap.blocks, snap.feeless);
+}
+
+function rerenderSignal(){
+  if (snap.forecast) renderForecast(snap.forecast);
+  renderRationale(snap.forecast, snap.predictionStatus);
+}
+
+function rerenderSide(){
+  if (snap.quality) renderQuality(snap.quality, snap.sla);
+  if (snap.anomalies) renderAnomalies(snap.anomalies);
+}
+
+function rerenderLedger(){
+  if (snap.tx) renderLedger(snap.tx);
+  renderProof(snap.decode, snap.eventLatest);
+}
+
+/* ── live wiring ───────────────────────────────────────── */
+// Filter inbound prediction events. Two protections against first-load flicker:
+//  1. Until activeTarget is set, drop any per-target payload (forecast/quality
+//     for some random metric). Render stays in the loading state.
+//  2. Once activeTarget is set, only accept payloads whose (source, metric)
+//     pair matches it. Stale SSE pushes from earlier polls are ignored.
+function matchesActive(payload){
+  const isPerTarget = Boolean(payload?.source || payload?.metric);
+  if (!activeTarget) return !isPerTarget;
+  if (!isPerTarget) return true;
+  return payload.source === activeTarget.source && payload.metric === activeTarget.metric;
+}
+
+function ingest(type, raw){
+  const payload = raw?.payload || {};
+  const fresh = changedSince(type, payload);
+  switch (type){
+    case 'prediction.status':
+      snap.predictionStatus = payload;
+      buildPicker(payload?.targets);
+      if (fresh) flashCard('cardSignal');
+      if (fresh && activeTarget) fetchMetricForecast(activeTarget.source, activeTarget.metric);
+      rerenderTiles(); rerenderSignal(); break;
+    case 'prediction.forecast':
+      if (!matchesActive(payload)) break;
+      snap.forecast = payload;
+      if (fresh) flashCard('cardSignal');
+      rerenderTiles(); rerenderSignal(); break;
+    case 'prediction.data_quality':
+      if (!matchesActive(payload)) break;
+      snap.quality = payload;
+      if (fresh) flashCard('cardQuality');
+      rerenderTiles(); rerenderSide(); break;
+    case 'prediction.sla':
+      snap.sla = payload;
+      if (fresh) flashCard('cardQuality');
+      rerenderSide(); break;
+    case 'prediction.anomaly':
+      snap.anomalies = payload;
+      if (fresh) flashCard('cardAnomalies');
+      rerenderSide(); break;
+    case 'blockchain.status':
+      snap.blockchainStatus = payload;
+      if (fresh) flashCard('cardLedger');
+      rerenderTiles(); break;
+    case 'blockchain.tx':
+      snap.tx = payload;
+      if (fresh) flashCard('cardLedger');
+      rerenderTiles(); rerenderLedger(); break;
+    case 'blockchain.block':
+      snap.blocks = payload;
+      rerenderTiles(); break;
+    case 'blockchain.chain_status':
+      snap.chainStatus = payload;
+      rerenderTiles(); break;
+    case 'blockchain.feeless':
+      snap.feeless = raw;
+      rerenderTiles(); break;
+    case 'blockchain.decode':
+      snap.decode = payload;
+      if (fresh) flashCard('cardLedger');
+      rerenderLedger(); break;
+    case 'blockchain.event': {
+      const data = payload?.data || [];
+      const latest = data[0] || null;
+      const previousId = snap.eventLatest?.id;
+      snap.eventLatest = latest;
+      if (latest && latest.id !== previousId) flashCard('cardLedger');
+      rerenderLedger(); break;
+    }
+  }
+}
+
+function setLive(state, message){
+  const dot = $('liveDot');
+  dot.classList.remove('on','off');
+  if (state === 'on') dot.classList.add('on');
+  if (state === 'off') dot.classList.add('off');
+  setText('liveStatus', message);
+}
+
+function startRealtime(){
+  const stream = new EventSource('/events');
+  const types = [
+    'prediction.status','prediction.sla','prediction.forecast','prediction.data_quality',
+    'prediction.anomaly','blockchain.status','blockchain.event','blockchain.tx',
+    'blockchain.block','blockchain.chain_status','blockchain.feeless','blockchain.decode',
+    'dashboard.connected','dashboard.heartbeat','dashboard.error',
+  ];
+  types.forEach(type => {
+    stream.addEventListener(type, ev => {
+      let parsed;
+      try { parsed = JSON.parse(ev.data); } catch { return; }
+      if (type === 'dashboard.connected' || type === 'dashboard.heartbeat'){
+        setLive('on', t('live.last_update', { time: new Date().toLocaleTimeString([], { hour12: false }) }));
+        return;
+      }
+      if (type === 'dashboard.error'){ return; }
+      ingest(type, parsed);
+      setLive('on', t('live.last_update', { time: new Date().toLocaleTimeString([], { hour12: false }) }));
+    });
+  });
+  stream.onerror = () => {
+    setLive('off', t('live.disconnected', { time: new Date().toLocaleTimeString([], { hour12: false }) }));
+    fallbackPoll();
+  };
+}
+
+/* ── REST fallback (also used for the very first render) ─ */
+async function getJson(path){
+  const res = await fetch(path);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function fallbackPoll(){
+  try { ingest('prediction.status', { payload: await getJson('/prediction/status') }); } catch {}
+  try {
+    const target = activeTarget || { source: 'OS2BIOS', metric: 'PM2_5' };
+    const params = `source=${encodeURIComponent(target.source)}&metric=${encodeURIComponent(target.metric)}`;
+    ingest('prediction.forecast', { payload: await getJson(`/prediction/forecasts/latest?${params}`) });
+    ingest('prediction.data_quality', { payload: await getJson(`/prediction/data-quality/latest?${params}`) });
+  } catch {}
+  try { ingest('prediction.sla', { payload: await getJson('/prediction/sla?window=24h') }); } catch {}
+  try { ingest('prediction.anomaly', { payload: await getJson('/prediction/anomalies?limit=5') }); } catch {}
+  try { ingest('blockchain.status', { payload: await getJson('/blockchain/status') }); } catch {}
+  try { ingest('blockchain.tx', { payload: await getJson('/blockchain/chain/transactions?limit=100') }); } catch {}
+  try { ingest('blockchain.chain_status', { payload: await getJson('/blockchain/chain/status') }); } catch {}
+  try { ingest('blockchain.event', { payload: await getJson('/blockchain/events?status=confirmed&limit=100') }); } catch {}
+  try {
+    const latest = await getJson('/blockchain/events/latest');
+    snap.eventLatest = latest;
+    if (latest?.payloadHex){
+      try { ingest('blockchain.decode', { payload: await getJson(`/blockchain/decode?payload=${encodeURIComponent(latest.payloadHex)}`) }); } catch {}
+    }
+    rerenderLedger();
+  } catch {}
+}
+
+/* refresh relative timestamps once a minute, no DOM thrash on the rest */
+setInterval(() => {
+  rerenderTiles();
+  rerenderSignal();
+  rerenderSide();
+  rerenderLedger();
+}, 30_000);
+
+// Wire up language switcher and apply initial translations before any data
+// fetch starts so first paint is in the user's chosen language.
+applyStaticTranslations();
+document.querySelectorAll('[data-lang]').forEach(btn => {
+  btn.addEventListener('click', () => setLanguage(btn.dataset.lang));
+});
+
+startRealtime();
+fallbackPoll();
+refreshSoiling();
+setInterval(refreshSoiling, 60_000);
 </script>
 </body>
 </html>

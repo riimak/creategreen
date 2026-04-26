@@ -7,9 +7,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Credentials are loaded from .env (not tracked in git).
 # Copy .env.example to .env and fill in your values.
 ENV_FILE="${SCRIPT_DIR}/.env"
+ROOT_ENV_FILE="${SCRIPT_DIR}/../.env"
 if [ -f "$ENV_FILE" ]; then
     # shellcheck source=/dev/null
     . "$ENV_FILE"
+elif [ -f "$ROOT_ENV_FILE" ]; then
+    # shellcheck source=/dev/null
+    . "$ROOT_ENV_FILE"
 fi
 
 API_BASE="${BIOS_API_BASE:-http://web.mars2.barrage.net:81}"

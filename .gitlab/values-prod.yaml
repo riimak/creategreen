@@ -1,0 +1,11 @@
+# =============================================================================
+# BIOS Multi-level Platform — Production Environment Values
+# =============================================================================
+replicaCount: 1
+
+ingress:
+  annotations:
+    cert-manager.io/cluster-issuer: barrage-prod
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"

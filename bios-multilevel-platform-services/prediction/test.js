@@ -1,6 +1,7 @@
 const assert = require('assert');
 const { parseExportText, seriesFor } = require('./bios-data');
 const { forecast, anomalies } = require('./model');
+const { dataQuality } = require('./server');
 
 const sample = [
   'OS1BIOS;TIMESTAMP;Temperatura;Relativna vlaznost;Brzina vjetra;Smjer vjetra;Suncevo zracenje;UV indeks;Tlak zraka;Kisa;CO;CO2;NO;NO2;O3;SO2;Lebdece cestice PM1;Lebdece cestice PM2.5;Lebdece cestice PM10;eaqi-traffic;CAQI;Buka;cumulative',
@@ -26,5 +27,15 @@ assert.ok(['linear-regression', 'seasonal-hourly-baseline'].includes(result.mode
 
 const detected = anomalies(series);
 assert.ok(Array.isArray(detected));
+
+const quality = dataQuality({
+  source: 'OS1BIOS',
+  metric: 'PM2_5',
+  hours: 24,
+  records,
+  series: series.slice(0, 2),
+});
+assert.strictEqual(quality.status, 'insufficient_data');
+assert.ok(quality.input.missingRatio > 0);
 
 console.log('prediction tests passed');

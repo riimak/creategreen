@@ -1,4 +1,5 @@
 .env
+/secrets/
 /output/*
 !/output/.gitkeep
 /test-output/

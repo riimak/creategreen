@@ -1,0 +1,25 @@
+{
+  "name": "bios-blockchain-service",
+  "private": true,
+  "version": "0.1.0",
+  "dependencies": {
+    "argon2": "0.44.0",
+    "bech32": "1.1.4",
+    "bip174": "2.1.0",
+    "bip32": "2.0.6",
+    "bip66": "1.1.5",
+    "bitcoin-ops": "1.4.1",
+    "bitcoinjs-lib": "5.2.0",
+    "bs58check": "2.1.2",
+    "create-hash": "1.2.0",
+    "merkle-lib": "2.0.10",
+    "pushdata-bitcoin": "1.0.1",
+    "randombytes": "2.1.0",
+    "tiny-secp256k1": "1.1.6",
+    "typeforce": "1.18.0",
+    "varuint-bitcoin": "1.1.2",
+    "wif": "2.0.6",
+    "xorshift.js": "1.0.5",
+    "pg": "8.16.0"
+  }
+}

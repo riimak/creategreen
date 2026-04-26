@@ -3,6 +3,10 @@ FROM node:22-alpine
 WORKDIR /app
 
 COPY prediction ./prediction
+COPY database ./database
+
+# pg is optional; install only if DATABASE_URL will be used
+RUN cd database && npm init -y > /dev/null 2>&1 && npm install pg@8 --omit=dev 2>/dev/null || true
 
 ENV PREDICTION_PORT=8091
 ENV BIOS_OUTPUT_DIR=/app/output

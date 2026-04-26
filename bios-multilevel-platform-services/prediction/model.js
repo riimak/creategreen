@@ -64,7 +64,14 @@ function rmse(actual, predict) {
 
 function chooseModel(series) {
   if (series.length < 4) {
-    return { name: 'mean-baseline', error: 0, predict: () => mean(series.map(point => point.value)) };
+    return {
+      name: 'mean-baseline',
+      error: 0,
+      predict: () => mean(series.map(point => point.value)),
+      comparisons: [],
+      reason: 'too_few_samples_for_holdout',
+      holdoutSize: 0,
+    };
   }
 
   const split = Math.max(2, Math.floor(series.length * 0.8));
@@ -78,16 +85,28 @@ function chooseModel(series) {
       name: 'linear-regression',
       error: rmse(holdout, timestamp => linearPredict(linear, timestamp)),
       predict: timestamp => linearPredict(linear, timestamp),
+      params: { slope: linear.slope, intercept: linear.intercept },
     },
     {
       name: 'seasonal-hourly-baseline',
       error: rmse(holdout, timestamp => seasonalPredict(seasonal, timestamp)),
       predict: timestamp => seasonalPredict(seasonal, timestamp),
+      params: { hoursCovered: seasonal.buckets.size, globalMean: seasonal.globalMean },
     },
   ];
 
   candidates.sort((a, b) => a.error - b.error);
-  return candidates[0];
+  const winner = candidates[0];
+  return {
+    ...winner,
+    comparisons: candidates.slice(1).map(candidate => ({
+      name: candidate.name,
+      error: Number(candidate.error.toFixed(4)),
+    })),
+    reason: 'lowest_holdout_rmse',
+    holdoutSize: holdout.length,
+    trainSize: train.length,
+  };
 }
 
 function forecast(series, horizonHours) {
@@ -116,6 +135,12 @@ function forecast(series, horizonHours) {
     model: model.name,
     residualError: Number((Number.isFinite(model.error) ? model.error : 0).toFixed(4)),
     horizonHours: cappedHorizon,
+    sigma: Number(sigma.toFixed(4)),
+    modelComparisons: model.comparisons || [],
+    modelParams: model.params || null,
+    modelReason: model.reason || null,
+    trainSize: model.trainSize || 0,
+    holdoutSize: model.holdoutSize || 0,
     points,
   };
 }

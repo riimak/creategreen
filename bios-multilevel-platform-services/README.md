@@ -10,9 +10,10 @@ BIOS multi-level platform for tracking of meteo data and electricity production:
 - `dashboard/` -- Deno/Deno Deploy dashboard for demonstrating the two
   services without changing the existing Mars2 production-data dashboard.
 
-Both services treat Mars2/BIOS as the source of truth. They do not duplicate
-raw measurement rows. Prediction stores derived forecast/anomaly artifacts;
-blockchain stores only local transaction status and compact payload metadata.
+Both services run continuously by default and treat Mars2/BIOS as the source of
+truth. They do not duplicate raw measurement rows. Prediction stores derived
+forecast/anomaly/data-quality/SLA artifacts; blockchain stores only local
+transaction status and compact payload metadata.
 
 ## Run
 
@@ -29,6 +30,8 @@ Open:
 http://localhost:8000
 ```
 
+The dashboard is read-only and updates in real time through Server-Sent Events.
+
 The dashboard proxies to the two services over the Docker network:
 
 - `http://prediction:8091`
@@ -38,8 +41,15 @@ For direct API checks from your host:
 
 ```sh
 curl http://localhost:8091/health
+curl http://localhost:8091/status
+curl http://localhost:8091/sla
 curl "http://localhost:8091/forecast?source=OS1BIOS&metric=PM2_5&horizon=24"
 curl http://localhost:8092/health
+curl http://localhost:8092/status
+curl http://localhost:8092/events
+curl http://localhost:8092/chain/status
+curl http://localhost:8092/chain/transactions
+curl http://localhost:8092/chain/blocks
 curl -X POST http://localhost:8092/events \
   -H "Content-Type: application/json" \
   -d '{"device_id":"0x0A1C","timestamp":1717699200,"event_code":"ok","value":250}'
@@ -79,6 +89,8 @@ real `stealth-lib` package and credentials are available.
 ## Mapping To Delivered Technical Solution
 
 - Predictive Analysis Service: short-term forecasting up to 48 hours,
-  anomaly/deviation detection, periodic refresh, and weather input adapter.
-- Blockchain Integration Service: receives critical events, encodes a compact
-  binary payload, submits it to Stealth, and retries transient failures.
+  anomaly/deviation detection, periodic refresh, data-quality/SLA overview, and
+  weather input adapter.
+- Blockchain Integration Service: continuously streams configured events,
+  encodes compact binary payloads, submits them to Stealth, deduplicates source
+  artifacts, and retries transient failures.

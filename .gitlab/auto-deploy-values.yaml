@@ -21,7 +21,7 @@ barrage:
 
 service:
   enabled: true
-  name: bios-creategreen
+  name: biosmultilevel
   type: ClusterIP
   externalPort: 8000
   internalPort: 8000
@@ -80,7 +80,7 @@ extraVolumes: []
 extraVolumeMounts: []
 
 serviceAccount:
-  name: bios-creategreen-sa
+  name: biosmultilevel-sa
   annotations: {}
   createNew: true
 
@@ -96,10 +96,13 @@ networkPolicy:
 # =============================================================================
 extraEnv:
   # Dashboard config
+  # Service DNS names follow the pattern: {HELM_RELEASE_PREFIX}-production-{worker-name}
+  # The ci-template creates them as: bios-creategreen-production-prediction, etc.
+  # Adjust if your release name differs.
   - name: PREDICTION_SERVICE_URL
-    value: "http://bios-creategreen-prediction:8091"
+    value: "http://bios-creategreen-production-prediction:8091"
   - name: BLOCKCHAIN_SERVICE_URL
-    value: "http://bios-creategreen-blockchain:8092"
+    value: "http://bios-creategreen-production-blockchain:8092"
   - name: DASHBOARD_EVENT_POLL_SECONDS
     value: "3"
 
@@ -178,7 +181,7 @@ workers:
       - name: BLOCKCHAIN_PORT
         value: "8092"
       - name: PREDICTION_SERVICE_URL
-        value: "http://bios-creategreen-prediction:8091"
+        value: "http://bios-creategreen-production-prediction:8091"
       - name: BLOCKCHAIN_INTERVAL_SECONDS
         value: "10"
       - name: BLOCKCHAIN_RECONFIRM_SECONDS

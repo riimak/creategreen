@@ -12,7 +12,8 @@ build-dashboard:
   extends: .build
   variables:
     TARGET_APP: dashboard
-    DOCKERFILE_PATH: dashboard/Dockerfile
+    # Paths are from repo root (Build V3 uses project root context; Dockerfiles live under monorepo dir)
+    DOCKERFILE_PATH: bios-multilevel-platform-services/dashboard/Dockerfile
     APPLICATION_IMAGE_NAME_TAG: dashboard
   rules:
     - !reference [.build, rules]
@@ -44,7 +45,7 @@ build-prediction:
   extends: .build
   variables:
     TARGET_APP: prediction
-    DOCKERFILE_PATH: prediction/Dockerfile
+    DOCKERFILE_PATH: bios-multilevel-platform-services/prediction/Dockerfile
     APPLICATION_IMAGE_NAME_TAG: prediction
   rules:
     - !reference [.build, rules]
@@ -71,7 +72,7 @@ build-blockchain:
   extends: .build
   variables:
     TARGET_APP: blockchain
-    DOCKERFILE_PATH: blockchain/Dockerfile
+    DOCKERFILE_PATH: bios-multilevel-platform-services/blockchain/Dockerfile
     APPLICATION_IMAGE_NAME_TAG: blockchain
   rules:
     - !reference [.build, rules]

@@ -41,6 +41,8 @@ The dashboard proxies to the two services over the Docker network:
 
 The repo uses the **monorepo** variables from `devops/ci-template` (`MONOREPO_TARGET_DIR`, `TARGET_APP`, `DOCKERFILE_PATH`, `APPLICATION_IMAGE_NAME_TAG`, `HELM_RELEASE_PREFIX`). Each app has its own Helm values under `dashboard/.gitlab/`, `prediction/.gitlab/`, and `blockchain/.gitlab/` (see GitLab Flow README in that template). After the first deploy, confirm in-cluster URLs in those files match `kubectl get svc` in the target namespace (Barrage often exposes the main Service as `…-barrage-au`).
 
+CI **`DOCKERFILE_PATH`** must be **repo-root-relative**, e.g. `bios-multilevel-platform-services/dashboard/Dockerfile`, not `dashboard/Dockerfile` alone. If the image build fails at `COPY` with “file not found”, the Docker build context is wrong — ask devops how `build-docker-image-v3.sh` sets context for monorepo paths (it should match this directory so `COPY prediction`, `COPY database`, etc. resolve).
+
 For direct API checks from your host:
 
 ```sh

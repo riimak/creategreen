@@ -7,6 +7,15 @@ const { feelessStatus } = require('./feeless');
 const { buildFeelessTransaction } = require('./feeless-builder');
 
 const PORT = Number(process.env.BLOCKCHAIN_PORT || 8092);
+const accessLogEnabled = process.env.BLOCKCHAIN_ACCESS_LOG !== 'false';
+/** JSON store (sync) vs pg store (async) — always await. */
+const S = (p) => Promise.resolve(p);
+function log(level, msg) {
+  const line = `${new Date().toISOString()} [blockchain] ${msg}`;
+  if (level === 'error') console.error(line);
+  else if (level === 'warn') console.warn(line);
+  else console.log(line);
+}
 
 // Use PostgreSQL if DATABASE_URL is set, otherwise JSON file.
 let store;
@@ -94,7 +103,8 @@ async function processEvent(event) {
   }
 
   const key = dedupeKey(event);
-  if (store.markSeen(key)) return { accepted: false, reason: 'duplicate', dedupeKey: key };
+  const priorSeen = await S(store.markSeen(key));
+  if (priorSeen) return { accepted: false, reason: 'duplicate', dedupeKey: key };
 
   const encoded = encodeEvent(event);
   const account = deriveAccount(encoded.deviceId || encoded.sourceId);
@@ -121,7 +131,7 @@ async function processEvent(event) {
     sourceRef: event.sourceRef || null,
     dedupeKey: key,
   };
-  store.put(record);
+  await S(store.put(record));
 
   const maxRetries = Number(process.env.BLOCKCHAIN_MAX_RETRIES || 3);
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
@@ -133,14 +143,14 @@ async function processEvent(event) {
       record.status = 'deferred';
       record.lastError = `relay cooling down for ${cs.cooldownSecondsRemaining}s`;
       record.updatedAt = new Date().toISOString();
-      store.put(record);
+      await S(store.put(record));
       return { accepted: false, deferred: true, ...record };
     }
 
     try {
       record.status = 'submitting';
       record.submittedAt = new Date().toISOString();
-      store.put(record);
+      await S(store.put(record));
       let submitPayloadHex = encoded.hex;
       if (relay.mode === 'json-rpc' && String(process.env.STEALTH_ENABLE_REAL_BROADCAST || 'false').toLowerCase() === 'true') {
         const built = await buildFeelessTransaction({ payloadHex: encoded.hex, relay });
@@ -164,14 +174,14 @@ async function processEvent(event) {
       record.retryCounter = attempt;
       record.updatedAt = new Date().toISOString();
       if (record.status === 'confirmed') record.confirmedAt = record.updatedAt;
-      store.put(record);
-      store.markSeen(key, { id, txId: record.txId, status: record.status, seenAt: record.updatedAt });
+      await S(store.put(record));
+      await S(store.markSeen(key, { id, txId: record.txId, status: record.status, seenAt: record.updatedAt }));
       return { accepted: true, ...record };
     } catch (error) {
       record.status = 'retrying';
       record.retryCounter = attempt + 1;
       record.lastError = error.message;
-      store.put(record);
+      await S(store.put(record));
       // small backoff between attempts to avoid a tight retry-storm
       if (attempt < maxRetries) await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
     }
@@ -179,8 +189,8 @@ async function processEvent(event) {
 
   record.status = 'failed';
   record.updatedAt = new Date().toISOString();
-  store.put(record);
-  store.markSeen(key, { id, status: record.status, seenAt: record.updatedAt });
+  await S(store.put(record));
+  await S(store.markSeen(key, { id, status: record.status, seenAt: record.updatedAt }));
   return { accepted: true, ...record };
 }
 
@@ -221,7 +231,7 @@ function eventNameFor(event) {
 
 async function chainTransactions(limit = 10) {
   const isProof = row => ['sent', 'confirmed'].includes(row.status) && Boolean(row.txId);
-  const all = store.list(isProof, 10000);
+  const all = await S(store.list(isProof, 10000));
   const events = all.slice(0, limit);
   const byEvent = {};
   const bySource = {};
@@ -268,7 +278,7 @@ async function chainTransactions(limit = 10) {
 
 async function chainBlocks(limit = 10) {
   if (relay.mode === 'mock') {
-    const events = store.list(() => true, limit * 5);
+    const events = await S(store.list(() => true, limit * 5));
     const groups = new Map();
     for (const event of events) {
       const minute = Math.floor((Date.parse(event.createdAt) || Date.now()) / 60000);
@@ -487,8 +497,10 @@ async function runCycle(reason = 'scheduled') {
       results,
     };
     state.progress = { phase: 'idle', processed: 0, total: 0, accepted: 0, deferred: 0 };
-    store.checkpoint('lastCycle', state.lastCycle);
-    store.setMeta('status', state);
+    await S(store.checkpoint('lastCycle', state.lastCycle));
+    await S(store.setMeta('status', state));
+    const okN = results.filter(r => r.status === 'ok').length;
+    log('info', `[cycle] ${reason}: ${okN}/${results.length} sources ok`);
     return state.lastCycle;
   } finally {
     state.running = false;
@@ -517,7 +529,7 @@ async function reconfirmSentTransactions() {
   // Cap the per-cycle batch size so we don't hammer the gateway. The
   // RPC layer caches confirmed results, so subsequent passes are cheap.
   const batchCap = numberParam('BLOCKCHAIN_RECONFIRM_BATCH', 20);
-  const sent = store.list(row => row.status === 'sent' && Boolean(row.txId), batchCap);
+  const sent = await S(store.list(row => row.status === 'sent' && Boolean(row.txId), batchCap));
   if (sent.length === 0) return { checked: 0, promoted: 0 };
 
   // If the relay is in cool-down, skip this pass entirely; the cached
@@ -547,8 +559,8 @@ async function reconfirmSentTransactions() {
         confirmations,
         blockHash: blockHash || event.blockHash || null,
       };
-      store.put(updated);
-      store.markSeen(event.dedupeKey, { id: event.id, txId: event.txId, status: 'confirmed', seenAt: updated.confirmedAt });
+      await S(store.put(updated));
+      await S(store.markSeen(event.dedupeKey, { id: event.id, txId: event.txId, status: 'confirmed', seenAt: updated.confirmedAt }));
       promoted += 1;
     }
   }
@@ -607,10 +619,12 @@ async function handle(req, res) {
     if (req.method === 'GET' && url.pathname === '/events') {
       const status = url.searchParams.get('status');
       const limit = Math.min(Number(url.searchParams.get('limit') || 100), 500);
-      return json(res, 200, { data: store.list(row => !status || row.status === status, limit) });
+      const data = await S(store.list(row => !status || row.status === status, limit));
+      return json(res, 200, { data });
     }
     if (req.method === 'GET' && url.pathname === '/events/latest') {
-      return json(res, 200, store.latest() || {});
+      const latest = await S(store.latest());
+      return json(res, 200, latest || {});
     }
     if (req.method === 'GET' && url.pathname === '/decode') {
       return json(res, 200, decodeEvent(url.searchParams.get('payload') || ''));
@@ -634,25 +648,36 @@ async function handle(req, res) {
     }
     if (req.method === 'GET' && url.pathname.startsWith('/events/')) {
       const id = decodeURIComponent(url.pathname.slice('/events/'.length));
-      const record = store.get(id);
+      const record = await S(store.get(id));
       return record ? json(res, 200, record) : json(res, 404, { error: 'event not found' });
     }
     if (req.method === 'GET' && url.pathname.startsWith('/verify/')) {
       const txId = decodeURIComponent(url.pathname.slice('/verify/'.length));
-      const record = store.get(txId);
+      const record = await S(store.get(txId));
       const chain = await relay.verify(txId);
       return json(res, 200, { txId, localRecordFound: Boolean(record), record, chain });
     }
     return json(res, 404, { error: 'not found' });
   } catch (error) {
+    log('error', `${url.pathname}: ${error.message}`);
     return json(res, 500, { error: error.message });
   }
 }
 
 if (require.main === module) {
   startWorker();
-  http.createServer(handle).listen(PORT, () => {
-    console.log(`Blockchain service listening on http://localhost:${PORT}`);
+  http.createServer((req, res) => {
+    const started = Date.now();
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    res.on('finish', () => {
+      if (accessLogEnabled) log('info', `${req.method} ${url.pathname} -> ${res.statusCode} ${Date.now() - started}ms`);
+    });
+    handle(req, res).catch((err) => {
+      log('error', `unhandled ${req.method} ${url.pathname}: ${err.message}`);
+      if (!res.headersSent) json(res, 500, { error: err.message });
+    });
+  }).listen(PORT, () => {
+    log('info', `listening on http://0.0.0.0:${PORT} relay=${relay.mode} DATABASE_URL=${process.env.DATABASE_URL ? 'set' : 'unset'} ACCESS_LOG=${accessLogEnabled}`);
   });
 }
 

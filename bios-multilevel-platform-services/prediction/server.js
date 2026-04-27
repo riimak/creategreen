@@ -6,6 +6,15 @@ const { METRICS, metricInfo, targetInfo } = require('./metrics');
 
 const PORT = Number(process.env.PREDICTION_PORT || 8091);
 const MAX_HORIZON_HOURS = 48;
+const accessLogEnabled = process.env.PREDICTION_ACCESS_LOG !== 'false';
+/** JSON store (sync) vs pg store (async) — always await. */
+const S = (p) => Promise.resolve(p);
+function log(level, msg) {
+  const line = `${new Date().toISOString()} [prediction] ${msg}`;
+  if (level === 'error') console.error(line);
+  else if (level === 'warn') console.warn(line);
+  else console.log(line);
+}
 
 // Use PostgreSQL if DATABASE_URL is set, otherwise JSON file.
 let store;
@@ -212,7 +221,7 @@ async function maybeNotifyDataQuality(quality) {
   if (staleMinutes < threshold && quality.status !== 'insufficient_data') return null;
 
   const key = `notification:${quality.source}:${quality.metric}:${quality.status}`;
-  const previous = store.checkpoint(key);
+  const previous = await S(store.checkpoint(key));
   if (previous?.sentAt && Date.now() - Date.parse(previous.sentAt) < repeatMinutes * 60 * 1000) return null;
 
   const payload = {
@@ -232,7 +241,7 @@ async function maybeNotifyDataQuality(quality) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  store.checkpoint(key, { sentAt: new Date().toISOString(), status: res.status, payload });
+  await S(store.checkpoint(key, { sentAt: new Date().toISOString(), status: res.status, payload }));
   return payload;
 }
 
@@ -244,10 +253,10 @@ async function runForecast(params) {
   const records = await loadRecords({ source, hours, ...config() });
   const series = seriesFor(records, metric);
   const quality = dataQuality({ source, metric, hours, records, series });
-  store.append('dataQuality', quality);
+  await S(store.append('dataQuality', quality));
   if (quality.status === 'insufficient_data') {
     const artifact = insufficientForecast(source, metric, hours, quality);
-    store.append('forecasts', artifact);
+    await S(store.append('forecasts', artifact));
     return artifact;
   }
   const result = forecast(series, horizon);
@@ -267,7 +276,7 @@ async function runForecast(params) {
     computedAt: new Date().toISOString(),
     ...result,
   };
-  store.append('forecasts', artifact);
+  await S(store.append('forecasts', artifact));
   return artifact;
 }
 
@@ -277,7 +286,7 @@ async function runAnomalies(params) {
   const hours = Number(params.get('hours') || 24);
   const records = await loadRecords({ source, hours, ...config() });
   const series = seriesFor(records, metric);
-  const latestQuality = store.latest('dataQuality', row => row.source === source && row.metric === metric)
+  const latestQuality = (await S(store.latest('dataQuality', row => row.source === source && row.metric === metric)))
     || dataQuality({ source, metric, hours, records, series });
   const qualityAnomalies = [];
   if (['stale', 'insufficient_data', 'partial'].includes(latestQuality.status)) {
@@ -306,7 +315,7 @@ async function runAnomalies(params) {
     computedAt: new Date().toISOString(),
     anomalies: [...qualityAnomalies, ...anomalies(series)],
   };
-  store.append('anomalies', artifact);
+  await S(store.append('anomalies', artifact));
   return artifact;
 }
 
@@ -315,10 +324,10 @@ async function processTarget(target, reason = 'scheduled') {
   const horizon = numberParam('PREDICTION_HORIZON_HOURS', 24);
   const params = new URLSearchParams({ source: target.source, metric: target.metric, hours: String(hours), horizon: String(horizon) });
   const forecastArtifact = await runForecast(params);
-  const quality = store.latest('dataQuality', row => row.source === target.source && row.metric === target.metric);
+  const quality = await S(store.latest('dataQuality', row => row.source === target.source && row.metric === target.metric));
   if (quality) {
     await maybeNotifyDataQuality(quality).catch(error => {
-      store.append('runs', { id: `notification-${Date.now()}`, target: targetKey(target.source, target.metric), status: 'notification_failed', error: error.message });
+      void S(store.append('runs', { id: `notification-${Date.now()}`, target: targetKey(target.source, target.metric), status: 'notification_failed', error: error.message }));
     });
   }
   const anomalyArtifact = await runAnomalies(params);
@@ -329,7 +338,7 @@ async function processTarget(target, reason = 'scheduled') {
     lastAnomalyId: anomalyArtifact.id,
     reason,
   };
-  store.checkpoint(checkpoint.target, checkpoint);
+  await S(store.checkpoint(checkpoint.target, checkpoint));
   return checkpoint;
 }
 
@@ -357,33 +366,36 @@ async function runCycle(reason = 'scheduled') {
       finishedAt: new Date().toISOString(),
       results,
     };
-    store.append('runs', state.lastCycle);
-    store.setMeta('status', state);
+    await S(store.append('runs', state.lastCycle));
+    await S(store.setMeta('status', state));
+    const okN = results.filter(r => r.status === 'ok').length;
+    log('info', `[cycle] ${reason}: ${okN}/${results.length} targets ok`);
     return state.lastCycle;
   } finally {
     state.running = false;
   }
 }
 
-function listFromStore(kind, params) {
+async function listFromStore(kind, params) {
   const source = params.get('source');
   const metric = params.get('metric');
   const limit = Math.min(Number(params.get('limit') || 100), 500);
-  return store.list(kind, row => (!source || row.source === source) && (!metric || row.metric === metric), limit);
+  return await S(store.list(kind, row => (!source || row.source === source) && (!metric || row.metric === metric), limit));
 }
 
-function latestFromStore(kind, params) {
+async function latestFromStore(kind, params) {
   const source = params.get('source');
   const metric = params.get('metric');
-  return store.latest(kind, row => (!source || row.source === source) && (!metric || row.metric === metric));
+  return await S(store.latest(kind, row => (!source || row.source === source) && (!metric || row.metric === metric)));
 }
 
-function slaSummary(params) {
+async function slaSummary(params) {
   const window = params.get('window') || '24h';
   const windowHours = window === '1h' ? 1 : window === '7d' ? 168 : 24;
   const cutoff = Date.now() - windowHours * 3600 * 1000;
   const targetPercent = numberParam('SLA_TARGET_PERCENT', 95);
-  const rows = store.list('dataQuality', row => Date.parse(row.computedAt) >= cutoff, 10000).reverse();
+  const listed = await S(store.list('dataQuality', row => Date.parse(row.computedAt) >= cutoff, 10000));
+  const rows = listed.slice().reverse();
   const byTarget = new Map();
   for (const row of rows) {
     const key = targetKey(row.source, row.metric);
@@ -399,7 +411,9 @@ function slaSummary(params) {
     const insufficient = items.filter(row => row.status === 'insufficient_data').length;
     const available = items.filter(row => row.status !== 'insufficient_data').length;
     const fresh = items.filter(row => row.status !== 'stale').length;
-    const avgMissing = total ? items.reduce((sum, row) => sum + row.input.missingRatio, 0) / total : 0;
+    const avgMissing = total
+      ? items.reduce((sum, row) => sum + (row.input && typeof row.input.missingRatio === 'number' ? row.input.missingRatio : 0), 0) / total
+      : 0;
     let currentStale = 0;
     for (let i = items.length - 1; i >= 0 && ['stale', 'insufficient_data'].includes(items[i].status); i -= 1) currentStale += 1;
     const availabilityPercent = total ? (available / total) * 100 : 0;
@@ -465,10 +479,11 @@ async function handle(req, res) {
       return json(res, 200, stats);
     }
     if (req.method === 'GET' && url.pathname === '/status') {
+      const lastRun = await S(store.latest('runs'));
       return json(res, 200, {
         ...state,
         intervalMinutes: numberParam('PREDICTION_INTERVAL_MINUTES', 10),
-        targets: store.latest('runs')?.results?.map(result => {
+        targets: lastRun?.results?.map(result => {
           const [source, metric] = String(result.target || '').split(':');
           return targetInfo(source, metric);
         }) || parseTargets().map(target => targetInfo(target.source, target.metric)),
@@ -491,28 +506,29 @@ async function handle(req, res) {
       return json(res, 200, await runForecast(url.searchParams));
     }
     if (req.method === 'GET' && url.pathname === '/forecasts') {
-      return json(res, 200, { data: listFromStore('forecasts', url.searchParams) });
+      return json(res, 200, { data: await listFromStore('forecasts', url.searchParams) });
     }
     if (req.method === 'GET' && url.pathname === '/forecasts/latest') {
-      return json(res, 200, latestFromStore('forecasts', url.searchParams) || {});
+      return json(res, 200, await latestFromStore('forecasts', url.searchParams) || {});
     }
     if (req.method === 'GET' && url.pathname === '/anomalies') {
       if (url.searchParams.get('recompute') === 'true') {
         return json(res, 200, await runAnomalies(url.searchParams));
       }
-      return json(res, 200, { data: listFromStore('anomalies', url.searchParams) });
+      return json(res, 200, { data: await listFromStore('anomalies', url.searchParams) });
     }
     if (req.method === 'GET' && url.pathname === '/data-quality') {
-      return json(res, 200, { data: listFromStore('dataQuality', url.searchParams) });
+      return json(res, 200, { data: await listFromStore('dataQuality', url.searchParams) });
     }
     if (req.method === 'GET' && url.pathname === '/data-quality/latest') {
-      return json(res, 200, latestFromStore('dataQuality', url.searchParams) || {});
+      return json(res, 200, await latestFromStore('dataQuality', url.searchParams) || {});
     }
     if (req.method === 'GET' && url.pathname === '/sla') {
-      return json(res, 200, slaSummary(url.searchParams));
+      return json(res, 200, await slaSummary(url.searchParams));
     }
     return json(res, 404, { error: 'not found' });
   } catch (error) {
+    log('error', `${url.pathname}: ${error.message}`);
     return json(res, 500, { error: error.message });
   }
 }
@@ -526,22 +542,36 @@ function startScheduler() {
   runCycle(process.env.PREDICTION_INIT_MODE || 'resume').catch(error => {
     state.lifecycle = 'degraded';
     state.lastCycle = { id: `run-${Date.now()}`, status: 'failed', error: error.message, finishedAt: new Date().toISOString() };
-    store.append('runs', state.lastCycle);
+    log('error', `[cycle] init failed: ${error.message}`);
+    void S(store.append('runs', state.lastCycle));
   });
 
   setInterval(() => {
     state.nextRunAt = new Date(Date.now() + interval * 60 * 1000).toISOString();
     runCycle('scheduled').catch(error => {
       state.lifecycle = 'degraded';
-      store.append('runs', { id: `run-${Date.now()}`, status: 'failed', error: error.message, finishedAt: new Date().toISOString() });
+      log('error', `[cycle] scheduled failed: ${error.message}`);
+      void S(store.append('runs', { id: `run-${Date.now()}`, status: 'failed', error: error.message, finishedAt: new Date().toISOString() }));
     });
   }, interval * 60 * 1000);
 }
 
 if (require.main === module) {
   startScheduler();
-  http.createServer(handle).listen(PORT, () => {
-    console.log(`Prediction service listening on http://localhost:${PORT}`);
+  http.createServer((req, res) => {
+    const started = Date.now();
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    res.on('finish', () => {
+      if (accessLogEnabled) log('info', `${req.method} ${url.pathname} -> ${res.statusCode} ${Date.now() - started}ms`);
+    });
+    handle(req, res).catch((err) => {
+      log('error', `unhandled ${req.method} ${url.pathname}: ${err.message}`);
+      if (!res.headersSent) json(res, 500, { error: err.message });
+    });
+  }).listen(PORT, () => {
+    const hasDb = Boolean(process.env.DATABASE_URL);
+    const dataIn = process.env.PREDICTION_DATA_API_BASE || process.env.BIOS_API_BASE || process.env.BIOS_OUTPUT_DIR || 'not configured';
+    log('info', `listening on http://0.0.0.0:${PORT} store=${hasDb ? 'postgres' : 'json'} data=${typeof dataIn === 'string' && dataIn.length > 40 ? dataIn.slice(0, 40) + '…' : dataIn} ACCESS_LOG=${accessLogEnabled}`);
   });
 }
 

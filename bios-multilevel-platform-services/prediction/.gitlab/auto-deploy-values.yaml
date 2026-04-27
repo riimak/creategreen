@@ -1,0 +1,116 @@
+# Prediction service — internal ClusterIP only (no public ingress).
+replicaCount: 1
+strategyType: "RollingUpdate"
+
+image:
+  repository: git.barrage.net/bios-multilevel/bios-multilevel-dashboard
+  tag: stable
+  pullPolicy: IfNotPresent
+  secrets:
+    - name: gitlab-registry-bios-multilevel-bios-multilevel-dashboard
+
+application:
+  track: stable
+  tier: app
+
+barrage:
+  vault:
+    create: false
+
+service:
+  enabled: true
+  name: bios-pred
+  type: ClusterIP
+  externalPort: 8091
+  internalPort: 8091
+
+ingress:
+  enabled: false
+  path: "/"
+  tls:
+    enabled: false
+
+livenessProbe:
+  path: "/health"
+  initialDelaySeconds: 15
+  timeoutSeconds: 5
+  scheme: "HTTP"
+  probeType: "httpGet"
+
+readinessProbe:
+  path: "/health"
+  initialDelaySeconds: 5
+  timeoutSeconds: 5
+  scheme: "HTTP"
+  probeType: "httpGet"
+
+startupProbe:
+  enabled: true
+  path: "/health"
+  initialDelaySeconds: 5
+  timeoutSeconds: 5
+  failureThreshold: 30
+  periodSeconds: 5
+  scheme: "HTTP"
+  probeType: "httpGet"
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+postgresql:
+  managed: false
+
+persistence:
+  enabled: false
+
+extraVolumes:
+  - name: pg-ca
+    secret:
+      secretName: bios-pg-ca
+      optional: true
+extraVolumeMounts:
+  - name: pg-ca
+    mountPath: /etc/ssl/pg
+    readOnly: true
+
+serviceAccount:
+  name: bios-multilevel-sa
+  annotations: {}
+  createNew: true
+
+podDisruptionBudget:
+  enabled: false
+
+networkPolicy:
+  enabled: false
+
+extraEnv:
+  - name: PREDICTION_PORT
+    value: "8091"
+  - name: PREDICTION_INTERVAL_MINUTES
+    value: "10"
+  - name: PREDICTION_TARGETS
+    value: "auto"
+  - name: PREDICTION_STATIONS
+    value: "OS1BIOS,OS2BIOS,SOLAXBIOS"
+  - name: PREDICTION_INIT_MODE
+    value: "resume"
+  - name: PREDICTION_BACKFILL_HOURS
+    value: "72"
+  - name: PREDICTION_EXPECTED_SAMPLE_MINUTES
+    value: "10"
+  - name: PREDICTION_MIN_SAMPLES
+    value: "6"
+  - name: PREDICTION_STALE_AFTER_MINUTES
+    value: "30"
+  - name: PREDICTION_MISSING_RATIO_WARN
+    value: "0.3"
+  - name: SLA_TARGET_PERCENT
+    value: "95"
+  - name: DATABASE_CA_FILE
+    value: "/etc/ssl/pg/ca.crt"

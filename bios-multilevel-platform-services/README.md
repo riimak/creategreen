@@ -37,6 +37,10 @@ The dashboard proxies to the two services over the Docker network:
 - `http://prediction:8091`
 - `http://blockchain:8092`
 
+### Production (Barrage GitLab)
+
+The repo uses the **monorepo** variables from `devops/ci-template` (`MONOREPO_TARGET_DIR`, `TARGET_APP`, `DOCKERFILE_PATH`, `APPLICATION_IMAGE_NAME_TAG`, `HELM_RELEASE_PREFIX`). Each app has its own Helm values under `dashboard/.gitlab/`, `prediction/.gitlab/`, and `blockchain/.gitlab/` (see GitLab Flow README in that template). After the first deploy, confirm in-cluster URLs in those files match `kubectl get svc` in the target namespace (Barrage often exposes the main Service as `…-barrage-au`).
+
 For direct API checks from your host:
 
 ```sh

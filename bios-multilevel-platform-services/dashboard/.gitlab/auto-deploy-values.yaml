@@ -1,0 +1,98 @@
+# Dashboard — Deno HTTP + ingress (operations UI).
+# See template: devops/ci-template monorepo (.gitlab per app under MONOREPO_TARGET_DIR).
+replicaCount: 1
+strategyType: "RollingUpdate"
+
+image:
+  repository: git.barrage.net/bios-multilevel/bios-multilevel-dashboard
+  tag: stable
+  pullPolicy: IfNotPresent
+  secrets:
+    - name: gitlab-registry-bios-multilevel-bios-multilevel-dashboard
+
+application:
+  track: stable
+  tier: app
+
+barrage:
+  vault:
+    create: false
+
+service:
+  enabled: true
+  name: bios-mlevel
+  type: ClusterIP
+  externalPort: 8000
+  internalPort: 8000
+
+ingress:
+  enabled: true
+  path: "/"
+  tls:
+    enabled: true
+    acme: true
+    secretName: ""
+    useDefaultSecret: false
+
+livenessProbe:
+  path: "/health"
+  initialDelaySeconds: 15
+  timeoutSeconds: 5
+  scheme: "HTTP"
+  probeType: "httpGet"
+  httpHeaders: []
+
+readinessProbe:
+  path: "/health"
+  initialDelaySeconds: 5
+  timeoutSeconds: 5
+  scheme: "HTTP"
+  probeType: "httpGet"
+  httpHeaders: []
+
+startupProbe:
+  enabled: true
+  path: "/health"
+  initialDelaySeconds: 5
+  timeoutSeconds: 5
+  failureThreshold: 30
+  periodSeconds: 5
+  scheme: "HTTP"
+  probeType: "httpGet"
+  httpHeaders: []
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 50m
+    memory: 128Mi
+
+postgresql:
+  managed: false
+
+persistence:
+  enabled: false
+
+serviceAccount:
+  name: bios-multilevel-sa
+  annotations: {}
+  createNew: true
+
+podDisruptionBudget:
+  enabled: false
+
+networkPolicy:
+  enabled: false
+
+# Upstream APIs (same K8s namespace). After first deploy, verify:
+#   kubectl get svc -n <namespace>
+# Barrage often names the main ClusterIP <release>-barrage-au — adjust hosts if yours differ.
+extraEnv:
+  - name: PREDICTION_SERVICE_URL
+    value: "http://bios-prediction-production-barrage-au:8091"
+  - name: BLOCKCHAIN_SERVICE_URL
+    value: "http://bios-blockchain-production-barrage-au:8092"
+  - name: DASHBOARD_EVENT_POLL_SECONDS
+    value: "3"

@@ -3,22 +3,91 @@ include:
     ref: v1.4.3
     file: GitlabFlow/Deploy-custom.yml
 
+# Monorepo root for bios-multilevel-platform-services/{dashboard,prediction,blockchain}
 variables:
-  HELM_RELEASE_PREFIX: bios-multilevel-bios-multilevel-dashboard
+  MONOREPO_TARGET_DIR: bios-multilevel-platform-services
 
-build-bios-multilevel:
+# ─── Dashboard (Deno + ingress) ───
+build-dashboard:
   extends: .build
+  variables:
+    TARGET_APP: dashboard
+    DOCKERFILE_PATH: dashboard/Dockerfile
+    APPLICATION_IMAGE_NAME_TAG: dashboard
   rules:
     - !reference [.build, rules]
     - when: on_success
 
-production-bios-multilevel:
+production-dashboard:
   extends: .production
   stage: deploy
+  variables:
+    TARGET_APP: dashboard
+    APPLICATION_IMAGE_NAME_TAG: dashboard
+    HELM_RELEASE_PREFIX: bios-dashboard
   environment:
+    name: production/dashboard
     url: https://bios-multilevel.barrage.net
   needs:
-    - job: build-bios-multilevel
+    - job: build-dashboard
+      optional: true
+    - job: production-prediction
+      optional: true
+    - job: production-blockchain
+      optional: true
+  rules:
+    - !reference [.production, rules]
+    - when: on_success
+
+# ─── Prediction (Node API) ───
+build-prediction:
+  extends: .build
+  variables:
+    TARGET_APP: prediction
+    DOCKERFILE_PATH: prediction/Dockerfile
+    APPLICATION_IMAGE_NAME_TAG: prediction
+  rules:
+    - !reference [.build, rules]
+    - when: on_success
+
+production-prediction:
+  extends: .production
+  stage: deploy
+  variables:
+    TARGET_APP: prediction
+    APPLICATION_IMAGE_NAME_TAG: prediction
+    HELM_RELEASE_PREFIX: bios-prediction
+  environment:
+    name: production/prediction
+  needs:
+    - job: build-prediction
+      optional: true
+  rules:
+    - !reference [.production, rules]
+    - when: on_success
+
+# ─── Blockchain (Node API) ───
+build-blockchain:
+  extends: .build
+  variables:
+    TARGET_APP: blockchain
+    DOCKERFILE_PATH: blockchain/Dockerfile
+    APPLICATION_IMAGE_NAME_TAG: blockchain
+  rules:
+    - !reference [.build, rules]
+    - when: on_success
+
+production-blockchain:
+  extends: .production
+  stage: deploy
+  variables:
+    TARGET_APP: blockchain
+    APPLICATION_IMAGE_NAME_TAG: blockchain
+    HELM_RELEASE_PREFIX: bios-blockchain
+  environment:
+    name: production/blockchain
+  needs:
+    - job: build-blockchain
       optional: true
   rules:
     - !reference [.production, rules]

@@ -1,6 +1,4 @@
-# =============================================================================
-# BIOS Multi-level Platform — Production Environment Values
-# =============================================================================
+# Production overrides — merged per Barrage DEPLOY_* / HELM_UPGRADE_EXTRA_ARGS pattern
 replicaCount: 1
 
 ingress:
@@ -9,3 +7,4 @@ ingress:
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"

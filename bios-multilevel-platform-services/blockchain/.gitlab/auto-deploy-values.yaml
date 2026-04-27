@@ -1,0 +1,124 @@
+# Blockchain service — internal ClusterIP only.
+replicaCount: 1
+strategyType: "RollingUpdate"
+
+image:
+  repository: git.barrage.net/bios-multilevel/bios-multilevel-dashboard
+  tag: stable
+  pullPolicy: IfNotPresent
+  secrets:
+    - name: gitlab-registry-bios-multilevel-bios-multilevel-dashboard
+
+application:
+  track: stable
+  tier: app
+
+barrage:
+  vault:
+    create: false
+
+service:
+  enabled: true
+  name: bios-bc
+  type: ClusterIP
+  externalPort: 8092
+  internalPort: 8092
+
+ingress:
+  enabled: false
+  path: "/"
+  tls:
+    enabled: false
+
+livenessProbe:
+  path: "/health"
+  initialDelaySeconds: 20
+  timeoutSeconds: 5
+  scheme: "HTTP"
+  probeType: "httpGet"
+
+readinessProbe:
+  path: "/health"
+  initialDelaySeconds: 10
+  timeoutSeconds: 5
+  scheme: "HTTP"
+  probeType: "httpGet"
+
+startupProbe:
+  enabled: true
+  path: "/health"
+  initialDelaySeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 30
+  periodSeconds: 5
+  scheme: "HTTP"
+  probeType: "httpGet"
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+postgresql:
+  managed: false
+
+persistence:
+  enabled: false
+
+extraVolumes:
+  - name: pg-ca
+    secret:
+      secretName: bios-pg-ca
+      optional: true
+extraVolumeMounts:
+  - name: pg-ca
+    mountPath: /etc/ssl/pg
+    readOnly: true
+
+serviceAccount:
+  name: bios-multilevel-sa
+  annotations: {}
+  createNew: true
+
+podDisruptionBudget:
+  enabled: false
+
+networkPolicy:
+  enabled: false
+
+extraEnv:
+  - name: BLOCKCHAIN_PORT
+    value: "8092"
+  - name: PREDICTION_SERVICE_URL
+    value: "http://bios-prediction-production-barrage-au:8091"
+  - name: BLOCKCHAIN_INTERVAL_SECONDS
+    value: "10"
+  - name: BLOCKCHAIN_RECONFIRM_SECONDS
+    value: "20"
+  - name: BLOCKCHAIN_EVENT_SOURCE
+    value: "prediction"
+  - name: BLOCKCHAIN_EVENT_SCHEMA
+    value: "v2"
+  - name: BLOCKCHAIN_MAX_BROADCASTS_PER_CYCLE
+    value: "3"
+  - name: BLOCKCHAIN_MAX_RETRIES
+    value: "3"
+  - name: BLOCKCHAIN_INIT_MODE
+    value: "resume"
+  - name: BLOCKCHAIN_RETENTION_COUNT
+    value: "5000"
+  - name: STEALTH_RELAY_MODE
+    value: "json-rpc"
+  - name: STEALTH_RPC_URL
+    value: "https://api-gateway-mainnet.stealthmonitor.xyz"
+  - name: STEALTH_RPC_ID
+    value: "666420"
+  - name: STEALTH_ENABLE_REAL_BROADCAST
+    value: "true"
+  - name: STEALTH_RPC_COOLDOWN_SECONDS
+    value: "30"
+  - name: DATABASE_CA_FILE
+    value: "/etc/ssl/pg/ca.crt"

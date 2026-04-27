@@ -116,20 +116,8 @@ extraEnv:
     value: "/etc/ssl/pg/ca.crt"
   # Mars2 / BIOS API ingest. Without these three set, `loadRecords` falls back to
   # local export files which don't exist in the pod → 0 targets, no Mars2 logs, blank dashboard.
-  # `BIOS_API_BASE` is a CI variable; `BIOS_USERNAME`/`BIOS_PASSWORD` come from the
-  # `bios-mars2` Secret which is synced from GitLab CI variables in production-prediction
-  # before_script (see `.gitlab-ci.yml`).
+  # `BIOS_API_BASE` is committed (not a secret); `BIOS_USERNAME`/`BIOS_PASSWORD` are appended
+  # to this file from GitLab CI variables in `production-prediction.before_script`
+  # (see `.gitlab-ci.yml`).
   - name: BIOS_API_BASE
     value: "http://web.mars2.barrage.net:81"
-  - name: BIOS_USERNAME
-    valueFrom:
-      secretKeyRef:
-        name: bios-mars2
-        key: username
-        optional: true
-  - name: BIOS_PASSWORD
-    valueFrom:
-      secretKeyRef:
-        name: bios-mars2
-        key: password
-        optional: true

@@ -63,18 +63,23 @@ production-prediction:
   needs:
     - job: build-prediction
       optional: true
-  # Pull GitLab CI variables (BIOS_USERNAME / BIOS_PASSWORD) into a K8s Secret each deploy.
-  # auto-deploy-values.yaml references this via secretKeyRef so the prediction pod gets fresh creds.
+  # Append GitLab CI variables BIOS_USERNAME / BIOS_PASSWORD to auto-deploy-values.yaml
+  # before Helm reads it. kubectl is NOT configured during before_script in
+  # barrage-auto-deploy (KUBECONFIG is set up later in the deploy step), so we patch
+  # the values file directly instead of creating a Kubernetes Secret.
   before_script:
     - |
-      if [ -n "${BIOS_USERNAME}" ] && [ -n "${BIOS_PASSWORD}" ]; then
-        kubectl create secret generic bios-mars2 \
-          --namespace="${KUBE_NAMESPACE}" \
-          --from-literal=username="${BIOS_USERNAME}" \
-          --from-literal=password="${BIOS_PASSWORD}" \
-          --dry-run=client -o yaml | kubectl apply -f -
+      VALUES_FILE="bios-multilevel-platform-services/prediction/.gitlab/auto-deploy-values.yaml"
+      if [ -n "${BIOS_USERNAME:-}" ] && [ -n "${BIOS_PASSWORD:-}" ]; then
+        {
+          echo "  - name: BIOS_USERNAME"
+          echo "    value: \"${BIOS_USERNAME}\""
+          echo "  - name: BIOS_PASSWORD"
+          echo "    value: \"${BIOS_PASSWORD}\""
+        } >> "${VALUES_FILE}"
+        echo "Appended BIOS_USERNAME/BIOS_PASSWORD from CI variables to ${VALUES_FILE}"
       else
-        echo "WARN: BIOS_USERNAME/BIOS_PASSWORD not set as CI variables; bios-mars2 secret not synced."
+        echo "WARN: BIOS_USERNAME/BIOS_PASSWORD not set as CI variables; Mars2 ingest will be OFF."
       fi
   rules:
     - !reference [.production, rules]

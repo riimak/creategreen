@@ -10,7 +10,7 @@ const accessLogEnabled = process.env.PREDICTION_ACCESS_LOG !== 'false';
 /** JSON store (sync) vs pg store (async) — always await. */
 const S = (p) => Promise.resolve(p);
 function log(level, msg) {
-  const line = `${new Date().toISOString()} [prediction] ${msg}`;
+  const line = `${new Date().toISOString()} prediction — ${msg}`;
   if (level === 'error') console.error(line);
   else if (level === 'warn') console.warn(line);
   else console.log(line);
@@ -370,7 +370,7 @@ async function runCycle(reason = 'scheduled') {
     await S(store.setMeta('status', state));
     const okN = results.filter(r => r.status === 'ok').length;
     const brief = results.map((r) => `${r.target}:${r.status === 'ok' ? 'ok' : (r.error || 'fail')}`).join(' · ');
-    log('info', `[cycle] ${reason}: ${okN}/${results.length} targets ok — ${brief}`);
+    log('info', `cycle: ${reason}: ${okN}/${results.length} targets ok — ${brief}`);
     return state.lastCycle;
   } finally {
     state.running = false;
@@ -543,7 +543,7 @@ function startScheduler() {
   runCycle(process.env.PREDICTION_INIT_MODE || 'resume').catch(error => {
     state.lifecycle = 'degraded';
     state.lastCycle = { id: `run-${Date.now()}`, status: 'failed', error: error.message, finishedAt: new Date().toISOString() };
-    log('error', `[cycle] init failed: ${error.message}`);
+    log('error', `cycle: init failed: ${error.message}`);
     void S(store.append('runs', state.lastCycle));
   });
 
@@ -551,7 +551,7 @@ function startScheduler() {
     state.nextRunAt = new Date(Date.now() + interval * 60 * 1000).toISOString();
     runCycle('scheduled').catch(error => {
       state.lifecycle = 'degraded';
-      log('error', `[cycle] scheduled failed: ${error.message}`);
+      log('error', `cycle: scheduled failed: ${error.message}`);
       void S(store.append('runs', { id: `run-${Date.now()}`, status: 'failed', error: error.message, finishedAt: new Date().toISOString() }));
     });
   }, interval * 60 * 1000);

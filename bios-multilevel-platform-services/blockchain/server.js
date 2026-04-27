@@ -11,7 +11,7 @@ const accessLogEnabled = process.env.BLOCKCHAIN_ACCESS_LOG !== 'false';
 /** JSON store (sync) vs pg store (async) — always await. */
 const S = (p) => Promise.resolve(p);
 function log(level, msg) {
-  const line = `${new Date().toISOString()} [blockchain] ${msg}`;
+  const line = `${new Date().toISOString()} blockchain — ${msg}`;
   if (level === 'error') console.error(line);
   else if (level === 'warn') console.warn(line);
   else console.log(line);
@@ -166,7 +166,7 @@ async function processEvent(event) {
       const receipt = await relay.submit({ payloadHex: submitPayloadHex, account });
       if (process.env.BLOCKCHAIN_RELAY_LOG !== 'false') {
         const tx = receipt.txId || receipt.transactionId;
-        log('info', `[relay] Stealth submit mode=${receipt.mode || relay.mode} relayStatus=${receipt.relayStatus || 'ok'} txId=${tx ?? 'none'}`);
+        log('info', `relay: Stealth submit mode=${receipt.mode || relay.mode} relayStatus=${receipt.relayStatus || 'ok'} txId=${tx ?? 'none'}`);
       }
       record.status = receipt.relayStatus === 'not_submitted'
         ? 'encoded'
@@ -456,7 +456,7 @@ async function predictionEvents() {
   }
   if (process.env.BLOCKCHAIN_INGEST_LOG !== 'false') {
     const tgt = (status.targets || []).length;
-    console.log(`${new Date().toISOString()} [blockchain-ingest] pulled prediction HTTP APIs (${tgt} targets in status) → built ${events.length} candidate event(s) for anchoring`);
+    log('info', `ingest: pulled prediction HTTP APIs (${tgt} targets in status) → built ${events.length} candidate event(s) for anchoring`);
   }
   return events;
 }
@@ -511,7 +511,7 @@ async function runCycle(reason = 'scheduled') {
     const detail = results.map((r) =>
       `${r.source}:${r.status}${r.events !== undefined ? `:evt=${r.events}` : ''}${r.accepted !== undefined ? `:accepted=${r.accepted}` : ''}`,
     ).join(' · ');
-    log('info', `[cycle] ${reason}: ${okN}/${results.length} sources ok — ${detail}`);
+    log('info', `cycle: ${reason}: ${okN}/${results.length} sources ok — ${detail}`);
     return state.lastCycle;
   } finally {
     state.running = false;

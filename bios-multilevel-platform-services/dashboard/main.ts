@@ -8,7 +8,8 @@ const stableSignatures = new Map<string, string>();
 const accessLogEnabled = Deno.env.get("DASHBOARD_ACCESS_LOG") !== "false";
 
 function logLine(level: "info" | "warn" | "error", msg: string): void {
-  const line = `${new Date().toISOString()} [dashboard] ${msg}`;
+  /** Use a single label; `] [poll]` as two tokens is easy to mis-read as `[dashboard[]` in terminals. */
+  const line = `${new Date().toISOString()} dashboard — ${msg}`;
   if (level === "error") console.error(line);
   else if (level === "warn") console.warn(line);
   else console.log(line);
@@ -102,7 +103,7 @@ function broadcastIfChanged(type: string, data: { payload?: unknown }): void {
 /** Chain/RPC routes can take 10–60s; default fetch has no deadline and may hang shorter stacks — cap here. */
 function upstreamTimeoutMs(kind: "prediction" | "blockchain", path: string): number {
   if (kind === "blockchain" && /^\/(?:chain\/|feeless\/)/.test(path)) {
-    return Number(Deno.env.get("DASHBOARD_UPSTREAM_BLOCKCHAIN_MS") || "60000");
+    return Number(Deno.env.get("DASHBOARD_UPSTREAM_BLOCKCHAIN_MS") || "120000");
   }
   return Number(Deno.env.get("DASHBOARD_UPSTREAM_MS") || "20000");
 }
@@ -184,7 +185,7 @@ async function pollServices(): Promise<void> {
     broadcastIfChanged(type, data);
   }
 
-  const summary = `[poll] ${okCount}/${tasks.length} upstream ok`;
+  const summary = `poll ${okCount}/${tasks.length} upstream ok`;
   if (issues.length > 0) {
     const detail = issues.join("; ");
     logLine("warn", `${summary}; failures: ${detail.length > 800 ? `${detail.slice(0, 800)}…` : detail}`);

@@ -1,0 +1,8 @@
+{
+  "name": "bios-database-shared",
+  "private": true,
+  "version": "0.1.0",
+  "dependencies": {
+    "pg": "8.16.0"
+  }
+}

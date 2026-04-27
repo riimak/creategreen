@@ -19,7 +19,6 @@
     "typeforce": "1.18.0",
     "varuint-bitcoin": "1.1.2",
     "wif": "2.0.6",
-    "xorshift.js": "1.0.5",
-    "pg": "8.16.0"
+    "xorshift.js": "1.0.5"
   }
 }

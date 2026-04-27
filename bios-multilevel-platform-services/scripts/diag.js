@@ -20,8 +20,8 @@
 
 'use strict';
 
-const SELF_PRED = process.env.PREDICTION_SELF_URL || `http://localhost:${process.env.PREDICTION_PORT || 8091}`;
-const SELF_BC = process.env.BLOCKCHAIN_SELF_URL || `http://localhost:${process.env.BLOCKCHAIN_PORT || 8092}`;
+const LOCAL_PRED = process.env.PREDICTION_SELF_URL || `http://localhost:${process.env.PREDICTION_PORT || 8091}`;
+const LOCAL_BC = process.env.BLOCKCHAIN_SELF_URL || `http://localhost:${process.env.BLOCKCHAIN_PORT || 8092}`;
 
 const PRED_URL = process.env.PREDICTION_SERVICE_URL
   || 'http://bios-prediction-production-barrage-autodeploy:8091';
@@ -29,6 +29,10 @@ const BC_URL = process.env.BLOCKCHAIN_SERVICE_URL
   || 'http://bios-blockchain-production-barrage-autodeploy:8092';
 const DASH_URL = process.env.DASHBOARD_URL
   || 'http://bios-dashboard-production-barrage-autodeploy:8000';
+
+/** Resolved at startup: which pod we're in and which Service URL to use for the OTHER service. */
+let SELF_PRED = PRED_URL;
+let SELF_BC = BC_URL;
 
 const STATIONS = (process.env.PREDICTION_STATIONS || 'OS1BIOS,OS2BIOS,SOLAXBIOS')
   .split(',').map(s => s.trim()).filter(Boolean);
@@ -82,6 +86,24 @@ function host(u) {
 }
 
 // ─── checks ──────────────────────────────────────────────────────────────────
+
+async function detectPod() {
+  // Probe localhost:8091 and localhost:8092 — whichever responds tells us which pod we're in.
+  // If neither responds, both checks fall back to cluster-DNS Service URLs.
+  section('Pod detection');
+  const probes = await Promise.all([
+    timedFetch(`${LOCAL_PRED}/health`, { timeoutMs: 1500 }),
+    timedFetch(`${LOCAL_BC}/health`, { timeoutMs: 1500 }),
+  ]);
+  const isPred = !probes[0].error && probes[0].res.ok;
+  const isBc = !probes[1].error && probes[1].res.ok;
+  if (isPred) { SELF_PRED = LOCAL_PRED; SELF_BC = BC_URL; ok('Detected pod', `prediction (localhost:8091 healthy) → blockchain via ${SELF_BC}`); }
+  else if (isBc) { SELF_BC = LOCAL_BC; SELF_PRED = PRED_URL; ok('Detected pod', `blockchain (localhost:8092 healthy) → prediction via ${SELF_PRED}`); }
+  else {
+    SELF_PRED = PRED_URL; SELF_BC = BC_URL;
+    notice('Detected pod', 'neither localhost:8091 nor :8092 responded — using Service URLs for both');
+  }
+}
 
 async function checkEnvSummary() {
   section('Environment summary (this pod)');
@@ -242,12 +264,19 @@ async function checkDatabase() {
     notice('Database', 'DATABASE_URL not set — store is JSON-on-disk');
     return;
   }
-  // pg should be available in this pod (database/ subfolder installs it).
+  // pg lives at /app/database/node_modules/pg in both prediction and blockchain images.
+  // Resolve it explicitly so the script works no matter where it's invoked from.
   let Pool;
-  try {
-    ({ Pool } = require('pg'));
-  } catch (err) {
-    notice('Database', `pg module not found in this pod (${err.message})`);
+  const candidates = [
+    'pg',
+    '/app/database/node_modules/pg',
+    require('path').resolve(__dirname, '..', 'database', 'node_modules', 'pg'),
+  ];
+  for (const c of candidates) {
+    try { ({ Pool } = require(c)); break; } catch { /* try next */ }
+  }
+  if (!Pool) {
+    notice('Database', `pg module not resolvable from any of: ${candidates.join(', ')}`);
     return;
   }
   const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
@@ -304,6 +333,7 @@ async function checkStealthRpc() {
   console.log(`when : ${new Date().toISOString()}`);
   console.log(`pod  : ${process.env.HOSTNAME || 'unknown'}`);
 
+  await detectPod();
   await checkEnvSummary();
   await checkMars2();
   await checkPrediction();

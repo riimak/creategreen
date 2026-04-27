@@ -8,6 +8,7 @@ RUN cd blockchain && npm install --omit=dev
 
 COPY bios-multilevel-platform-services/blockchain ./blockchain
 COPY bios-multilevel-platform-services/database ./database
+COPY bios-multilevel-platform-services/scripts ./scripts
 # database/* uses require('pg'); Node resolves from database/node_modules (not blockchain/node_modules).
 RUN cd database && npm install --omit=dev
 

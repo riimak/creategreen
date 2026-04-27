@@ -5,6 +5,7 @@ WORKDIR /app
 # Build context must be Git / compose repo root; paths are root-relative.
 COPY bios-multilevel-platform-services/prediction ./prediction
 COPY bios-multilevel-platform-services/database ./database
+COPY bios-multilevel-platform-services/scripts ./scripts
 
 RUN cd database && npm install --omit=dev
 

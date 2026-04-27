@@ -726,7 +726,9 @@ const I18N = {
     'input.note.behind':    'Posljednje očitanje je staro {age}. Unutar 24h SLA prozora; cilj svježine je 30m. Podaci se osvježavaju automatski sa svakim izvještajem postaje.',
 
     // anomalies
-    'anomalies.clear':      'svi senzori rade normalno',
+    'anomalies.clear':      'nema zabilježenih model-anomalija za praćene metrike',
+    'anomalies.no_evidence':'nemamo dovoljno mjerenja za procjenu — čekaju se ciklusi predikcije i ulazni podaci',
+    'anomalies.input_weak': 'ulazni podaci ne zadovoljavaju SLA ili su nedostatni — ne možemo tvrditi da su senzori u redu',
     'anomalies.count_one':  '{n} očitanje',
     'anomalies.count_many': '{n} očitanja',
     'anomalies.soiling_warn':'inverter kasni {min}m za senzorima zračenja',
@@ -900,7 +902,9 @@ const I18N = {
     'input.action.out':     'Latest reading is {age} old, beyond the 24h SLA. Stations may be offline.',
     'input.note.behind':    'Latest reading is {age} old. Within the 24h SLA window; live target is 30m. Data refreshes automatically with each station report.',
 
-    'anomalies.clear':      'all sensors reporting normally',
+    'anomalies.clear':      'no model-flagged anomalies on tracked metrics',
+    'anomalies.no_evidence':'not enough readings to assess — awaiting prediction cycles and input data',
+    'anomalies.input_weak': 'input data fails SLA or is insufficient — cannot assert sensors are healthy',
     'anomalies.count_one':  '{n} reading',
     'anomalies.count_many': '{n} readings',
     'anomalies.soiling_warn':'inverter {min}m behind irradiance sensors',
@@ -1562,6 +1566,24 @@ function renderAnomalies(anomalies){
   const extras = lastSoilingHint ? [lastSoilingHint] : [];
 
   if (flagged.length === 0 && extras.length === 0){
+    const agg = snap.sla?.aggregate;
+    const cycles = typeof agg?.totalCycles === 'number' ? agg.totalCycles : 0;
+    const avail = typeof agg?.availabilityPercent === 'number' ? agg.availabilityPercent : null;
+    const q = snap.quality;
+    const inputBad = q && (q.status === 'insufficient_data' || q.status === 'stale');
+    const noAssessmentYet = data.length === 0 && cycles === 0;
+    const slaSaysNoData = cycles > 0 && avail !== null && avail <= 0;
+
+    if (noAssessmentYet || (data.length === 0 && !agg && snap.predictionStatus?.lifecycle === 'initializing')){
+      setPill('anomalyPill', t('pill.awaiting'), 'info');
+      setHtml('anomalyList', `<div class="muted" style="font-size:12.5px">${t('anomalies.no_evidence')}</div>`);
+      return;
+    }
+    if (slaSaysNoData || inputBad || (avail !== null && avail <= 0)){
+      setPill('anomalyPill', t('pill.partial'), 'warn');
+      setHtml('anomalyList', `<div class="muted" style="font-size:12.5px">${t('anomalies.input_weak')}</div>`);
+      return;
+    }
     setPill('anomalyPill', t('pill.clear'), 'ok');
     setHtml('anomalyList', `<div class="muted" style="font-size:12.5px">${t('anomalies.clear')}</div>`);
     return;

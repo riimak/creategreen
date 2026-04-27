@@ -111,16 +111,25 @@ async function loadFromMars2(apiBase, username, password, source, hours) {
 }
 
 async function loadRecords({ source, hours = 72, dataDir, apiBase, mars2ApiBase, mars2Username, mars2Password }) {
+  let records;
+  let mode = 'export-files';
   if (mars2ApiBase && mars2Username && mars2Password) {
-    return loadFromMars2(mars2ApiBase, mars2Username, mars2Password, source, hours);
+    mode = 'mars2-api';
+    records = await loadFromMars2(mars2ApiBase, mars2Username, mars2Password, source, hours);
+  } else if (apiBase) {
+    mode = 'prediction-data-api';
+    records = await loadFromWorker(apiBase, source, hours);
+  } else {
+    const dir = dataDir || path.resolve(process.cwd(), 'output');
+    const file = fileForSource(dir, source);
+    const text = fs.readFileSync(file, 'utf8');
+    const cutoff = Math.floor(Date.now() / 1000) - Number(hours) * 3600;
+    records = parseExportText(text, source).filter(row => row.timestamp >= cutoff || row.timestamp < 2000000000);
   }
-  if (apiBase) return loadFromWorker(apiBase, source, hours);
-
-  const dir = dataDir || path.resolve(process.cwd(), 'output');
-  const file = fileForSource(dir, source);
-  const text = fs.readFileSync(file, 'utf8');
-  const cutoff = Math.floor(Date.now() / 1000) - Number(hours) * 3600;
-  return parseExportText(text, source).filter(row => row.timestamp >= cutoff || row.timestamp < 2000000000);
+  if (process.env.PREDICTION_INGEST_LOG !== 'false') {
+    console.log(`${new Date().toISOString()} [prediction-ingest] source=${source} rows=${records.length} mode=${mode}`);
+  }
+  return records;
 }
 
 function seriesFor(records, metric) {

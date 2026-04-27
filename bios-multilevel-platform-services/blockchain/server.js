@@ -164,6 +164,10 @@ async function processEvent(event) {
         submitPayloadHex = `rawtx:${built.rawTransactionHex}`;
       }
       const receipt = await relay.submit({ payloadHex: submitPayloadHex, account });
+      if (process.env.BLOCKCHAIN_RELAY_LOG !== 'false') {
+        const tx = receipt.txId || receipt.transactionId;
+        log('info', `[relay] Stealth submit mode=${receipt.mode || relay.mode} relayStatus=${receipt.relayStatus || 'ok'} txId=${tx ?? 'none'}`);
+      }
       record.status = receipt.relayStatus === 'not_submitted'
         ? 'encoded'
         : receipt.confirmed === false ? 'sent' : 'confirmed';
@@ -450,6 +454,10 @@ async function predictionEvents() {
       });
     }
   }
+  if (process.env.BLOCKCHAIN_INGEST_LOG !== 'false') {
+    const tgt = (status.targets || []).length;
+    console.log(`${new Date().toISOString()} [blockchain-ingest] pulled prediction HTTP APIs (${tgt} targets in status) → built ${events.length} candidate event(s) for anchoring`);
+  }
   return events;
 }
 
@@ -500,7 +508,10 @@ async function runCycle(reason = 'scheduled') {
     await S(store.checkpoint('lastCycle', state.lastCycle));
     await S(store.setMeta('status', state));
     const okN = results.filter(r => r.status === 'ok').length;
-    log('info', `[cycle] ${reason}: ${okN}/${results.length} sources ok`);
+    const detail = results.map((r) =>
+      `${r.source}:${r.status}${r.events !== undefined ? `:evt=${r.events}` : ''}${r.accepted !== undefined ? `:accepted=${r.accepted}` : ''}`,
+    ).join(' · ');
+    log('info', `[cycle] ${reason}: ${okN}/${results.length} sources ok — ${detail}`);
     return state.lastCycle;
   } finally {
     state.running = false;

@@ -369,7 +369,8 @@ async function runCycle(reason = 'scheduled') {
     await S(store.append('runs', state.lastCycle));
     await S(store.setMeta('status', state));
     const okN = results.filter(r => r.status === 'ok').length;
-    log('info', `[cycle] ${reason}: ${okN}/${results.length} targets ok`);
+    const brief = results.map((r) => `${r.target}:${r.status === 'ok' ? 'ok' : (r.error || 'fail')}`).join(' · ');
+    log('info', `[cycle] ${reason}: ${okN}/${results.length} targets ok — ${brief}`);
     return state.lastCycle;
   } finally {
     state.running = false;

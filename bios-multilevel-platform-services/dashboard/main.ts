@@ -99,17 +99,37 @@ function broadcastIfChanged(type: string, data: { payload?: unknown }): void {
   broadcast(type, data);
 }
 
+/** Chain/RPC routes can take 10–60s; default fetch has no deadline and may hang shorter stacks — cap here. */
+function upstreamTimeoutMs(kind: "prediction" | "blockchain", path: string): number {
+  if (kind === "blockchain" && /^\/(?:chain\/|feeless\/)/.test(path)) {
+    return Number(Deno.env.get("DASHBOARD_UPSTREAM_BLOCKCHAIN_MS") || "60000");
+  }
+  return Number(Deno.env.get("DASHBOARD_UPSTREAM_MS") || "20000");
+}
+
 async function fetchService(kind: "prediction" | "blockchain", path: string): Promise<unknown> {
   const base = serviceUrl(kind);
   if (!base) return { error: `${kind} service is not configured` };
-  const res = await fetch(`${base.replace(/\/$/, "")}${path}`);
-  if (!res.ok) return { error: `${kind} ${path}: HTTP ${res.status}` };
-  return res.json();
+  const url = `${base.replace(/\/$/, "")}${path}`;
+  const ms = upstreamTimeoutMs(kind, path);
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(ms) });
+    if (!res.ok) return { error: `${kind} ${path}: HTTP ${res.status}` };
+    return await res.json();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { error: `${kind} ${path}: ${msg}` };
+  }
 }
 
 let lastHeartbeatAt = 0;
+/** Avoid overlapping polls when interval < slow upstream (RPC); prevents duplicate log spam and piled requests. */
+let pollInFlight = false;
 
 async function pollServices(): Promise<void> {
+  if (pollInFlight) return;
+  pollInFlight = true;
+  try {
   // Send a heartbeat at most every 15s. The previous code beat on every
   // poll cycle (2s), which made the live-stream label flicker constantly.
   const now = Date.now();
@@ -170,6 +190,9 @@ async function pollServices(): Promise<void> {
     logLine("warn", `${summary}; failures: ${detail.length > 800 ? `${detail.slice(0, 800)}…` : detail}`);
   } else {
     logLine("info", summary);
+  }
+  } finally {
+    pollInFlight = false;
   }
 }
 
@@ -293,6 +316,11 @@ Deno.serve(async (req: Request) => {
   const pred = Boolean(serviceUrl("prediction"));
   const bc = Boolean(serviceUrl("blockchain"));
   const sec = Number(Deno.env.get("DASHBOARD_EVENT_POLL_SECONDS") || 3);
-  logLine("info", `ready: PREDICTION_SERVICE_URL=${pred ? "set" : "missing"} BLOCKCHAIN_SERVICE_URL=${bc ? "set" : "missing"} poll=${sec}s accessLog=${accessLogEnabled}`);
+  const tGeneral = upstreamTimeoutMs("prediction", "/status");
+  const tBc = upstreamTimeoutMs("blockchain", "/chain/status");
+  logLine(
+    "info",
+    `ready: prediction=${pred ? "set" : "missing"} blockchain=${bc ? "set" : "missing"} poll=${sec}s accessLog=${accessLogEnabled} fetchTimeout=${tGeneral}ms blockchainRpc=${tBc}ms`,
+  );
 }
 startPolling();

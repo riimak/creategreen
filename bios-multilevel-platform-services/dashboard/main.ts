@@ -4,6 +4,22 @@ const clients = new Set<ReadableStreamDefaultController<Uint8Array>>();
 const latest = new Map<string, unknown>();
 const stableSignatures = new Map<string, string>();
 
+/** Set `DASHBOARD_ACCESS_LOG=false` to disable per-request lines in container logs. */
+const accessLogEnabled = Deno.env.get("DASHBOARD_ACCESS_LOG") !== "false";
+
+function logLine(level: "info" | "warn" | "error", msg: string): void {
+  const line = `${new Date().toISOString()} [dashboard] ${msg}`;
+  if (level === "error") console.error(line);
+  else if (level === "warn") console.warn(line);
+  else console.log(line);
+}
+
+function isFetchErrorPayload(value: unknown): value is { error: string } {
+  return Boolean(
+    value && typeof value === "object" && "error" in value && typeof (value as { error: string }).error === "string",
+  );
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -124,6 +140,8 @@ async function pollServices(): Promise<void> {
   ];
 
   const settled = await Promise.allSettled(tasks.map(([, task]) => task));
+  let okCount = 0;
+  const issues: string[] = [];
   for (let index = 0; index < settled.length; index += 1) {
     const result = settled[index];
     const type = tasks[index][0];
@@ -131,11 +149,27 @@ async function pollServices(): Promise<void> {
     if (type === "blockchain.decode" && payload && typeof payload === "object" && "payloadHex" in payload) {
       payload = await fetchService("blockchain", `/decode?payload=${encodeURIComponent(String((payload as { payloadHex?: string }).payloadHex || ""))}`);
     }
+    if (result.status === "rejected") {
+      const msg = result.reason?.message || String(result.reason);
+      issues.push(`${type}: ${msg}`);
+    } else if (isFetchErrorPayload(payload)) {
+      issues.push(`${type}: ${payload.error}`);
+    } else {
+      okCount += 1;
+    }
     const data = result.status === "fulfilled"
       ? { type, receivedAt: new Date().toISOString(), payload: result.value }
       : { type, receivedAt: new Date().toISOString(), error: result.reason?.message || String(result.reason) };
     if (type === "blockchain.decode" && result.status === "fulfilled") (data as { payload?: unknown }).payload = payload;
     broadcastIfChanged(type, data);
+  }
+
+  const summary = `[poll] ${okCount}/${tasks.length} upstream ok`;
+  if (issues.length > 0) {
+    const detail = issues.join("; ");
+    logLine("warn", `${summary}; failures: ${detail.length > 800 ? `${detail.slice(0, 800)}…` : detail}`);
+  } else {
+    logLine("info", summary);
   }
 }
 
@@ -188,18 +222,24 @@ async function proxy(req: Request, kind: "prediction" | "blockchain", prefix: st
   upstream.search = url.search;
 
   const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
-  const res = await fetch(upstream, {
-    method: req.method,
-    headers: req.headers,
-    body,
-  });
+  try {
+    const res = await fetch(upstream, {
+      method: req.method,
+      headers: req.headers,
+      body,
+    });
 
-  const headers = new Headers(res.headers);
-  Object.entries(corsHeaders).forEach(([key, value]) => headers.set(key, value));
-  return new Response(res.body, { status: res.status, headers });
+    const headers = new Headers(res.headers);
+    Object.entries(corsHeaders).forEach(([key, value]) => headers.set(key, value));
+    return new Response(res.body, { status: res.status, headers });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logLine("error", `proxy ${kind} ${upstream.origin}${upstream.pathname}${upstream.search}: ${msg}`);
+    return json({ error: "upstream unreachable", upstream: `${upstream.origin}${upstream.pathname}`, detail: msg }, 502);
+  }
 }
 
-Deno.serve(async (req: Request) => {
+async function handleRequest(req: Request): Promise<Response> {
   const url = new URL(req.url);
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
 
@@ -231,6 +271,28 @@ Deno.serve(async (req: Request) => {
   }
 
   return json({ error: "not found" }, 404);
+}
+
+Deno.serve(async (req: Request) => {
+  const start = performance.now();
+  const path = new URL(req.url).pathname;
+  try {
+    const res = await handleRequest(req);
+    if (accessLogEnabled) {
+      logLine("info", `${req.method} ${path} -> ${res.status} ${Math.round(performance.now() - start)}ms`);
+    }
+    return res;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logLine("error", `${req.method} ${path} -> unhandled: ${msg}`);
+    throw err;
+  }
 });
 
+{
+  const pred = Boolean(serviceUrl("prediction"));
+  const bc = Boolean(serviceUrl("blockchain"));
+  const sec = Number(Deno.env.get("DASHBOARD_EVENT_POLL_SECONDS") || 3);
+  logLine("info", `ready: PREDICTION_SERVICE_URL=${pred ? "set" : "missing"} BLOCKCHAIN_SERVICE_URL=${bc ? "set" : "missing"} poll=${sec}s accessLog=${accessLogEnabled}`);
+}
 startPolling();

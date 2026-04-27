@@ -1,7 +1,7 @@
-const { Pool } = require('pg');
+const { createPool } = require('./pg-pool');
 
 function createPgBlockchainStore(databaseUrl) {
-  const pool = new Pool({ connectionString: databaseUrl, max: 5 });
+  const pool = createPool(databaseUrl, { max: 5 });
 
   async function init() {
     const fs = require('fs');

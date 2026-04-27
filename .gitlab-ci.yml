@@ -4,21 +4,21 @@ include:
     file: GitlabFlow/Deploy-custom.yml
 
 variables:
-  HELM_RELEASE_PREFIX: bios-creategreen
+  HELM_RELEASE_PREFIX: bios-multilevel
 
-build-bios-creategreen:
+build-bios-multilevel:
   extends: .build
   rules:
     - !reference [.build, rules]
     - when: on_success
 
-production-bios-creategreen:
+production-bios-multilevel:
   extends: .production
   stage: deploy
   environment:
     url: https://bios.barrage.net
   needs:
-    - job: build-bios-creategreen
+    - job: build-bios-multilevel
       optional: true
   rules:
     - !reference [.production, rules]

@@ -5,11 +5,11 @@ replicaCount: 1
 strategyType: "RollingUpdate"
 
 image:
-  repository: git.barrage.net/bios/creategreen
+  repository: git.barrage.net/bios/bios-multilevel
   tag: stable
   pullPolicy: IfNotPresent
   secrets:
-    - name: gitlab-registry-bios-creategreen
+    - name: gitlab-registry-bios-multilevel
 
 application:
   track: stable
@@ -21,7 +21,7 @@ barrage:
 
 service:
   enabled: true
-  name: biosmultilevel
+  name: bios-mlevel
   type: ClusterIP
   externalPort: 8000
   internalPort: 8000
@@ -76,11 +76,23 @@ postgresql:
 persistence:
   enabled: false
 
-extraVolumes: []
-extraVolumeMounts: []
+# Mount the PG CA cert from a K8s Secret so pg connects with verify-ca.
+# Create the secret once:
+#   kubectl create secret generic bios-pg-ca \
+#     --namespace=bios-multilevel-production \
+#     --from-file=ca.crt=/path/to/ca.crt
+extraVolumes:
+  - name: pg-ca
+    secret:
+      secretName: bios-pg-ca
+      optional: true
+extraVolumeMounts:
+  - name: pg-ca
+    mountPath: /etc/ssl/pg
+    readOnly: true
 
 serviceAccount:
-  name: biosmultilevel-sa
+  name: bios-multilevel-sa
   annotations: {}
   createNew: true
 
@@ -96,13 +108,14 @@ networkPolicy:
 # =============================================================================
 extraEnv:
   # Dashboard config
-  # Service DNS names follow the pattern: {HELM_RELEASE_PREFIX}-production-{worker-name}
-  # The ci-template creates them as: bios-creategreen-production-prediction, etc.
-  # Adjust if your release name differs.
+  # Service DNS: {HELM_RELEASE_PREFIX}-production-{worker-name}
   - name: PREDICTION_SERVICE_URL
-    value: "http://bios-creategreen-production-prediction:8091"
+    value: "http://bios-multilevel-production-prediction:8091"
   - name: BLOCKCHAIN_SERVICE_URL
-    value: "http://bios-creategreen-production-blockchain:8092"
+    value: "http://bios-multilevel-production-blockchain:8092"
+  # PG TLS: point to the mounted CA cert
+  - name: DATABASE_CA_FILE
+    value: "/etc/ssl/pg/ca.crt"
   - name: DASHBOARD_EVENT_POLL_SECONDS
     value: "3"
 
@@ -150,6 +163,8 @@ workers:
         value: "0.3"
       - name: SLA_TARGET_PERCENT
         value: "95"
+      - name: DATABASE_CA_FILE
+        value: "/etc/ssl/pg/ca.crt"
       # DATABASE_URL, BIOS_API_BASE, BIOS_USERNAME, BIOS_PASSWORD
       # injected from GitLab CI/CD secret variables via K8s Secret
     resources:
@@ -181,7 +196,7 @@ workers:
       - name: BLOCKCHAIN_PORT
         value: "8092"
       - name: PREDICTION_SERVICE_URL
-        value: "http://bios-creategreen-production-prediction:8091"
+        value: "http://bios-multilevel-production-prediction:8091"
       - name: BLOCKCHAIN_INTERVAL_SECONDS
         value: "10"
       - name: BLOCKCHAIN_RECONFIRM_SECONDS
@@ -208,6 +223,8 @@ workers:
         value: "true"
       - name: STEALTH_RPC_COOLDOWN_SECONDS
         value: "30"
+      - name: DATABASE_CA_FILE
+        value: "/etc/ssl/pg/ca.crt"
       # DATABASE_URL, STEALTH_WIF injected from GitLab CI/CD secret variables
     resources:
       limits:

@@ -5,11 +5,11 @@ replicaCount: 1
 strategyType: "RollingUpdate"
 
 image:
-  repository: git.barrage.net/bios/bios-multilevel
+  repository: git.barrage.net/bios-multilevel/bios-multilevel-dashboard
   tag: stable
   pullPolicy: IfNotPresent
   secrets:
-    - name: gitlab-registry-bios-multilevel
+    - name: gitlab-registry-bios-multilevel-bios-multilevel-dashboard
 
 application:
   track: stable

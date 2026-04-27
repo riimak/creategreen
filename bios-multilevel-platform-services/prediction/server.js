@@ -106,6 +106,7 @@ function stationIds() {
 
 async function expandTargets(targets, hours) {
   const expanded = [];
+  const stationOutcome = [];
   for (const target of targets) {
     if (target.source !== 'auto') {
       expanded.push(target);
@@ -115,12 +116,19 @@ async function expandTargets(targets, hours) {
       try {
         const records = await loadRecords({ source, hours, ...config() });
         const fields = fieldsFor(source);
+        const before = expanded.length;
         for (const metric of fields) {
           if (seriesFor(records, metric).length > 0) expanded.push({ source, metric });
         }
-      } catch {}
+        stationOutcome.push(`${source}=ok(rows=${records.length},metrics=${expanded.length - before})`);
+      } catch (err) {
+        // Surface the reason instead of dropping silently — this was the symptom of
+        // "no Mars2 logs" in production: every station threw, expand returned [].
+        stationOutcome.push(`${source}=failed(${err.message})`);
+      }
     }
   }
+  if (stationOutcome.length) log('info', `expand: targets=auto outcome ${stationOutcome.join(' · ')}`);
   const seen = new Set();
   return expanded.filter(target => {
     const key = targetKey(target.source, target.metric);
@@ -571,8 +579,17 @@ if (require.main === module) {
     });
   }).listen(PORT, () => {
     const hasDb = Boolean(process.env.DATABASE_URL);
-    const dataIn = process.env.PREDICTION_DATA_API_BASE || process.env.BIOS_API_BASE || process.env.BIOS_OUTPUT_DIR || 'not configured';
-    log('info', `listening on http://0.0.0.0:${PORT} store=${hasDb ? 'postgres' : 'json'} data=${typeof dataIn === 'string' && dataIn.length > 40 ? dataIn.slice(0, 40) + '…' : dataIn} ACCESS_LOG=${accessLogEnabled}`);
+    const cfg = config();
+    let mode;
+    if (cfg.mars2ApiBase && cfg.mars2Username && cfg.mars2Password) mode = `mars2-api(${cfg.mars2ApiBase})`;
+    else if (cfg.apiBase) mode = `prediction-data-api(${cfg.apiBase})`;
+    else mode = `export-files(${cfg.dataDir || 'output'})`;
+    log('info', `listening on http://0.0.0.0:${PORT} store=${hasDb ? 'postgres' : 'json'} ingest=${mode} ACCESS_LOG=${accessLogEnabled}`);
+    if (mode.startsWith('export-files')) {
+      log('warn', `ingest fallback: no BIOS_API_BASE/BIOS_USERNAME/BIOS_PASSWORD nor PREDICTION_DATA_API_BASE — Mars2 ingest is OFF and runCycle will see 0 targets`);
+    } else if (mode.startsWith('mars2-api') && (!cfg.mars2Username || !cfg.mars2Password)) {
+      log('warn', `ingest config: BIOS_API_BASE set but BIOS_USERNAME/PASSWORD missing — Mars2 auth will fail`);
+    }
   });
 }
 

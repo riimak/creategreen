@@ -174,7 +174,7 @@ async function loadFromMars2(apiBase, username, password, source, hours) {
 
 async function loadRecords({ source, hours = 72, dataDir, apiBase, mars2ApiBase, mars2Username, mars2Password }) {
   let records;
-  let mode = 'export-files';
+  let mode;
   if (mars2ApiBase && mars2Username && mars2Password) {
     mode = 'mars2-api';
     try {
@@ -189,8 +189,19 @@ async function loadRecords({ source, hours = 72, dataDir, apiBase, mars2ApiBase,
     mode = 'prediction-data-api';
     records = await loadFromWorker(apiBase, source, hours);
   } else {
+    mode = 'export-files';
     const dir = dataDir || path.resolve(process.cwd(), 'output');
     const file = fileForSource(dir, source);
+    if (!fs.existsSync(file)) {
+      // Without BIOS_API_BASE/USERNAME/PASSWORD this is the silent failure mode:
+      // expandTargets() catches and drops the station, leaving runCycle with 0 targets.
+      if (ingestLogEnabled()) {
+        console.error(
+          `${new Date().toISOString()} prediction ingest: export-files MISSING source=${source} file=${file} — set BIOS_API_BASE/BIOS_USERNAME/BIOS_PASSWORD or PREDICTION_DATA_API_BASE`,
+        );
+      }
+      throw new Error(`export file missing for ${source}: ${file}`);
+    }
     const text = fs.readFileSync(file, 'utf8');
     const cutoff = Math.floor(Date.now() / 1000) - Number(hours) * 3600;
     records = parseExportText(text, source).filter(row => row.timestamp >= cutoff || row.timestamp < 2000000000);

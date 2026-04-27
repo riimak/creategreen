@@ -63,6 +63,19 @@ production-prediction:
   needs:
     - job: build-prediction
       optional: true
+  # Pull GitLab CI variables (BIOS_USERNAME / BIOS_PASSWORD) into a K8s Secret each deploy.
+  # auto-deploy-values.yaml references this via secretKeyRef so the prediction pod gets fresh creds.
+  before_script:
+    - |
+      if [ -n "${BIOS_USERNAME}" ] && [ -n "${BIOS_PASSWORD}" ]; then
+        kubectl create secret generic bios-mars2 \
+          --namespace="${KUBE_NAMESPACE}" \
+          --from-literal=username="${BIOS_USERNAME}" \
+          --from-literal=password="${BIOS_PASSWORD}" \
+          --dry-run=client -o yaml | kubectl apply -f -
+      else
+        echo "WARN: BIOS_USERNAME/BIOS_PASSWORD not set as CI variables; bios-mars2 secret not synced."
+      fi
   rules:
     - !reference [.production, rules]
     - when: on_success

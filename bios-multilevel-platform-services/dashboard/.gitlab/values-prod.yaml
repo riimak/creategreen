@@ -1,4 +1,5 @@
 # Production overrides — merged per Barrage DEPLOY_* / HELM_UPGRADE_EXTRA_ARGS pattern
+# cert-manager issuer: set in auto-deploy-values.yaml (ingress.annotations.cert-manager.io/cluster-issuer).
 replicaCount: 1
 
 ingress:

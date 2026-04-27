@@ -93,7 +93,7 @@ extraEnv:
   - name: BLOCKCHAIN_PORT
     value: "8092"
   - name: PREDICTION_SERVICE_URL
-    value: "http://bios-prediction-production-barrage-au:8091"
+    value: "http://bios-prediction-production-barrage-autodeploy:8091"
   - name: BLOCKCHAIN_INTERVAL_SECONDS
     value: "10"
   - name: BLOCKCHAIN_RECONFIRM_SECONDS

@@ -28,6 +28,10 @@ service:
 ingress:
   enabled: true
   path: "/"
+  # Required for cert-manager to create the TLS secret (avoids "failed to determine issuer" on the ingress).
+  # Must match a ClusterIssuer in the cluster: kubectl get clusterissuer
+  annotations:
+    cert-manager.io/cluster-issuer: barrage-prod
   tls:
     enabled: true
     acme: true
@@ -86,13 +90,11 @@ podDisruptionBudget:
 networkPolicy:
   enabled: false
 
-# Upstream APIs (same K8s namespace). After first deploy, verify:
-#   kubectl get svc -n <namespace>
-# Barrage often names the main ClusterIP <release>-barrage-au — adjust hosts if yours differ.
+# Upstream APIs (same K8s namespace). Hostnames must match `kubectl get svc` (e.g. …-barrage-autodeploy).
 extraEnv:
   - name: PREDICTION_SERVICE_URL
-    value: "http://bios-prediction-production-barrage-au:8091"
+    value: "http://bios-prediction-production-barrage-autodeploy:8091"
   - name: BLOCKCHAIN_SERVICE_URL
-    value: "http://bios-blockchain-production-barrage-au:8092"
+    value: "http://bios-blockchain-production-barrage-autodeploy:8092"
   - name: DASHBOARD_EVENT_POLL_SECONDS
     value: "3"

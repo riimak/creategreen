@@ -1,8 +1,8 @@
 services:
   prediction:
     build:
-      context: .
-      dockerfile: prediction/Dockerfile
+      context: ..
+      dockerfile: bios-multilevel-platform-services/prediction/Dockerfile
     env_file:
       - ../.env
     environment:
@@ -39,8 +39,8 @@ services:
 
   blockchain:
     build:
-      context: .
-      dockerfile: blockchain/Dockerfile
+      context: ..
+      dockerfile: bios-multilevel-platform-services/blockchain/Dockerfile
     env_file:
       - ../.env
     environment:
@@ -92,8 +92,8 @@ services:
 
   dashboard:
     build:
-      context: .
-      dockerfile: dashboard/Dockerfile
+      context: ..
+      dockerfile: bios-multilevel-platform-services/dashboard/Dockerfile
     environment:
       PREDICTION_SERVICE_URL: http://prediction:8091
       BLOCKCHAIN_SERVICE_URL: http://blockchain:8092

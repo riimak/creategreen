@@ -2,7 +2,8 @@ FROM denoland/deno:alpine
 
 WORKDIR /app
 
-COPY dashboard ./dashboard
+# Build context must be Git / compose repo root; paths are root-relative.
+COPY bios-multilevel-platform-services/dashboard ./dashboard
 
 WORKDIR /app/dashboard
 

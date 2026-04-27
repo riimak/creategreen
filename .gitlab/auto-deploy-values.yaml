@@ -110,9 +110,9 @@ extraEnv:
   # Dashboard config
   # Service DNS: {HELM_RELEASE_PREFIX}-production-{worker-name}
   - name: PREDICTION_SERVICE_URL
-    value: "http://bios-multilevel-production-prediction:8091"
+    value: "http://bios-multilevel-production-prediction:8000"
   - name: BLOCKCHAIN_SERVICE_URL
-    value: "http://bios-multilevel-production-blockchain:8092"
+    value: "http://bios-multilevel-production-blockchain:8000"
   # PG TLS: point to the mounted CA cert
   - name: DATABASE_CA_FILE
     value: "/etc/ssl/pg/ca.crt"
@@ -142,7 +142,7 @@ workers:
       probeType: "httpGet"
     extraEnv:
       - name: PREDICTION_PORT
-        value: "8091"
+        value: "8000"
       - name: PREDICTION_INTERVAL_MINUTES
         value: "10"
       - name: PREDICTION_TARGETS
@@ -167,6 +167,15 @@ workers:
         value: "/etc/ssl/pg/ca.crt"
       # DATABASE_URL, BIOS_API_BASE, BIOS_USERNAME, BIOS_PASSWORD
       # injected from GitLab CI/CD secret variables via K8s Secret
+    extraVolumes:
+      - name: pg-ca
+        secret:
+          secretName: bios-pg-ca
+          optional: true
+    extraVolumeMounts:
+      - name: pg-ca
+        mountPath: /etc/ssl/pg
+        readOnly: true
     resources:
       limits:
         cpu: 500m
@@ -194,9 +203,9 @@ workers:
       probeType: "httpGet"
     extraEnv:
       - name: BLOCKCHAIN_PORT
-        value: "8092"
+        value: "8000"
       - name: PREDICTION_SERVICE_URL
-        value: "http://bios-multilevel-production-prediction:8091"
+        value: "http://bios-multilevel-production-prediction:8000"
       - name: BLOCKCHAIN_INTERVAL_SECONDS
         value: "10"
       - name: BLOCKCHAIN_RECONFIRM_SECONDS
@@ -226,6 +235,15 @@ workers:
       - name: DATABASE_CA_FILE
         value: "/etc/ssl/pg/ca.crt"
       # DATABASE_URL, STEALTH_WIF injected from GitLab CI/CD secret variables
+    extraVolumes:
+      - name: pg-ca
+        secret:
+          secretName: bios-pg-ca
+          optional: true
+    extraVolumeMounts:
+      - name: pg-ca
+        mountPath: /etc/ssl/pg
+        readOnly: true
     resources:
       limits:
         cpu: 500m

@@ -4,7 +4,7 @@ include:
     file: GitlabFlow/Deploy-custom.yml
 
 variables:
-  HELM_RELEASE_PREFIX: bios-multilevel
+  HELM_RELEASE_PREFIX: bios-multilevel-bios-multilevel-dashboard
 
 build-bios-multilevel:
   extends: .build
@@ -16,7 +16,7 @@ production-bios-multilevel:
   extends: .production
   stage: deploy
   environment:
-    url: https://bios.barrage.net
+    url: https://bios-multilevel.barrage.net
   needs:
     - job: build-bios-multilevel
       optional: true

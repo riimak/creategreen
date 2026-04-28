@@ -89,6 +89,15 @@ podDisruptionBudget:
 networkPolicy:
   enabled: false
 
+# Stealth API gateway: public DNS points to an internet-facing IP; the cert is issued for
+# api-gateway-mainnet.stealthmonitor.xyz. From the cluster we must connect to the Barrage
+# internal VIP (172.21.239.244) while still using that hostname for TLS SNI + certificate
+# validation. hostAliases is the pod-level /etc/hosts override (same as docker compose extra_hosts).
+hostAliases:
+  - ip: "172.21.239.244"
+    hostnames:
+      - api-gateway-mainnet.stealthmonitor.xyz
+
 extraEnv:
   - name: BLOCKCHAIN_PORT
     value: "8092"
@@ -113,7 +122,7 @@ extraEnv:
   - name: STEALTH_RELAY_MODE
     value: "json-rpc"
   - name: STEALTH_RPC_URL
-    value: "https://api-gateway-mainnet.prod.stealth.barrage.net"
+    value: "https://api-gateway-mainnet.stealthmonitor.xyz"
   - name: STEALTH_RPC_ID
     value: "666420"
   - name: STEALTH_ENABLE_REAL_BROADCAST

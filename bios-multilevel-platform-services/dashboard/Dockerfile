@@ -3,7 +3,7 @@ FROM denoland/deno:alpine
 WORKDIR /app
 
 # Install BARRAGE internal CA so Deno and curl trust *.barrage.net hosts
-# (api-gateway-mainnet.prod.stealth.barrage.net is signed by BIPA, not a public CA).
+# BARRAGE-internal HTTPS (*.barrage.net) uses BIPA; public Stealth hostnames may use Lets Encrypt.
 COPY certs/bipa_ca.crt /usr/local/share/ca-certificates/bipa_ca.crt
 RUN apk add --no-cache ca-certificates \
  && update-ca-certificates

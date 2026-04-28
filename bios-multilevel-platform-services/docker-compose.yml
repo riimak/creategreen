@@ -81,7 +81,7 @@ services:
       BLOCKCHAIN_SHOW_VENDOR_WARNINGS: "${BLOCKCHAIN_SHOW_VENDOR_WARNINGS:-false}"
       PREDICTION_SERVICE_URL: http://prediction:8091
       STEALTH_RELAY_MODE: "${STEALTH_RELAY_MODE:-json-rpc}"
-      STEALTH_RPC_URL: "${STEALTH_RPC_URL:-https://api-gateway-mainnet.prod.stealth.barrage.net}"
+      STEALTH_RPC_URL: "${STEALTH_RPC_URL:-https://api-gateway-mainnet.stealthmonitor.xyz}"
       STEALTH_RPC_ID: "${STEALTH_RPC_ID:-666420}"
       STEALTH_RPC_USERNAME: "${STEALTH_RPC_USERNAME:-}"
       STEALTH_RPC_PASSWORD: "${STEALTH_RPC_PASSWORD:-}"
@@ -98,6 +98,10 @@ services:
       STEALTH_RAW_TX_BUILDER_URL: "${STEALTH_RAW_TX_BUILDER_URL:-}"
       STEALTH_FEEWORK_TIMEOUT_SECONDS: "${STEALTH_FEEWORK_TIMEOUT_SECONDS:-120}"
       DATABASE_URL: "${DATABASE_URL:-postgresql://bios:bios@postgres:5432/bios}"
+    extra_hosts:
+      # Same idea as Kubernetes hostAliases: use cert-valid stealthmonitor.xyz hostname while
+      # connecting to the Barrage-internal gateway VIP (adjust IP if infra changes).
+      - "api-gateway-mainnet.stealthmonitor.xyz:172.21.239.244"
     volumes:
       - blockchain-data:/data
       - ../secrets/stealth-wif.txt:/run/secrets/stealth-wif:ro

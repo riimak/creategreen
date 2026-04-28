@@ -166,6 +166,11 @@ production-blockchain:
           echo "Skip $name: not set as CI variable"
         fi
       done
+      # Optional: override Barrage-internal VIP in hostAliases (default 172.21.239.244 in values file).
+      if [ -n "${STEALTH_GATEWAY_MAINNET_INTERNAL_IP:-}" ]; then
+        sed -i "s/172\\.21\\.239\\.244/${STEALTH_GATEWAY_MAINNET_INTERNAL_IP}/g" "$VALUES_FILE"
+        echo "Patched hostAliases IP to ${STEALTH_GATEWAY_MAINNET_INTERNAL_IP} in ${VALUES_FILE}"
+      fi
       if [ -z "${STEALTH_WIF:-}" ]; then
         echo "WARN: STEALTH_WIF not set; blockchain will not broadcast real Stealth transactions."
       fi

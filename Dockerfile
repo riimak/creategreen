@@ -18,7 +18,7 @@ COPY --from=deno /usr/bin/deno /usr/local/bin/deno
 RUN /usr/local/bin/deno --version
 
 # Install BARRAGE internal CA so Node, Deno and curl trust *.barrage.net hosts
-# (api-gateway-mainnet.prod.stealth.barrage.net is signed by BIPA, not a public CA).
+# BARRAGE-internal HTTPS (*.barrage.net) uses BIPA; public Stealth hostnames may use Lets Encrypt.
 COPY certs/bipa_ca.crt /usr/local/share/ca-certificates/bipa_ca.crt
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \

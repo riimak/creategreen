@@ -61,6 +61,35 @@ function createPgBlockchainStore(databaseUrl) {
     return items[0] || null;
   }
 
+  /* Paginated event listing for the dashboard's Lanac browser. Filters
+   * pushed into SQL so the table can scale past the 500-row UI page. */
+  async function listPaginated(filters = {}, options = {}) {
+    const where = [];
+    const values = [];
+    let p = 1;
+    if (filters.status) { where.push(`status = $${p++}`); values.push(filters.status); }
+    if (filters.sourceKind) { where.push(`source_kind = $${p++}`); values.push(filters.sourceKind); }
+    if (filters.eventName) { where.push(`event_name = $${p++}`); values.push(filters.eventName); }
+    if (filters.search) {
+      where.push(`(coalesce(event_name,'') || ' ' || coalesce(source_kind,'') || ' ' || coalesce(tx_id,'') || ' ' || coalesce(dedupe_key,'')) ILIKE $${p++}`);
+      values.push(`%${filters.search}%`);
+    }
+    const sortCol = ({
+      created_at: 'created_at',
+      confirmed_at: 'confirmed_at',
+      timestamp: 'created_at',
+    })[options.sort] || 'created_at';
+    const sortDir = options.sortDir === 'asc' ? 'ASC' : 'DESC';
+    const limit = Math.min(Math.max(Number(options.limit) || 100, 1), 1000);
+    const offset = Math.max(0, Number(options.offset) || 0);
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    const dataQ = `SELECT * FROM blockchain_events ${whereSql} ORDER BY ${sortCol} ${sortDir} NULLS LAST LIMIT ${limit} OFFSET ${offset}`;
+    const countQ = `SELECT count(*)::bigint AS total FROM blockchain_events ${whereSql}`;
+    const [data, count] = await Promise.all([pool.query(dataQ, values), pool.query(countQ, values)]);
+    return { data: data.rows.map(rowToRecord), total: Number(count.rows[0].total), limit, offset };
+  }
+
   async function markSeen(key, value) {
     if (value !== undefined) {
       await pool.query(
@@ -129,7 +158,7 @@ function createPgBlockchainStore(databaseUrl) {
     return rows[0] || {};
   }
 
-  return { init, put, get, list, latest, markSeen, checkpoint, setMeta, read, write, stats, prune, file: 'postgres' };
+  return { init, put, get, list, latest, listPaginated, markSeen, checkpoint, setMeta, read, write, stats, prune, file: 'postgres' };
 }
 
 module.exports = { createPgBlockchainStore };

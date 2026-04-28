@@ -74,6 +74,36 @@ CREATE TABLE IF NOT EXISTS prediction_checkpoints (
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Mars2 raw measurements (long-term historical store).
+-- Tall layout: one row per (source, metric, timestamp) so the dashboard can
+-- filter by metric without unpacking JSON. Backfill plus ongoing cycle inserts
+-- both write here via INSERT ... ON CONFLICT DO UPDATE on the natural key.
+CREATE TABLE IF NOT EXISTS raw_measurements (
+  source        TEXT NOT NULL,
+  metric        TEXT NOT NULL,
+  ts            TIMESTAMPTZ NOT NULL,
+  value         DOUBLE PRECISION,
+  is_missing    BOOLEAN NOT NULL DEFAULT FALSE,
+  ingested_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (source, metric, ts)
+);
+
+CREATE INDEX IF NOT EXISTS idx_raw_measurements_ts ON raw_measurements (ts DESC);
+CREATE INDEX IF NOT EXISTS idx_raw_measurements_source_metric_ts ON raw_measurements (source, metric, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_raw_measurements_ingested ON raw_measurements (ingested_at DESC);
+
+CREATE OR REPLACE VIEW raw_measurements_stats AS
+SELECT
+  count(*)                                  AS total_rows,
+  count(DISTINCT source)                    AS unique_sources,
+  count(DISTINCT metric)                    AS unique_metrics,
+  min(ts)                                   AS earliest,
+  max(ts)                                   AS latest,
+  count(*) FILTER (WHERE value IS NULL)     AS missing_rows,
+  count(*) FILTER (WHERE ts > now() - interval '24 hours') AS rows_24h,
+  count(*) FILTER (WHERE ts > now() - interval '7 days')   AS rows_7d
+FROM raw_measurements;
+
 -- Blockchain service tables
 
 CREATE TABLE IF NOT EXISTS blockchain_events (
@@ -145,6 +175,8 @@ FROM blockchain_events;
 
 -- Retention: call periodically to prune old records.
 -- Default: keep 90 days of forecasts/anomalies/quality, 180 days of blockchain events.
+-- raw_measurements is NOT pruned by this function; it has its own optional pruner
+-- driven by RAW_MEASUREMENTS_RETENTION_DAYS in the prediction service (default: off).
 CREATE OR REPLACE FUNCTION prune_old_records(
   forecast_days INTEGER DEFAULT 90,
   blockchain_days INTEGER DEFAULT 180
@@ -159,5 +191,17 @@ BEGIN
   DELETE FROM blockchain_events WHERE created_at < now() - make_interval(days => blockchain_days);
   GET DIAGNOSTICS pruned_events = ROW_COUNT;
   RETURN NEXT;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Optional pruner for raw_measurements; called from the prediction service when
+-- RAW_MEASUREMENTS_RETENTION_DAYS is set (off by default to preserve backfill).
+CREATE OR REPLACE FUNCTION prune_raw_measurements(retention_days INTEGER)
+RETURNS BIGINT AS $$
+DECLARE deleted BIGINT;
+BEGIN
+  DELETE FROM raw_measurements WHERE ts < now() - make_interval(days => retention_days);
+  GET DIAGNOSTICS deleted = ROW_COUNT;
+  RETURN deleted;
 END;
 $$ LANGUAGE plpgsql;

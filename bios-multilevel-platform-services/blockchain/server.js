@@ -633,6 +633,23 @@ async function handle(req, res) {
       const data = await S(store.list(row => !status || row.status === status, limit));
       return json(res, 200, { data });
     }
+    // Server-paginated events for the dashboard's Lanac browser.
+    // ?status=&search=&limit=&offset=&sort=&sortDir=
+    if (req.method === 'GET' && url.pathname === '/events/page') {
+      const filters = {
+        status: url.searchParams.get('status') || undefined,
+        sourceKind: url.searchParams.get('sourceKind') || undefined,
+        eventName: url.searchParams.get('eventName') || undefined,
+        search: url.searchParams.get('search') || undefined,
+      };
+      const options = {
+        limit: Number(url.searchParams.get('limit')) || 100,
+        offset: Number(url.searchParams.get('offset')) || 0,
+        sort: url.searchParams.get('sort') || 'created_at',
+        sortDir: url.searchParams.get('sortDir') || 'desc',
+      };
+      return json(res, 200, await S(store.listPaginated(filters, options)));
+    }
     if (req.method === 'GET' && url.pathname === '/events/latest') {
       const latest = await S(store.latest());
       return json(res, 200, latest || {});

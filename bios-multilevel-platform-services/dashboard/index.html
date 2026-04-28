@@ -497,6 +497,87 @@ main{
 .muted{color:var(--muted)}
 .mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
 .skeleton{color:var(--subtle);font-style:italic;font-size:12.5px}
+
+/* ── tabs / views ──────────────────────────────────────────── */
+nav.tabs{display:flex;gap:2px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:3px}
+nav.tabs .tab{
+  font:600 12.5px/1 'Inter',sans-serif;letter-spacing:-0.005em;
+  background:transparent;color:var(--muted);border:0;padding:7px 12px;border-radius:6px;
+  cursor:pointer;transition:background-color .12s,color .12s;
+}
+nav.tabs .tab:hover{color:var(--text)}
+nav.tabs .tab.active{background:var(--card);color:var(--text);box-shadow:0 1px 0 rgba(0,0,0,.04)}
+
+.view[hidden]{display:none}
+
+/* ── measurements view ─────────────────────────────────────── */
+.meas{display:flex;flex-direction:column;gap:14px;min-height:0}
+.meas .toolbar{
+  display:flex;justify-content:space-between;align-items:flex-end;gap:14px;flex-wrap:wrap;
+  padding:12px 14px;background:var(--card);border:1px solid var(--border);border-radius:10px;
+}
+.meas .toolbar h2{margin:0;font-size:15px;font-weight:700;letter-spacing:-0.01em}
+.meas .toolbar .meta{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.meas .filters{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px 10px;
+  padding:12px 14px;background:var(--card);border:1px solid var(--border);border-radius:10px;
+}
+.meas .filters label{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+.meas .filters input,
+.meas .filters select{
+  font:13px/1 'Inter',sans-serif;color:var(--text);
+  padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);
+  min-width:0;
+}
+.meas .filters input:focus,
+.meas .filters select:focus{outline:2px solid var(--accent);outline-offset:0;border-color:transparent}
+.meas .filters .checkbox{flex-direction:row;align-items:center;gap:6px;text-transform:none;font-size:12.5px;color:var(--text);font-weight:500;letter-spacing:0;padding-top:18px}
+.meas .filters .checkbox input{margin:0;accent-color:var(--accent)}
+.meas .filters .actions{display:flex;align-items:flex-end;gap:6px;padding-top:18px}
+.meas .filters .actions button{
+  font:600 12px/1 'Inter',sans-serif;
+  padding:8px 12px;border-radius:6px;border:1px solid var(--border);
+  background:var(--surface);color:var(--text);cursor:pointer;
+}
+.meas .filters .actions button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.meas .filters .actions button:hover{filter:brightness(.97)}
+
+.meas .table-wrap{
+  border:1px solid var(--border);border-radius:10px;background:var(--card);overflow:hidden;
+  display:flex;flex-direction:column;min-height:0;
+}
+.meas table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.meas thead th{
+  position:sticky;top:0;z-index:1;background:var(--surface);
+  font:600 11.5px/1 'Inter',sans-serif;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);
+  text-align:left;padding:10px 12px;border-bottom:1px solid var(--border);
+  cursor:pointer;user-select:none;white-space:nowrap;
+}
+.meas thead th[data-sort]:hover{color:var(--text)}
+.meas thead th .ind{display:inline-block;margin-left:4px;opacity:.4;font-size:10px}
+.meas thead th.sorted{color:var(--text)}
+.meas thead th.sorted .ind{opacity:1}
+.meas tbody td{padding:8px 12px;border-bottom:1px solid var(--border);font-size:13px}
+.meas tbody tr:last-child td{border-bottom:0}
+.meas tbody tr:nth-child(2n) td{background:oklch(99% 0 0 / .35)}
+.meas tbody td.value{text-align:right;font-weight:600}
+.meas tbody td.value.missing{color:var(--red);font-weight:500}
+.meas tbody td.empty{padding:32px 14px;text-align:center;color:var(--subtle);font-style:italic;font-size:12.5px}
+.meas .pager{
+  display:flex;justify-content:space-between;align-items:center;gap:10px;
+  padding:8px 12px;border-top:1px solid var(--border);background:var(--surface);
+  font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;
+}
+.meas .pager button{
+  font:600 11.5px/1 'Inter',sans-serif;
+  padding:6px 10px;border-radius:5px;border:1px solid var(--border);
+  background:var(--card);color:var(--text);cursor:pointer;
+}
+.meas .pager button:disabled{opacity:.4;cursor:not-allowed}
+.meas .station-status{display:flex;gap:8px;flex-wrap:wrap;font-size:11.5px;color:var(--muted)}
+.meas .station-status .chip{padding:3px 7px;border:1px solid var(--border);border-radius:999px;font-weight:600}
+.meas .station-status .chip.ok{color:oklch(36% .12 150);background:var(--green-soft);border-color:oklch(78% .08 150)}
+.meas .station-status .chip.bad{color:oklch(40% .14 25);background:var(--red-soft);border-color:oklch(80% .1 25)}
 </style>
 </head>
 <body>
@@ -515,6 +596,12 @@ main{
         <span class="partner-name">Grad Osijek</span>
       </a>
     </div>
+    <nav class="tabs" role="tablist" aria-label="View">
+      <button type="button" class="tab active" data-tab="overview" data-i18n="tab.overview">Pregled</button>
+      <button type="button" class="tab" data-tab="measurements" data-i18n="tab.measurements">Mjerenja</button>
+      <button type="button" class="tab" data-tab="predictions" data-i18n="tab.predictions">Predikcije</button>
+      <button type="button" class="tab" data-tab="chain" data-i18n="tab.chain">Lanac</button>
+    </nav>
     <div class="lang-switch" role="group" aria-label="Language">
       <button type="button" data-lang="hr">HR</button>
       <button type="button" data-lang="en">EN</button>
@@ -524,6 +611,7 @@ main{
 </header>
 
 <main>
+<section class="view" id="viewOverview">
   <section class="strip" aria-label="System status">
     <article class="tile" id="tileSource">
       <span class="label" data-i18n="tile.source.label">Source data</span>
@@ -607,6 +695,176 @@ main{
       </div>
     </aside>
   </section>
+</section><!-- /viewOverview -->
+
+<section class="view meas" id="viewMeasurements" hidden>
+  <header class="toolbar">
+    <div>
+      <h2 data-i18n="meas.title">Sirovi podaci s Mars2 API-ja</h2>
+      <div class="meta" id="measMeta" data-i18n="meas.loading">učitavanje…</div>
+    </div>
+    <div class="station-status" id="measStationStatus"></div>
+  </header>
+
+  <div class="filters">
+    <label data-i18n="meas.filter.station">stanica
+      <select id="measSource"><option value="" data-i18n="meas.all">sve</option></select>
+    </label>
+    <label data-i18n="meas.filter.metric">metrika
+      <select id="measMetric"><option value="" data-i18n="meas.all">sve</option></select>
+    </label>
+    <label data-i18n="meas.filter.window">vremenski prozor
+      <select id="measHours">
+        <option value="1">1 h</option>
+        <option value="6">6 h</option>
+        <option value="24" selected>24 h</option>
+        <option value="72">72 h</option>
+        <option value="168">7 d</option>
+        <option value="720">30 d</option>
+      </select>
+    </label>
+    <label data-i18n="meas.filter.value_min">min. vrijednost
+      <input type="number" step="any" id="measValueMin" placeholder="—">
+    </label>
+    <label data-i18n="meas.filter.value_max">maks. vrijednost
+      <input type="number" step="any" id="measValueMax" placeholder="—">
+    </label>
+    <label data-i18n="meas.filter.search">pretraga
+      <input type="search" id="measSearch" placeholder="metrika ili stanica">
+    </label>
+    <label class="checkbox"><input type="checkbox" id="measMissing"><span data-i18n="meas.filter.missing">samo s nedostajućim vrijednostima</span></label>
+    <div class="actions">
+      <button type="button" id="measRefresh" class="primary" data-i18n="meas.refresh">osvježi</button>
+      <button type="button" id="measReset" data-i18n="meas.reset">poništi</button>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th data-sort="timestamp" class="sorted"><span data-i18n="meas.col.time">vrijeme</span><span class="ind">↓</span></th>
+          <th data-sort="source"><span data-i18n="meas.col.station">stanica</span><span class="ind"></span></th>
+          <th data-sort="metric"><span data-i18n="meas.col.metric">metrika</span><span class="ind"></span></th>
+          <th data-sort="value" style="text-align:right"><span data-i18n="meas.col.value">vrijednost</span><span class="ind"></span></th>
+        </tr>
+      </thead>
+      <tbody id="measTbody">
+        <tr><td colspan="4" class="empty" data-i18n="meas.loading">učitavanje…</td></tr>
+      </tbody>
+    </table>
+    <div class="pager">
+      <span id="measPageInfo">--</span>
+      <div style="display:flex;gap:6px">
+        <button type="button" id="measPrev" data-i18n="meas.prev">prethodna</button>
+        <button type="button" id="measNext" data-i18n="meas.next">sljedeća</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="view meas" id="viewPredictions" hidden>
+  <header class="toolbar">
+    <div>
+      <h2 data-i18n="pred.title">Zapisi predikcija</h2>
+      <div class="meta" id="predMeta">--</div>
+    </div>
+    <nav class="tabs" id="predSubtabs" aria-label="Prediction record types">
+      <button type="button" class="tab active" data-subtab="forecasts" data-i18n="pred.subtab.forecasts">Prognoze</button>
+      <button type="button" class="tab" data-subtab="anomalies" data-i18n="pred.subtab.anomalies">Anomalije</button>
+      <button type="button" class="tab" data-subtab="quality" data-i18n="pred.subtab.quality">Kvaliteta podataka</button>
+    </nav>
+  </header>
+
+  <div class="filters">
+    <label data-i18n="meas.filter.station">stanica
+      <select id="predSource"><option value="" data-i18n="meas.all">sve</option></select>
+    </label>
+    <label data-i18n="meas.filter.metric">metrika
+      <select id="predMetric"><option value="" data-i18n="meas.all">sve</option></select>
+    </label>
+    <label data-i18n="meas.filter.search">pretraga
+      <input type="search" id="predSearch" placeholder="metrika ili stanica">
+    </label>
+    <div class="actions">
+      <button type="button" id="predRefresh" class="primary" data-i18n="meas.refresh">osvježi</button>
+      <button type="button" id="predReset" data-i18n="meas.reset">poništi</button>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead id="predThead"></thead>
+      <tbody id="predTbody">
+        <tr><td colspan="6" class="empty" data-i18n="meas.loading">učitavanje…</td></tr>
+      </tbody>
+    </table>
+    <div class="pager">
+      <span id="predPageInfo">--</span>
+      <div style="display:flex;gap:6px">
+        <button type="button" id="predPrev" data-i18n="meas.prev">prethodna</button>
+        <button type="button" id="predNext" data-i18n="meas.next">sljedeća</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="view meas" id="viewChain" hidden>
+  <header class="toolbar">
+    <div>
+      <h2 data-i18n="chain.title">Zapisi na lancu</h2>
+      <div class="meta" id="chainMeta">--</div>
+    </div>
+  </header>
+
+  <div class="filters">
+    <label data-i18n="chain.filter.status">status
+      <select id="chainStatus">
+        <option value="" data-i18n="chain.status.all">sve</option>
+        <option value="confirmed">confirmed</option>
+        <option value="sent">sent</option>
+        <option value="queued">queued</option>
+        <option value="encoded">encoded</option>
+        <option value="failed">failed</option>
+        <option value="retrying">retrying</option>
+        <option value="deferred">deferred</option>
+      </select>
+    </label>
+    <label data-i18n="meas.filter.search">pretraga
+      <input type="search" id="chainSearch" placeholder="event / source / tx">
+    </label>
+    <div class="actions">
+      <button type="button" id="chainRefresh" class="primary" data-i18n="meas.refresh">osvježi</button>
+      <button type="button" id="chainReset" data-i18n="meas.reset">poništi</button>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th><span data-i18n="chain.col.created">kreirano</span></th>
+          <th><span data-i18n="chain.col.confirmed">potvrđeno</span></th>
+          <th><span data-i18n="chain.col.event">događaj</span></th>
+          <th><span data-i18n="chain.col.source_kind">izvor</span></th>
+          <th><span data-i18n="chain.col.status">status</span></th>
+          <th><span data-i18n="chain.col.tx">tx</span></th>
+          <th><span data-i18n="chain.col.block">blok</span></th>
+        </tr>
+      </thead>
+      <tbody id="chainTbody">
+        <tr><td colspan="7" class="empty" data-i18n="meas.loading">učitavanje…</td></tr>
+      </tbody>
+    </table>
+    <div class="pager">
+      <span id="chainPageInfo">--</span>
+      <div style="display:flex;gap:6px">
+        <button type="button" id="chainPrev" data-i18n="meas.prev">prethodna</button>
+        <button type="button" id="chainNext" data-i18n="meas.next">sljedeća</button>
+      </div>
+    </div>
+  </div>
+</section>
 </main>
 
 <script>
@@ -633,6 +891,76 @@ const I18N = {
     'live.last_update':     'uživo · ažurirano u {time}',
     'live.disconnected':    'prekinuto u {time}, ponovni pokušaj',
     'lang.label':           'Jezik',
+
+    // tabs
+    'tab.overview':         'Pregled',
+    'tab.measurements':     'Mjerenja',
+    'tab.predictions':      'Predikcije',
+    'tab.chain':            'Lanac',
+
+    // measurements view
+    'meas.title':           'Sirovi podaci s Mars2 API-ja (povijesno)',
+    'meas.loading':         'učitavanje…',
+    'meas.empty':           'nema rezultata za odabrane filtere',
+    'meas.all':             'sve',
+    'meas.filter.station':  'stanica',
+    'meas.filter.metric':   'metrika',
+    'meas.filter.window':   'vremenski prozor',
+    'meas.filter.value_min':'min. vrijednost',
+    'meas.filter.value_max':'maks. vrijednost',
+    'meas.filter.search':   'pretraga',
+    'meas.filter.missing':  'samo s nedostajućim vrijednostima',
+    'meas.refresh':         'osvježi',
+    'meas.reset':           'poništi',
+    'meas.col.time':        'vrijeme',
+    'meas.col.station':     'stanica',
+    'meas.col.metric':      'metrika',
+    'meas.col.value':       'vrijednost',
+    'meas.prev':            'prethodna',
+    'meas.next':            'sljedeća',
+    'meas.page_info':       '{from}–{to} od {total} · stranica {page}/{pages} · keširano {age}',
+    'meas.cache_age_now':   'sada',
+    'meas.cache_age':       'prije {sec}s',
+    'meas.missing':         '—',
+    'meas.error':           'greška: {msg}',
+
+    // predictions view
+    'pred.title':           'Zapisi predikcija',
+    'pred.subtab.forecasts':'Prognoze',
+    'pred.subtab.anomalies':'Anomalije',
+    'pred.subtab.quality':  'Kvaliteta podataka',
+    'pred.col.computed':    'izračunato',
+    'pred.col.station':     'stanica',
+    'pred.col.metric':      'metrika',
+    'pred.col.model':       'model',
+    'pred.col.points':      'točke',
+    'pred.col.horizon':     'horizont (h)',
+    'pred.col.residual':    'rezidualna pogreška',
+    'pred.col.input_count': 'ulaznih uzoraka',
+    'pred.col.anomaly_count':'anomalija',
+    'pred.col.severity':    'najteža',
+    'pred.col.status':      'status',
+    'pred.col.gap':         'praznine',
+    'pred.col.age':         'starost (min)',
+    'pred.col.reasons':     'razlozi',
+    'pred.empty':           'nema zapisa',
+
+    // chain view
+    'chain.title':          'Zapisi na lancu',
+    'chain.col.created':    'kreirano',
+    'chain.col.confirmed':  'potvrđeno',
+    'chain.col.event':      'događaj',
+    'chain.col.station':    'stanica',
+    'chain.col.metric':     'metrika',
+    'chain.col.value':      'vrijednost',
+    'chain.col.status':     'status',
+    'chain.col.tx':         'tx',
+    'chain.col.block':      'blok',
+    'chain.col.source_kind':'izvor',
+    'chain.empty':          'nema zapisa',
+    'chain.filter.status':  'status',
+    'chain.filter.event':   'tip događaja',
+    'chain.status.all':     'sve',
 
     // tiles
     'tile.source.label':    'Izvor podataka',
@@ -819,6 +1147,72 @@ const I18N = {
     'live.last_update':     'live · last update {time}',
     'live.disconnected':    'disconnected at {time}, retrying',
     'lang.label':           'Language',
+
+    'tab.overview':         'Overview',
+    'tab.measurements':     'Measurements',
+    'tab.predictions':      'Predictions',
+    'tab.chain':            'Chain',
+
+    'meas.title':           'Raw Mars2 measurements (historical)',
+    'meas.loading':         'loading…',
+    'meas.empty':           'no rows match the current filters',
+    'meas.all':             'all',
+    'meas.filter.station':  'station',
+    'meas.filter.metric':   'metric',
+    'meas.filter.window':   'time window',
+    'meas.filter.value_min':'value min',
+    'meas.filter.value_max':'value max',
+    'meas.filter.search':   'search',
+    'meas.filter.missing':  'missing only',
+    'meas.refresh':         'refresh',
+    'meas.reset':           'reset',
+    'meas.col.time':        'time',
+    'meas.col.station':     'station',
+    'meas.col.metric':      'metric',
+    'meas.col.value':       'value',
+    'meas.prev':            'prev',
+    'meas.next':            'next',
+    'meas.page_info':       '{from}–{to} of {total} · page {page}/{pages} · cached {age}',
+    'meas.cache_age_now':   'just now',
+    'meas.cache_age':       '{sec}s ago',
+    'meas.missing':         '—',
+    'meas.error':           'error: {msg}',
+
+    'pred.title':           'Prediction records',
+    'pred.subtab.forecasts':'Forecasts',
+    'pred.subtab.anomalies':'Anomalies',
+    'pred.subtab.quality':  'Data quality',
+    'pred.col.computed':    'computed',
+    'pred.col.station':     'station',
+    'pred.col.metric':      'metric',
+    'pred.col.model':       'model',
+    'pred.col.points':      'points',
+    'pred.col.horizon':     'horizon (h)',
+    'pred.col.residual':    'residual error',
+    'pred.col.input_count': 'input samples',
+    'pred.col.anomaly_count':'anomalies',
+    'pred.col.severity':    'worst severity',
+    'pred.col.status':      'status',
+    'pred.col.gap':         'gap',
+    'pred.col.age':         'age (min)',
+    'pred.col.reasons':     'reasons',
+    'pred.empty':           'no records',
+
+    'chain.title':          'Anchored chain records',
+    'chain.col.created':    'created',
+    'chain.col.confirmed':  'confirmed',
+    'chain.col.event':      'event',
+    'chain.col.station':    'station',
+    'chain.col.metric':     'metric',
+    'chain.col.value':      'value',
+    'chain.col.status':     'status',
+    'chain.col.tx':         'tx',
+    'chain.col.block':      'block',
+    'chain.col.source_kind':'source',
+    'chain.empty':          'no records',
+    'chain.filter.status':  'status',
+    'chain.filter.event':   'event type',
+    'chain.status.all':     'all',
 
     'tile.source.label':    'Source data',
     'tile.source.name':     'Mars2 sensors',
@@ -2010,6 +2404,440 @@ setInterval(() => {
   rerenderLedger();
 }, 30_000);
 
+/* ── tabs (overview / measurements) ─────────────────────────
+ * Hash-based routing so the URL reflects the current view (#measurements)
+ * and the back/forward buttons work. Lazy-loads the measurements data the
+ * first time that tab is shown so the overview tab stays snappy. */
+const TABS = ['overview', 'measurements', 'predictions', 'chain'];
+
+function applyTab(name) {
+  if (!TABS.includes(name)) name = 'overview';
+  document.querySelectorAll('header.app .tabs [data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  $('viewOverview').hidden = name !== 'overview';
+  $('viewMeasurements').hidden = name !== 'measurements';
+  $('viewPredictions').hidden = name !== 'predictions';
+  $('viewChain').hidden = name !== 'chain';
+  if (name === 'measurements') {
+    if (!measurements.metaLoaded) loadMeasurementsMeta();
+    refreshMeasurements();
+  }
+  if (name === 'predictions') {
+    if (!predictionsView.metaLoaded) loadPredictionsMeta();
+    refreshPredictions();
+  }
+  if (name === 'chain') {
+    refreshChain();
+  }
+}
+
+document.querySelectorAll('header.app .tabs [data-tab]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const target = btn.dataset.tab;
+    if (location.hash !== `#${target}`) location.hash = target;
+    else applyTab(target);
+  });
+});
+window.addEventListener('hashchange', () => applyTab(location.hash.slice(1) || 'overview'));
+
+/* ── measurements view ─────────────────────────────────────
+ * Calls /prediction/measurements via the dashboard's existing proxy.
+ * Filters and sort are sent server-side; pagination uses limit/offset. */
+const measurements = {
+  metaLoaded: false,
+  state: { sort: 'timestamp', sortDir: 'desc', offset: 0, limit: 100 },
+  total: 0,
+  cachedAt: null,
+  loadTimer: null,
+};
+
+function loadMeasurementsMeta() {
+  measurements.metaLoaded = true;
+  fetch('/prediction/measurements/meta').then(r => r.json()).then(meta => {
+    const srcSel = $('measSource');
+    const metricSel = $('measMetric');
+    const stationFor = code => stationLabel(code);
+    for (const s of meta.stations || []) {
+      const opt = document.createElement('option');
+      opt.value = s; opt.textContent = `${stationFor(s)} (${s})`;
+      srcSel.appendChild(opt);
+    }
+    const allMetrics = [...new Set([...(meta.metrics?.meteo || []), ...(meta.metrics?.solax || [])])].sort();
+    for (const m of allMetrics) {
+      const opt = document.createElement('option');
+      opt.value = m; opt.textContent = (FRIENDLY_METRICS[m] || m) + (FRIENDLY_METRICS[m] ? ` (${m})` : '');
+      metricSel.appendChild(opt);
+    }
+  }).catch(err => {
+    measurements.metaLoaded = false;
+    setText('measMeta', t('meas.error', { msg: err.message || String(err) }));
+  });
+}
+
+function buildMeasurementsQuery() {
+  const p = new URLSearchParams();
+  const src = $('measSource').value;
+  const metric = $('measMetric').value;
+  const hours = $('measHours').value || '24';
+  const vmin = $('measValueMin').value;
+  const vmax = $('measValueMax').value;
+  const search = $('measSearch').value.trim();
+  const missing = $('measMissing').checked;
+  if (src) p.set('source', src);
+  if (metric) p.set('metric', metric);
+  p.set('hours', hours);
+  if (vmin !== '') p.set('valueMin', vmin);
+  if (vmax !== '') p.set('valueMax', vmax);
+  if (search) p.set('search', search);
+  if (missing) p.set('missingOnly', 'true');
+  p.set('sort', measurements.state.sort);
+  p.set('sortDir', measurements.state.sortDir);
+  p.set('limit', String(measurements.state.limit));
+  p.set('offset', String(measurements.state.offset));
+  return p.toString();
+}
+
+function cacheAgeText(iso) {
+  if (!iso) return t('meas.cache_age_now');
+  const sec = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
+  return sec < 2 ? t('meas.cache_age_now') : t('meas.cache_age', { sec });
+}
+
+function renderMeasurements(payload) {
+  const data = payload.data || [];
+  const tbody = $('measTbody');
+  if (data.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" class="empty">${t('meas.empty')}</td></tr>`;
+  } else {
+    const rows = data.map(row => {
+      const time = new Date(row.timestamp * 1000);
+      const friendly = FRIENDLY_METRICS[row.metric] ? `<span class="dim" style="color:var(--muted)"> · ${escapeHtml(FRIENDLY_METRICS[row.metric])}</span>` : '';
+      const valueCell = row.isMissing
+        ? `<td class="value missing">${t('meas.missing')}</td>`
+        : `<td class="value">${escapeHtml(formatNumber(row.value))}</td>`;
+      return `<tr>
+        <td><time datetime="${time.toISOString()}" title="${time.toISOString()}">${escapeHtml(time.toLocaleString())}</time></td>
+        <td>${escapeHtml(stationLabel(row.source))} <span class="dim" style="color:var(--muted)">(${escapeHtml(row.source)})</span></td>
+        <td><span class="mono">${escapeHtml(row.metric)}</span>${friendly}</td>
+        ${valueCell}
+      </tr>`;
+    }).join('');
+    tbody.innerHTML = rows;
+  }
+  // header sort indicators
+  document.querySelectorAll('.meas thead th[data-sort]').forEach(th => {
+    const isSorted = th.dataset.sort === measurements.state.sort;
+    th.classList.toggle('sorted', isSorted);
+    const ind = th.querySelector('.ind');
+    if (ind) ind.textContent = isSorted ? (measurements.state.sortDir === 'asc' ? '↑' : '↓') : '';
+  });
+  measurements.total = payload.total || 0;
+  measurements.cachedAt = payload.cachedAt;
+  const offset = measurements.state.offset;
+  const limit = measurements.state.limit;
+  const from = measurements.total === 0 ? 0 : offset + 1;
+  const to = Math.min(offset + limit, measurements.total);
+  const page = Math.floor(offset / limit) + 1;
+  const pages = Math.max(1, Math.ceil(measurements.total / limit));
+  setText('measPageInfo', t('meas.page_info', {
+    from, to, total: measurements.total, page, pages, age: cacheAgeText(payload.cachedAt),
+  }));
+  $('measPrev').disabled = offset <= 0;
+  $('measNext').disabled = offset + limit >= measurements.total;
+  // station-status chips
+  const ss = $('measStationStatus');
+  ss.innerHTML = (payload.stationStatus || []).map(s =>
+    `<span class="chip ${s.ok ? 'ok' : 'bad'}" title="${escapeHtml(s.error || '')}">${escapeHtml(stationLabel(s.source))}: ${s.ok ? `${s.included}/${s.rows}` : 'fail'}</span>`
+  ).join('');
+  setText('measMeta', payload.cachedAt
+    ? `${t('meas.col.time')}: ${new Date(payload.cachedAt).toLocaleString()} · TTL ${payload.cacheTtlSeconds}s`
+    : '--');
+}
+
+function formatNumber(n) {
+  if (typeof n !== 'number') return String(n ?? '');
+  if (Math.abs(n) >= 1000) return n.toFixed(0);
+  if (Math.abs(n) >= 100) return n.toFixed(1);
+  if (Math.abs(n) >= 1) return n.toFixed(2);
+  return n.toFixed(3);
+}
+
+function refreshMeasurements() {
+  if (measurements.loadTimer) clearTimeout(measurements.loadTimer);
+  setText('measMeta', t('meas.loading'));
+  fetch(`/prediction/measurements?${buildMeasurementsQuery()}`)
+    .then(r => r.json())
+    .then(renderMeasurements)
+    .catch(err => {
+      setText('measMeta', t('meas.error', { msg: err.message || String(err) }));
+      $('measTbody').innerHTML = `<tr><td colspan="4" class="empty">${escapeHtml(err.message || String(err))}</td></tr>`;
+    });
+}
+
+function debouncedMeasurements() {
+  if (measurements.loadTimer) clearTimeout(measurements.loadTimer);
+  measurements.loadTimer = setTimeout(() => { measurements.state.offset = 0; refreshMeasurements(); }, 220);
+}
+
+['measSource','measMetric','measHours','measValueMin','measValueMax','measSearch'].forEach(id => {
+  $(id).addEventListener('input', debouncedMeasurements);
+  $(id).addEventListener('change', debouncedMeasurements);
+});
+$('measMissing').addEventListener('change', () => { measurements.state.offset = 0; refreshMeasurements(); });
+$('measRefresh').addEventListener('click', refreshMeasurements);
+$('measReset').addEventListener('click', () => {
+  $('measSource').value = ''; $('measMetric').value = ''; $('measHours').value = '24';
+  $('measValueMin').value = ''; $('measValueMax').value = ''; $('measSearch').value = '';
+  $('measMissing').checked = false;
+  measurements.state.sort = 'timestamp'; measurements.state.sortDir = 'desc'; measurements.state.offset = 0;
+  refreshMeasurements();
+});
+$('measPrev').addEventListener('click', () => {
+  measurements.state.offset = Math.max(0, measurements.state.offset - measurements.state.limit);
+  refreshMeasurements();
+});
+$('measNext').addEventListener('click', () => {
+  measurements.state.offset += measurements.state.limit;
+  refreshMeasurements();
+});
+document.querySelectorAll('#viewMeasurements thead th[data-sort]').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.sort;
+    if (measurements.state.sort === col) {
+      measurements.state.sortDir = measurements.state.sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      measurements.state.sort = col;
+      measurements.state.sortDir = col === 'timestamp' ? 'desc' : 'asc';
+    }
+    measurements.state.offset = 0;
+    refreshMeasurements();
+  });
+});
+
+/* ── predictions view (forecasts / anomalies / data quality) ─
+ * All three sub-views read the same prediction-service endpoints we already
+ * use for the overview, but here as paginated/sortable browsable lists. */
+const predictionsView = {
+  metaLoaded: false,
+  subtab: 'forecasts',
+  state: { offset: 0, limit: 100 },
+  total: 0,
+  loadTimer: null,
+};
+
+const PREDICTION_SUBTAB = {
+  forecasts: {
+    endpoint: '/prediction/forecasts/page',
+    columns: ['pred.col.computed', 'pred.col.station', 'pred.col.metric', 'pred.col.model', 'pred.col.points', 'pred.col.horizon', 'pred.col.input_count'],
+    row(r) {
+      return [
+        renderTime(r.computedAt),
+        cellStation(r.source),
+        `<span class="mono">${escapeHtml(r.metric || '')}</span>`,
+        escapeHtml(r.model || '--'),
+        String(r.points?.length ?? 0),
+        String(r.horizonHours ?? '--'),
+        String(r.input?.count ?? '--'),
+      ];
+    },
+  },
+  anomalies: {
+    endpoint: '/prediction/anomalies/page',
+    columns: ['pred.col.computed', 'pred.col.station', 'pred.col.metric', 'pred.col.anomaly_count', 'pred.col.severity'],
+    row(r) {
+      const severities = (r.anomalies || []).map(a => a.severity).filter(Boolean);
+      const worst = severities.includes('high') ? 'high' : severities.includes('medium') ? 'medium' : (severities[0] || '--');
+      return [
+        renderTime(r.computedAt),
+        cellStation(r.source),
+        `<span class="mono">${escapeHtml(r.metric || '')}</span>`,
+        String(r.anomalies?.length ?? 0),
+        escapeHtml(worst),
+      ];
+    },
+  },
+  quality: {
+    endpoint: '/prediction/data-quality/page',
+    columns: ['pred.col.computed', 'pred.col.station', 'pred.col.metric', 'pred.col.status', 'pred.col.gap', 'pred.col.age', 'pred.col.reasons'],
+    row(r) {
+      const gap = r.input?.missingRatio !== undefined ? `${(r.input.missingRatio * 100).toFixed(1)}%` : '--';
+      const age = r.input?.dataAgeMinutes ?? '--';
+      const reasons = Array.isArray(r.reasons) ? r.reasons.join(', ') : '';
+      return [
+        renderTime(r.computedAt),
+        cellStation(r.source),
+        `<span class="mono">${escapeHtml(r.metric || '')}</span>`,
+        `<span class="pill ${r.status === 'ok' ? 'ok' : r.status === 'partial' ? 'warn' : 'err'}">${escapeHtml(r.status || '--')}</span>`,
+        gap,
+        String(age),
+        escapeHtml(reasons),
+      ];
+    },
+  },
+};
+
+function renderTime(iso) {
+  if (!iso) return '--';
+  const d = new Date(iso);
+  return `<time datetime="${d.toISOString()}" title="${d.toISOString()}">${escapeHtml(d.toLocaleString())}</time>`;
+}
+function cellStation(s) {
+  if (!s) return '--';
+  return `${escapeHtml(stationLabel(s))} <span class="dim" style="color:var(--muted)">(${escapeHtml(s)})</span>`;
+}
+
+function loadPredictionsMeta() {
+  predictionsView.metaLoaded = true;
+  fetch('/prediction/measurements/meta').then(r => r.json()).then(meta => {
+    const srcSel = $('predSource');
+    const metricSel = $('predMetric');
+    for (const s of meta.stations || []) {
+      const opt = document.createElement('option');
+      opt.value = s; opt.textContent = `${stationLabel(s)} (${s})`;
+      srcSel.appendChild(opt);
+    }
+    const allMetrics = [...new Set([...(meta.metrics?.meteo || []), ...(meta.metrics?.solax || [])])].sort();
+    for (const m of allMetrics) {
+      const opt = document.createElement('option');
+      opt.value = m; opt.textContent = (FRIENDLY_METRICS[m] || m);
+      metricSel.appendChild(opt);
+    }
+  }).catch(() => { predictionsView.metaLoaded = false; });
+}
+
+function refreshPredictions() {
+  const cfg = PREDICTION_SUBTAB[predictionsView.subtab];
+  const thead = $('predThead');
+  thead.innerHTML = `<tr>${cfg.columns.map(k => `<th>${escapeHtml(t(k))}</th>`).join('')}</tr>`;
+  setText('predMeta', t('meas.loading'));
+  // Server-side paginated + filtered. The total comes from a count(*) on the
+  // matching set so the pager always shows the real number.
+  const limit = predictionsView.state.limit;
+  const offset = predictionsView.state.offset;
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  const src = $('predSource').value;
+  const metric = $('predMetric').value;
+  const search = $('predSearch').value.trim();
+  if (src) params.set('source', src);
+  if (metric) params.set('metric', metric);
+  if (search) params.set('search', search);
+  fetch(`${cfg.endpoint}?${params}`).then(r => r.json()).then(payload => {
+    const items = payload?.data || [];
+    const total = Number(payload?.total ?? items.length);
+    predictionsView.total = total;
+    const tbody = $('predTbody');
+    if (items.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="${cfg.columns.length}" class="empty">${t('pred.empty')}</td></tr>`;
+    } else {
+      tbody.innerHTML = items.map(r => `<tr>${cfg.row(r).map(c => `<td>${c}</td>`).join('')}</tr>`).join('');
+    }
+    const from = total === 0 ? 0 : offset + 1;
+    const to = Math.min(offset + limit, total);
+    const page = Math.floor(offset / limit) + 1;
+    const pages = Math.max(1, Math.ceil(total / limit));
+    setText('predPageInfo', t('meas.page_info', { from, to, total, page, pages, age: t('meas.cache_age_now') }));
+    $('predPrev').disabled = offset <= 0;
+    $('predNext').disabled = offset + limit >= total;
+    setText('predMeta', `${total} ${t('pred.title').toLowerCase()}`);
+  }).catch(err => {
+    setText('predMeta', t('meas.error', { msg: err.message || String(err) }));
+    $('predTbody').innerHTML = `<tr><td colspan="${cfg.columns.length}" class="empty">${escapeHtml(err.message || String(err))}</td></tr>`;
+  });
+}
+
+document.querySelectorAll('#predSubtabs [data-subtab]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#predSubtabs [data-subtab]').forEach(b => b.classList.toggle('active', b === btn));
+    predictionsView.subtab = btn.dataset.subtab;
+    predictionsView.state.offset = 0;
+    refreshPredictions();
+  });
+});
+['predSource', 'predMetric', 'predSearch'].forEach(id => {
+  $(id).addEventListener('input', () => {
+    if (predictionsView.loadTimer) clearTimeout(predictionsView.loadTimer);
+    predictionsView.loadTimer = setTimeout(() => { predictionsView.state.offset = 0; refreshPredictions(); }, 220);
+  });
+});
+$('predRefresh').addEventListener('click', refreshPredictions);
+$('predReset').addEventListener('click', () => {
+  $('predSource').value = ''; $('predMetric').value = ''; $('predSearch').value = '';
+  predictionsView.state.offset = 0; refreshPredictions();
+});
+$('predPrev').addEventListener('click', () => { predictionsView.state.offset = Math.max(0, predictionsView.state.offset - predictionsView.state.limit); refreshPredictions(); });
+$('predNext').addEventListener('click', () => { predictionsView.state.offset += predictionsView.state.limit; refreshPredictions(); });
+
+/* ── chain view (blockchain anchored events) ──────────────── */
+const chainView = {
+  state: { offset: 0, limit: 100 },
+  total: 0,
+  loadTimer: null,
+};
+
+function refreshChain() {
+  setText('chainMeta', t('meas.loading'));
+  const status = $('chainStatus').value;
+  const search = $('chainSearch').value.trim();
+  const limit = chainView.state.limit;
+  const offset = chainView.state.offset;
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (status) params.set('status', status);
+  if (search) params.set('search', search);
+  fetch(`/blockchain/events/page?${params}`).then(r => r.json()).then(payload => {
+    const items = payload?.data || [];
+    const total = Number(payload?.total ?? items.length);
+    chainView.total = total;
+    const tbody = $('chainTbody');
+    if (items.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="7" class="empty">${t('chain.empty')}</td></tr>`;
+    } else {
+      tbody.innerHTML = items.map(ev => {
+        const txLink = ev.txId
+          ? `<a class="mono" href="${stealthTxUrl(ev.txId)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(ev.txId)}">${escapeHtml(shorten(ev.txId, 8, 6))}</a>`
+          : '<span class="dim" style="color:var(--muted)">--</span>';
+        const blockLink = ev.blockHash
+          ? `<a class="mono" href="${stealthBlockUrl(ev.blockHash)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(ev.blockHash)}">${escapeHtml(shorten(ev.blockHash, 8, 6))}</a>`
+          : '<span class="dim" style="color:var(--muted)">--</span>';
+        const statusKind = ev.status === 'confirmed' ? 'ok' : ev.status === 'sent' ? 'info' : ev.status === 'failed' ? 'err' : 'warn';
+        return `<tr>
+          <td>${renderTime(ev.createdAt)}</td>
+          <td>${ev.confirmedAt ? renderTime(ev.confirmedAt) : '--'}</td>
+          <td><span class="mono">${escapeHtml(ev.eventName || '--')}</span></td>
+          <td>${escapeHtml(ev.sourceKind || '--')}</td>
+          <td><span class="pill ${statusKind}">${escapeHtml(ev.status || '--')}</span></td>
+          <td>${txLink}</td>
+          <td>${blockLink}</td>
+        </tr>`;
+      }).join('');
+    }
+    const from = total === 0 ? 0 : offset + 1;
+    const to = Math.min(offset + limit, total);
+    const page = Math.floor(offset / limit) + 1;
+    const pages = Math.max(1, Math.ceil(total / limit));
+    setText('chainPageInfo', t('meas.page_info', { from, to, total, page, pages, age: t('meas.cache_age_now') }));
+    $('chainPrev').disabled = offset <= 0;
+    $('chainNext').disabled = offset + limit >= total;
+    setText('chainMeta', `${total} ${t('chain.title').toLowerCase()}`);
+  }).catch(err => {
+    setText('chainMeta', t('meas.error', { msg: err.message || String(err) }));
+    $('chainTbody').innerHTML = `<tr><td colspan="7" class="empty">${escapeHtml(err.message || String(err))}</td></tr>`;
+  });
+}
+
+['chainStatus', 'chainSearch'].forEach(id => {
+  $(id).addEventListener('input', () => {
+    if (chainView.loadTimer) clearTimeout(chainView.loadTimer);
+    chainView.loadTimer = setTimeout(() => { chainView.state.offset = 0; refreshChain(); }, 220);
+  });
+  $(id).addEventListener('change', () => { chainView.state.offset = 0; refreshChain(); });
+});
+$('chainRefresh').addEventListener('click', refreshChain);
+$('chainReset').addEventListener('click', () => {
+  $('chainStatus').value = ''; $('chainSearch').value = '';
+  chainView.state.offset = 0; refreshChain();
+});
+$('chainPrev').addEventListener('click', () => { chainView.state.offset = Math.max(0, chainView.state.offset - chainView.state.limit); refreshChain(); });
+$('chainNext').addEventListener('click', () => { chainView.state.offset += chainView.state.limit; refreshChain(); });
+
 // Wire up language switcher and apply initial translations before any data
 // fetch starts so first paint is in the user's chosen language.
 applyStaticTranslations();
@@ -2021,6 +2849,9 @@ startRealtime();
 fallbackPoll();
 refreshSoiling();
 setInterval(refreshSoiling, 60_000);
+
+// Apply initial tab from URL hash; defaults to overview.
+applyTab(location.hash.slice(1) || 'overview');
 </script>
 </body>
 </html>

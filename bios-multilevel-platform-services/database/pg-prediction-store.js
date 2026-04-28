@@ -74,6 +74,49 @@ function createPgPredictionStore(databaseUrl) {
     return items[0] || null;
   }
 
+  /* Paginated artifact listing. Used by the dashboard's Predikcije browser.
+   * Accepts source/metric/status/search filters and limit/offset/sort options.
+   * Returns { data, total } so the UI can render real pagination instead of
+   * pulling a fixed page and filtering in JS. */
+  async function listPaginated(kind, filters = {}, options = {}) {
+    const table = kind === 'forecasts' ? 'forecasts'
+      : kind === 'anomalies' ? 'anomalies'
+      : kind === 'dataQuality' ? 'data_quality'
+      : kind === 'runs' ? 'prediction_runs' : null;
+    if (!table) return { data: [], total: 0, limit: 0, offset: 0 };
+    const where = [];
+    const values = [];
+    let p = 1;
+    if (filters.source) { where.push(`source = $${p++}`); values.push(filters.source); }
+    if (filters.metric) { where.push(`metric = $${p++}`); values.push(filters.metric); }
+    if (filters.status) { where.push(`status = $${p++}`); values.push(filters.status); }
+    if (filters.search) {
+      const cols = kind === 'forecasts'
+        ? `coalesce(source,'') || ' ' || coalesce(metric,'') || ' ' || coalesce(model,'')`
+        : kind === 'dataQuality'
+          ? `coalesce(source,'') || ' ' || coalesce(metric,'') || ' ' || coalesce(status,'')`
+          : `coalesce(source,'') || ' ' || coalesce(metric,'')`;
+      where.push(`(${cols}) ILIKE $${p++}`);
+      values.push(`%${filters.search}%`);
+    }
+    const sortCol = ({
+      timestamp: 'computed_at',
+      computed_at: 'computed_at',
+      created_at: 'created_at',
+      source: 'source',
+      metric: 'metric',
+    })[options.sort] || 'computed_at';
+    const sortDir = options.sortDir === 'asc' ? 'ASC' : 'DESC';
+    const limit = Math.min(Math.max(Number(options.limit) || 100, 1), 1000);
+    const offset = Math.max(0, Number(options.offset) || 0);
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    const dataQ = `SELECT * FROM ${table} ${whereSql} ORDER BY ${sortCol} ${sortDir} LIMIT ${limit} OFFSET ${offset}`;
+    const countQ = `SELECT count(*)::bigint AS total FROM ${table} ${whereSql}`;
+    const [data, count] = await Promise.all([pool.query(dataQ, values), pool.query(countQ, values)]);
+    return { data: data.rows.map(rowToArtifact), total: Number(count.rows[0].total), limit, offset };
+  }
+
   async function checkpoint(key, value) {
     if (value !== undefined) {
       await pool.query(
@@ -133,7 +176,120 @@ function createPgPredictionStore(databaseUrl) {
     return rows[0] || {};
   }
 
-  return { init, append, list, latest, checkpoint, setMeta, read, write, stats, prune, file: 'postgres' };
+  /* ── Mars2 raw measurements ──────────────────────────────────────────────
+   * `records` is the array returned by bios-data.loadRecords for one station:
+   *   [{ source, timestamp, <metric1>: val, <metric2>: val, ... }]
+   * We expand to (source, metric, ts) rows and bulk-insert with ON CONFLICT
+   * DO UPDATE so re-running the cycle / backfill is idempotent. */
+  async function persistRawRecords(source, fields, records) {
+    if (!records || records.length === 0) return { inserted: 0 };
+    // Build a single multi-row insert. cap chunk size to keep param count under
+    // libpq's 65535 parameter limit (5 params per row → 13107 rows max).
+    const ROWS_PER_BATCH = 5000;
+    let total = 0;
+    for (let start = 0; start < records.length; start += ROWS_PER_BATCH) {
+      const slice = records.slice(start, start + ROWS_PER_BATCH);
+      const values = [];
+      const tuples = [];
+      let p = 1;
+      for (const row of slice) {
+        const station = row.source || source;
+        if (!Number.isFinite(row.timestamp)) continue;
+        const tsIso = new Date(row.timestamp * 1000).toISOString();
+        for (const metric of fields) {
+          const v = row[metric];
+          const isMissing = !Number.isFinite(v);
+          tuples.push(`($${p++},$${p++},$${p++},$${p++},$${p++})`);
+          values.push(station, metric, tsIso, isMissing ? null : v, isMissing);
+        }
+      }
+      if (tuples.length === 0) continue;
+      const sql = `INSERT INTO raw_measurements (source, metric, ts, value, is_missing)
+                   VALUES ${tuples.join(',')}
+                   ON CONFLICT (source, metric, ts) DO UPDATE
+                     SET value = EXCLUDED.value,
+                         is_missing = EXCLUDED.is_missing,
+                         ingested_at = now()`;
+      const r = await pool.query(sql, values);
+      total += r.rowCount || 0;
+    }
+    return { inserted: total };
+  }
+
+  async function listRawMeasurements(filters = {}) {
+    const where = [];
+    const values = [];
+    let p = 1;
+    if (filters.source) { where.push(`source = $${p++}`); values.push(filters.source); }
+    if (filters.metric) { where.push(`metric = $${p++}`); values.push(filters.metric); }
+    if (filters.from)   { where.push(`ts >= $${p++}`);    values.push(filters.from); }
+    if (filters.to)     { where.push(`ts <= $${p++}`);    values.push(filters.to); }
+    if (Number.isFinite(filters.valueMin)) { where.push(`value >= $${p++}`); values.push(filters.valueMin); }
+    if (Number.isFinite(filters.valueMax)) { where.push(`value <= $${p++}`); values.push(filters.valueMax); }
+    if (filters.search) {
+      where.push(`(source ILIKE $${p} OR metric ILIKE $${p})`);
+      values.push(`%${filters.search}%`);
+      p += 1;
+    }
+    if (filters.missingOnly) where.push(`is_missing = TRUE`);
+
+    const sortCol = ({ timestamp: 'ts', source: 'source', metric: 'metric', value: 'value' })[filters.sort] || 'ts';
+    const sortDir = filters.sortDir === 'asc' ? 'ASC' : 'DESC';
+    const limit = Math.min(Math.max(Number(filters.limit) || 500, 1), 5000);
+    const offset = Math.max(0, Number(filters.offset) || 0);
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    const dataQ = `SELECT source, metric, extract(epoch from ts)::bigint AS timestamp, value, is_missing
+                   FROM raw_measurements ${whereSql}
+                   ORDER BY ${sortCol} ${sortDir}
+                   LIMIT ${limit} OFFSET ${offset}`;
+    const countQ = `SELECT count(*)::bigint AS total FROM raw_measurements ${whereSql}`;
+    const [data, count] = await Promise.all([pool.query(dataQ, values), pool.query(countQ, values)]);
+    return {
+      data: data.rows.map(r => ({
+        source: r.source, metric: r.metric, timestamp: Number(r.timestamp), value: r.value, isMissing: r.is_missing,
+      })),
+      total: Number(count.rows[0].total),
+      limit, offset,
+    };
+  }
+
+  async function rawMeasurementsStats() {
+    const { rows } = await pool.query('SELECT * FROM raw_measurements_stats');
+    const top = rows[0] || {};
+    const perStation = await pool.query(
+      `SELECT source, count(*)::bigint AS rows, min(ts) AS earliest, max(ts) AS latest
+       FROM raw_measurements GROUP BY source ORDER BY source`,
+    );
+    return {
+      totalRows: Number(top.total_rows || 0),
+      uniqueSources: Number(top.unique_sources || 0),
+      uniqueMetrics: Number(top.unique_metrics || 0),
+      missingRows: Number(top.missing_rows || 0),
+      rows24h: Number(top.rows_24h || 0),
+      rows7d: Number(top.rows_7d || 0),
+      earliest: top.earliest?.toISOString?.() || top.earliest || null,
+      latest:   top.latest?.toISOString?.()   || top.latest   || null,
+      perStation: perStation.rows.map(r => ({
+        source: r.source,
+        rows: Number(r.rows),
+        earliest: r.earliest?.toISOString?.() || r.earliest,
+        latest: r.latest?.toISOString?.() || r.latest,
+      })),
+    };
+  }
+
+  async function pruneRawMeasurements(retentionDays) {
+    if (!retentionDays || retentionDays <= 0) return { deleted: 0, skipped: 'retention disabled' };
+    const { rows } = await pool.query('SELECT prune_raw_measurements($1) AS deleted', [retentionDays]);
+    return { deleted: Number(rows[0]?.deleted || 0) };
+  }
+
+  return {
+    init, append, list, latest, listPaginated, checkpoint, setMeta, read, write, stats, prune,
+    persistRawRecords, listRawMeasurements, rawMeasurementsStats, pruneRawMeasurements,
+    file: 'postgres',
+  };
 }
 
 module.exports = { createPgPredictionStore };

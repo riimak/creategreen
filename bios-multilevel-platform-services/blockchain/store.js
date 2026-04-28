@@ -37,6 +37,20 @@ function createStore(file) {
     return list(predicate, 1)[0] || null;
   }
 
+  function listPaginated(filters = {}, options = {}) {
+    let rows = read().events.slice().reverse();
+    if (filters.status) rows = rows.filter(r => r.status === filters.status);
+    if (filters.sourceKind) rows = rows.filter(r => r.sourceKind === filters.sourceKind);
+    if (filters.eventName) rows = rows.filter(r => r.eventName === filters.eventName);
+    if (filters.search) {
+      const q = String(filters.search).toLowerCase();
+      rows = rows.filter(r => `${r.eventName || ''} ${r.sourceKind || ''} ${r.txId || ''} ${r.dedupeKey || ''}`.toLowerCase().includes(q));
+    }
+    const limit = Math.min(Math.max(Number(options.limit) || 100, 1), 1000);
+    const offset = Math.max(0, Number(options.offset) || 0);
+    return { data: rows.slice(offset, offset + limit), total: rows.length, limit, offset };
+  }
+
   function markSeen(key, value) {
     const data = read();
     data.seen = data.seen || {};
@@ -65,7 +79,7 @@ function createStore(file) {
     return value;
   }
 
-  return { read, write, put, get, list, latest, markSeen, checkpoint, setMeta, file: storeFile };
+  return { read, write, put, get, list, latest, listPaginated, markSeen, checkpoint, setMeta, file: storeFile };
 }
 
 module.exports = { createStore };

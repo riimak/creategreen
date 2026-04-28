@@ -108,6 +108,30 @@ production-blockchain:
   needs:
     - job: build-blockchain
       optional: true
+  # Append Stealth secrets from GitLab CI variables to auto-deploy-values.yaml.
+  # Only STEALTH_WIF is strictly required for real broadcast; the *_USERNAME/PASSWORD/API_KEY
+  # are only used if the Stealth RPC gateway requires authentication.
+  before_script:
+    - |
+      VALUES_FILE="bios-multilevel-platform-services/blockchain/.gitlab/auto-deploy-values.yaml"
+      append_env() {
+        local name="$1"; local value="$2"
+        if [ -n "${value}" ]; then
+          {
+            echo "  - name: ${name}"
+            echo "    value: \"${value}\""
+          } >> "${VALUES_FILE}"
+          echo "Appended ${name} from CI variables to ${VALUES_FILE}"
+        fi
+      }
+      if [ -n "${STEALTH_WIF:-}" ]; then
+        append_env STEALTH_WIF "${STEALTH_WIF}"
+      else
+        echo "WARN: STEALTH_WIF not set; blockchain will not be able to broadcast real Stealth transactions."
+      fi
+      append_env STEALTH_RPC_USERNAME "${STEALTH_RPC_USERNAME:-}"
+      append_env STEALTH_RPC_PASSWORD "${STEALTH_RPC_PASSWORD:-}"
+      append_env STEALTH_API_KEY      "${STEALTH_API_KEY:-}"
   rules:
     - !reference [.production, rules]
     - when: on_success

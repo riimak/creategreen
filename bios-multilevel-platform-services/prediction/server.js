@@ -1,5 +1,5 @@
 const http = require('http');
-const { loadRecords, seriesFor, fieldsFor } = require('./bios-data');
+const { loadRecords, seriesFor, fieldsFor, METEO_FIELDS, SOLAX_FIELDS } = require('./bios-data');
 const { forecast, anomalies } = require('./model');
 const { createStore: createJsonStore } = require('./store');
 const { METRICS, metricInfo, targetInfo } = require('./metrics');
@@ -120,7 +120,15 @@ async function expandTargets(targets, hours) {
         for (const metric of fields) {
           if (seriesFor(records, metric).length > 0) expanded.push({ source, metric });
         }
-        stationOutcome.push(`${source}=ok(rows=${records.length},metrics=${expanded.length - before})`);
+        // Persist the raw pull. Idempotent (PRIMARY KEY + ON CONFLICT DO UPDATE),
+        // so re-running a cycle with overlapping data simply refreshes values.
+        try {
+          const persistResult = await S(store.persistRawRecords(source, fields, records));
+          stationOutcome.push(`${source}=ok(rows=${records.length},metrics=${expanded.length - before},persisted=${persistResult.inserted ?? 0})`);
+        } catch (persistErr) {
+          log('warn', `persist raw_measurements failed for ${source}: ${persistErr.message}`);
+          stationOutcome.push(`${source}=ok(rows=${records.length},metrics=${expanded.length - before},persist=failed)`);
+        }
       } catch (err) {
         // Surface the reason instead of dropping silently — this was the symptom of
         // "no Mars2 logs" in production: every station threw, expand returned [].
@@ -385,6 +393,56 @@ async function runCycle(reason = 'scheduled') {
   }
 }
 
+async /* ── Raw measurements view (Mars2 data browser, DB-backed) ──────────────────
+ * Stored in `raw_measurements` (tall layout) by `runCycle` after each Mars2
+ * pull, and seedable historically via `scripts/backfill-mars2.js`. The
+ * dashboard reads from this table — no live Mars2 hit on the critical path. */
+async function listMeasurements(params) {
+  const fromRaw = params.get('from');
+  const toRaw = params.get('to');
+  const hoursRaw = params.get('hours');
+  let from = null;
+  let to = null;
+  if (fromRaw) from = new Date(fromRaw);
+  if (toRaw) to = new Date(toRaw);
+  if (!from && !to && hoursRaw) {
+    const hours = Math.min(Math.max(Number(hoursRaw) || 24, 1), 24 * 365 * 10);
+    from = new Date(Date.now() - hours * 3600 * 1000);
+  }
+
+  const filters = {
+    source: params.get('source') || undefined,
+    metric: params.get('metric') || undefined,
+    from: from && !Number.isNaN(from.getTime()) ? from.toISOString() : undefined,
+    to:   to   && !Number.isNaN(to.getTime())   ? to.toISOString()   : undefined,
+    valueMin: params.get('valueMin') === null || params.get('valueMin') === '' ? null : Number(params.get('valueMin')),
+    valueMax: params.get('valueMax') === null || params.get('valueMax') === '' ? null : Number(params.get('valueMax')),
+    search: (params.get('search') || '').trim() || undefined,
+    missingOnly: params.get('missingOnly') === 'true',
+    sort: params.get('sort') || 'timestamp',
+    sortDir: params.get('sortDir') === 'asc' ? 'asc' : 'desc',
+    limit: Math.min(Math.max(Number(params.get('limit')) || 500, 1), 5000),
+    offset: Math.max(0, Number(params.get('offset')) || 0),
+  };
+
+  const result = await S(store.listRawMeasurements(filters));
+  return { ...result, filters: { ...filters, valueMin: filters.valueMin, valueMax: filters.valueMax } };
+}
+
+async function measurementsMeta() {
+  const stats = await S(store.rawMeasurementsStats());
+  return {
+    stations: stationIds(),
+    metrics: { meteo: METEO_FIELDS, solax: SOLAX_FIELDS },
+    inputSource: inputSourceInfo(),
+    intervalMinutes: numberParam('PREDICTION_INTERVAL_MINUTES', 10),
+    expectedSampleMinutes: numberParam('PREDICTION_EXPECTED_SAMPLE_MINUTES', 10),
+    storage: store.file === 'postgres' ? 'postgres' : 'json',
+    stats,
+    retentionDays: Number(process.env.RAW_MEASUREMENTS_RETENTION_DAYS) || null,
+  };
+}
+
 async function listFromStore(kind, params) {
   const source = params.get('source');
   const metric = params.get('metric');
@@ -535,6 +593,32 @@ async function handle(req, res) {
     if (req.method === 'GET' && url.pathname === '/sla') {
       return json(res, 200, await slaSummary(url.searchParams));
     }
+    if (req.method === 'GET' && url.pathname === '/measurements') {
+      return json(res, 200, await listMeasurements(url.searchParams));
+    }
+    if (req.method === 'GET' && url.pathname === '/measurements/meta') {
+      return json(res, 200, await measurementsMeta());
+    }
+    // Paginated artifact browsers (used by the dashboard's Predikcije tab).
+    // Supports: ?source=&metric=&status=&search=&limit=&offset=&sort=&sortDir=
+    if (req.method === 'GET' && (url.pathname === '/forecasts/page' || url.pathname === '/anomalies/page' || url.pathname === '/data-quality/page')) {
+      const kind = url.pathname === '/forecasts/page' ? 'forecasts'
+        : url.pathname === '/anomalies/page' ? 'anomalies'
+        : 'dataQuality';
+      const filters = {
+        source: url.searchParams.get('source') || undefined,
+        metric: url.searchParams.get('metric') || undefined,
+        status: url.searchParams.get('status') || undefined,
+        search: url.searchParams.get('search') || undefined,
+      };
+      const options = {
+        limit: Number(url.searchParams.get('limit')) || 100,
+        offset: Number(url.searchParams.get('offset')) || 0,
+        sort: url.searchParams.get('sort') || 'computed_at',
+        sortDir: url.searchParams.get('sortDir') || 'desc',
+      };
+      return json(res, 200, await S(store.listPaginated(kind, filters, options)));
+    }
     return json(res, 404, { error: 'not found' });
   } catch (error) {
     log('error', `${url.pathname}: ${error.message}`);
@@ -563,6 +647,19 @@ function startScheduler() {
       void S(store.append('runs', { id: `run-${Date.now()}`, status: 'failed', error: error.message, finishedAt: new Date().toISOString() }));
     });
   }, interval * 60 * 1000);
+
+  // Optional pruning of raw_measurements (off by default to preserve backfill).
+  // Set RAW_MEASUREMENTS_RETENTION_DAYS=730 to keep ~2 years.
+  const retention = Number(process.env.RAW_MEASUREMENTS_RETENTION_DAYS) || 0;
+  if (retention > 0 && typeof store.pruneRawMeasurements === 'function') {
+    const runPrune = () => {
+      S(store.pruneRawMeasurements(retention))
+        .then(r => log('info', `raw_measurements prune: deleted=${r.deleted ?? 0} retentionDays=${retention}`))
+        .catch(err => log('warn', `raw_measurements prune failed: ${err.message}`));
+    };
+    setTimeout(runPrune, 60 * 1000);
+    setInterval(runPrune, 6 * 3600 * 1000);
+  }
 }
 
 if (require.main === module) {

@@ -63,22 +63,40 @@ production-prediction:
   needs:
     - job: build-prediction
       optional: true
-  # Append GitLab CI variables BIOS_USERNAME / BIOS_PASSWORD to auto-deploy-values.yaml
-  # before Helm reads it. kubectl is NOT configured during before_script in
-  # barrage-auto-deploy (KUBECONFIG is set up later in the deploy step), so we patch
-  # the values file directly instead of creating a Kubernetes Secret.
+  # Forward GitLab CI/CD variables into Helm `extraEnv` before the deploy step reads it.
+  # kubectl is NOT configured during before_script in barrage-auto-deploy (KUBECONFIG is
+  # set up later), so we patch the values file directly instead of creating a Secret.
+  #
+  # Kubernetes processes container `env` in order and "last wins" on duplicate names, so
+  # entries appended here also OVERRIDE defaults baked into auto-deploy-values.yaml.
+  # To plumb a new variable through CI, set it as a GitLab CI/CD variable and add its
+  # name to PREDICTION_FORWARD_ENVS below.
   before_script:
     - |
+      set -e
       VALUES_FILE="bios-multilevel-platform-services/prediction/.gitlab/auto-deploy-values.yaml"
-      if [ -n "${BIOS_USERNAME:-}" ] && [ -n "${BIOS_PASSWORD:-}" ]; then
-        {
-          echo "  - name: BIOS_USERNAME"
-          echo "    value: \"${BIOS_USERNAME}\""
-          echo "  - name: BIOS_PASSWORD"
-          echo "    value: \"${BIOS_PASSWORD}\""
-        } >> "${VALUES_FILE}"
-        echo "Appended BIOS_USERNAME/BIOS_PASSWORD from CI variables to ${VALUES_FILE}"
-      else
+      PREDICTION_FORWARD_ENVS="\
+        BIOS_API_BASE BIOS_USERNAME BIOS_PASSWORD \
+        PREDICTION_INTERVAL_MINUTES PREDICTION_TARGETS PREDICTION_STATIONS \
+        PREDICTION_INIT_MODE PREDICTION_BACKFILL_HOURS \
+        PREDICTION_EXPECTED_SAMPLE_MINUTES PREDICTION_MIN_SAMPLES \
+        PREDICTION_STALE_AFTER_MINUTES PREDICTION_MISSING_RATIO_WARN \
+        PREDICTION_DATA_API_BASE WEATHER_API_BASE WEATHER_API_KEY \
+        SLA_TARGET_PERCENT NOTIFICATIONS_ENABLED NOTIFICATION_WEBHOOK_URL \
+        NOTIFICATION_STALE_AFTER_MINUTES NOTIFICATION_REPEAT_AFTER_MINUTES"
+      for name in $PREDICTION_FORWARD_ENVS; do
+        value="${!name:-}"
+        if [ -n "$value" ]; then
+          {
+            echo "  - name: $name"
+            echo "    value: \"$value\""
+          } >> "$VALUES_FILE"
+          echo "Forwarded CI var $name -> $VALUES_FILE"
+        else
+          echo "Skip $name: not set as CI variable"
+        fi
+      done
+      if [ -z "${BIOS_USERNAME:-}" ] || [ -z "${BIOS_PASSWORD:-}" ]; then
         echo "WARN: BIOS_USERNAME/BIOS_PASSWORD not set as CI variables; Mars2 ingest will be OFF."
       fi
   rules:
@@ -108,30 +126,49 @@ production-blockchain:
   needs:
     - job: build-blockchain
       optional: true
-  # Append Stealth secrets from GitLab CI variables to auto-deploy-values.yaml.
+  # Forward GitLab CI/CD variables (Stealth secrets + tunables) into Helm `extraEnv`.
   # Only STEALTH_WIF is strictly required for real broadcast; the *_USERNAME/PASSWORD/API_KEY
   # are only used if the Stealth RPC gateway requires authentication.
+  #
+  # Kubernetes processes container `env` in order and "last wins" on duplicate names, so
+  # entries appended here also OVERRIDE defaults baked into auto-deploy-values.yaml
+  # (e.g. STEALTH_RPC_URL, BLOCKCHAIN_MAX_BROADCASTS_PER_CYCLE, BLOCKCHAIN_EVENT_SOURCE).
+  # To plumb a new variable through CI, set it as a GitLab CI/CD variable and add its
+  # name to BLOCKCHAIN_FORWARD_ENVS below.
   before_script:
     - |
+      set -e
       VALUES_FILE="bios-multilevel-platform-services/blockchain/.gitlab/auto-deploy-values.yaml"
-      append_env() {
-        local name="$1"; local value="$2"
-        if [ -n "${value}" ]; then
+      BLOCKCHAIN_FORWARD_ENVS="\
+        STEALTH_WIF STEALTH_RPC_USERNAME STEALTH_RPC_PASSWORD STEALTH_API_KEY \
+        STEALTH_RELAY_MODE STEALTH_RPC_URL STEALTH_RPC_ID \
+        STEALTH_ENABLE_REAL_BROADCAST STEALTH_RPC_COOLDOWN_SECONDS \
+        STEALTH_RPC_STATUS_METHOD STEALTH_RPC_BALANCE_METHOD \
+        STEALTH_RPC_OUTPUTS_METHOD STEALTH_RPC_TX_METHOD \
+        STEALTH_RPC_BLOCK_METHOD STEALTH_RPC_BEST_BLOCK_METHOD \
+        STEALTH_RPC_SEND_METHOD STEALTH_RAW_TX_BUILDER_URL \
+        STEALTH_FEEWORK_TIMEOUT_SECONDS \
+        BLOCKCHAIN_EVENT_FILTERS BLOCKCHAIN_EVENT_SOURCE BLOCKCHAIN_EVENT_SCHEMA \
+        BLOCKCHAIN_INTERVAL_SECONDS BLOCKCHAIN_RECONFIRM_SECONDS \
+        BLOCKCHAIN_MAX_RETRIES BLOCKCHAIN_INIT_MODE BLOCKCHAIN_RETENTION_COUNT \
+        BLOCKCHAIN_MAX_BROADCASTS_PER_CYCLE BLOCKCHAIN_ANCHOR_PREDICTIONS \
+        BLOCKCHAIN_DEMO_DEVICES BLOCKCHAIN_SHOW_VENDOR_WARNINGS \
+        BLOCKCHAIN_WALLET_SEED BLOCKCHAIN_AMQP_MODE"
+      for name in $BLOCKCHAIN_FORWARD_ENVS; do
+        value="${!name:-}"
+        if [ -n "$value" ]; then
           {
-            echo "  - name: ${name}"
-            echo "    value: \"${value}\""
-          } >> "${VALUES_FILE}"
-          echo "Appended ${name} from CI variables to ${VALUES_FILE}"
+            echo "  - name: $name"
+            echo "    value: \"$value\""
+          } >> "$VALUES_FILE"
+          echo "Forwarded CI var $name -> $VALUES_FILE"
+        else
+          echo "Skip $name: not set as CI variable"
         fi
-      }
-      if [ -n "${STEALTH_WIF:-}" ]; then
-        append_env STEALTH_WIF "${STEALTH_WIF}"
-      else
-        echo "WARN: STEALTH_WIF not set; blockchain will not be able to broadcast real Stealth transactions."
+      done
+      if [ -z "${STEALTH_WIF:-}" ]; then
+        echo "WARN: STEALTH_WIF not set; blockchain will not broadcast real Stealth transactions."
       fi
-      append_env STEALTH_RPC_USERNAME "${STEALTH_RPC_USERNAME:-}"
-      append_env STEALTH_RPC_PASSWORD "${STEALTH_RPC_PASSWORD:-}"
-      append_env STEALTH_API_KEY      "${STEALTH_API_KEY:-}"
   rules:
     - !reference [.production, rules]
     - when: on_success

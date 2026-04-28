@@ -113,7 +113,7 @@ extraEnv:
   - name: STEALTH_RELAY_MODE
     value: "json-rpc"
   - name: STEALTH_RPC_URL
-    value: "https://api-gateway-mainnet.stealthmonitor.xyz"
+    value: "https://api-gateway-mainnet.prod.stealth.barrage.net"
   - name: STEALTH_RPC_ID
     value: "666420"
   - name: STEALTH_ENABLE_REAL_BROADCAST

@@ -17,6 +17,17 @@ ENTRYPOINT []
 COPY --from=deno /usr/bin/deno /usr/local/bin/deno
 RUN /usr/local/bin/deno --version
 
+# Install BARRAGE internal CA so Node, Deno and curl trust *.barrage.net hosts
+# (api-gateway-mainnet.prod.stealth.barrage.net is signed by BIPA, not a public CA).
+COPY certs/bipa_ca.crt /usr/local/share/ca-certificates/bipa_ca.crt
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && update-ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+ENV DENO_CERT=/usr/local/share/ca-certificates/bipa_ca.crt
+ENV DENO_TLS_CA_STORE=system
+
 WORKDIR /app
 
 # Blockchain service has npm dependencies

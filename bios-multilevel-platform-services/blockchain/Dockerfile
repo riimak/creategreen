@@ -2,6 +2,13 @@ FROM node:22-alpine
 
 WORKDIR /app
 
+# Install BARRAGE internal CA so Node and curl trust *.barrage.net hosts
+# (api-gateway-mainnet.prod.stealth.barrage.net is signed by BIPA, not a public CA).
+COPY certs/bipa_ca.crt /usr/local/share/ca-certificates/bipa_ca.crt
+RUN apk add --no-cache ca-certificates \
+ && update-ca-certificates
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+
 # Build context must be Git / compose repo root (.. from this folder); paths are root-relative.
 COPY bios-multilevel-platform-services/blockchain/package.json ./blockchain/package.json
 RUN cd blockchain && npm install --omit=dev

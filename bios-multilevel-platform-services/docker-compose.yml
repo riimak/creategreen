@@ -81,7 +81,7 @@ services:
       BLOCKCHAIN_SHOW_VENDOR_WARNINGS: "${BLOCKCHAIN_SHOW_VENDOR_WARNINGS:-false}"
       PREDICTION_SERVICE_URL: http://prediction:8091
       STEALTH_RELAY_MODE: "${STEALTH_RELAY_MODE:-json-rpc}"
-      STEALTH_RPC_URL: "${STEALTH_RPC_URL:-https://api-gateway-mainnet.stealthmonitor.xyz}"
+      STEALTH_RPC_URL: "${STEALTH_RPC_URL:-https://api-gateway-mainnet.prod.stealth.barrage.net}"
       STEALTH_RPC_ID: "${STEALTH_RPC_ID:-666420}"
       STEALTH_RPC_USERNAME: "${STEALTH_RPC_USERNAME:-}"
       STEALTH_RPC_PASSWORD: "${STEALTH_RPC_PASSWORD:-}"

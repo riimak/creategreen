@@ -63,14 +63,10 @@ production-prediction:
   needs:
     - job: build-prediction
       optional: true
-  # Forward GitLab CI/CD variables into Helm `extraEnv` before the deploy step reads it.
-  # kubectl is NOT configured during before_script in barrage-auto-deploy (KUBECONFIG is
-  # set up later), so we patch the values file directly instead of creating a Secret.
-  #
-  # Kubernetes processes container `env` in order and "last wins" on duplicate names, so
-  # entries appended here also OVERRIDE defaults baked into auto-deploy-values.yaml.
-  # To plumb a new variable through CI, set it as a GitLab CI/CD variable and add its
-  # name to PREDICTION_FORWARD_ENVS below.
+  # Forward GitLab CI/CD variables into Helm `extraEnv`.
+  # For each CI variable that is set, we DELETE any existing entry with the same `name:`
+  # from auto-deploy-values.yaml first, then append — so there are never duplicate names
+  # (Kubernetes strategic merge patch rejects duplicate env entries).
   before_script:
     - |
       set -e
@@ -87,6 +83,7 @@ production-prediction:
       for name in $PREDICTION_FORWARD_ENVS; do
         value="${!name:-}"
         if [ -n "$value" ]; then
+          sed -i "/^  - name: ${name}$/,+1d" "$VALUES_FILE"
           {
             echo "  - name: $name"
             echo "    value: \"$value\""
@@ -127,14 +124,9 @@ production-blockchain:
     - job: build-blockchain
       optional: true
   # Forward GitLab CI/CD variables (Stealth secrets + tunables) into Helm `extraEnv`.
-  # Only STEALTH_WIF is strictly required for real broadcast; the *_USERNAME/PASSWORD/API_KEY
-  # are only used if the Stealth RPC gateway requires authentication.
-  #
-  # Kubernetes processes container `env` in order and "last wins" on duplicate names, so
-  # entries appended here also OVERRIDE defaults baked into auto-deploy-values.yaml
-  # (e.g. STEALTH_RPC_URL, BLOCKCHAIN_MAX_BROADCASTS_PER_CYCLE, BLOCKCHAIN_EVENT_SOURCE).
-  # To plumb a new variable through CI, set it as a GitLab CI/CD variable and add its
-  # name to BLOCKCHAIN_FORWARD_ENVS below.
+  # For each CI variable that is set, we DELETE any existing entry with the same `name:`
+  # from auto-deploy-values.yaml first, then append — so there are never duplicate names
+  # (Kubernetes strategic merge patch rejects duplicate env entries).
   before_script:
     - |
       set -e
@@ -157,6 +149,7 @@ production-blockchain:
       for name in $BLOCKCHAIN_FORWARD_ENVS; do
         value="${!name:-}"
         if [ -n "$value" ]; then
+          sed -i "/^  - name: ${name}$/,+1d" "$VALUES_FILE"
           {
             echo "  - name: $name"
             echo "    value: \"$value\""

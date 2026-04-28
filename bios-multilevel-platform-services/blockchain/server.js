@@ -488,11 +488,15 @@ async function runCycle(reason = 'scheduled') {
             state.progress.deferred = deferred;
             continue;
           }
-          const result = await processEvent(event);
-          if (result.accepted) accepted += 1;
-          if (result.reason === 'duplicate') duplicates += 1;
-          if (result.reason === 'filtered') filtered += 1;
-          state.progress.accepted = accepted;
+          try {
+            const result = await processEvent(event);
+            if (result.accepted) accepted += 1;
+            if (result.reason === 'duplicate') duplicates += 1;
+            if (result.reason === 'filtered') filtered += 1;
+            state.progress.accepted = accepted;
+          } catch (err) {
+            duplicates += 1;
+          }
         }
         results.push({ source, status: 'ok', events: events.length, accepted, duplicates, filtered, deferred, maxBroadcasts });
       } catch (error) {

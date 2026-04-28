@@ -393,7 +393,7 @@ async function runCycle(reason = 'scheduled') {
   }
 }
 
-async /* ── Raw measurements view (Mars2 data browser, DB-backed) ──────────────────
+/* ── Raw measurements view (Mars2 data browser, DB-backed) ──────────────────
  * Stored in `raw_measurements` (tall layout) by `runCycle` after each Mars2
  * pull, and seedable historically via `scripts/backfill-mars2.js`. The
  * dashboard reads from this table — no live Mars2 hit on the critical path. */

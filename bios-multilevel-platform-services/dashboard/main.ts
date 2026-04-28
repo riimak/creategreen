@@ -61,13 +61,14 @@ function broadcast(type: string, data: unknown): void {
 // Volatile fields the upstream services stamp every poll. Stripping them
 // before dedup means we only re-broadcast when something substantive
 // changes, instead of pulsing the whole UI every two seconds.
+// Fields stripped before dedup so we only re-broadcast on substantive changes.
+// Do NOT strip computedAt / nextRunAt / startedAt — the rationale widget needs
+// fresh timestamps to render "1m ago" / "in 8m" and SSE was silently swallowing
+// updates when only those fields changed.
 const VOLATILE_KEYS = new Set([
-  "computedAt",
   "checkedAt",
   "lastPollAt",
   "receivedAt",
-  "nextRunAt",
-  "startedAt",
   "lastReadAt",
 ]);
 

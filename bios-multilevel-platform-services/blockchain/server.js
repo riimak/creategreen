@@ -380,6 +380,7 @@ async function predictionEvents() {
 
   for (const row of quality.data || []) {
     if (!['stale', 'insufficient_data', 'partial'].includes(row.status)) continue;
+    if (row.nighttime && row.solar) continue;
     const value = row.status === 'stale'
       ? Math.min(65535, row.input.dataAgeMinutes || 0)
       : Math.round((row.input.missingRatio || 0) * 1000);
@@ -400,6 +401,7 @@ async function predictionEvents() {
   const anomalies = await fetchJson(base, '/anomalies?limit=50');
   for (const artifact of anomalies.data || []) {
     for (const anomaly of artifact.anomalies || []) {
+      if (anomaly.severity !== 'high' || anomaly.nighttime) continue;
       events.push({
         source: artifact.source,
         metric: artifact.metric,
@@ -418,7 +420,9 @@ async function predictionEvents() {
   for (const row of sla.targets || []) {
     const [source, metric] = String(row.target || '').split(':');
     if (!source || !metric) continue;
-    if (row.withinSla === false) {
+    const isSolar = String(source).toUpperCase().startsWith('SOLAX');
+    const latestQuality = (quality.data || []).find(q => q.source === source && q.metric === metric);
+    if (row.withinSla === false && !(isSolar && latestQuality?.nighttime)) {
       events.push({
         source,
         metric,
@@ -434,7 +438,7 @@ async function predictionEvents() {
     }
   }
 
-  if (boolParam('BLOCKCHAIN_ANCHOR_PREDICTIONS', false)) {
+  if (boolParam('BLOCKCHAIN_ANCHOR_PREDICTIONS', true)) {
     for (const forecast of forecasts.data || []) {
       events.push({
         source: forecast.source,

@@ -234,7 +234,7 @@ main{
    row 2 has the metric picker. No flex-wrap, so changing metric never
    reflows the header height. */
 .signal>.head{
-  padding:12px 18px 10px;border-bottom:1px solid var(--border);grid-column:1 / -1;
+  padding:14px 16px 10px;border-bottom:1px solid var(--border);grid-column:1 / -1;
   display:flex;flex-direction:column;gap:8px;min-width:0;
 }
 .signal>.head .head-row{display:flex;align-items:center;gap:12px;min-width:0}
@@ -526,6 +526,7 @@ nav.tabs .tab.active{background:var(--card);color:var(--text);box-shadow:0 1px 0
 .meas .filters{
   display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px 10px;
   padding:12px 14px;background:var(--card);border:1px solid var(--border);border-radius:10px;
+  align-items:end;
 }
 .meas .filters label{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600}
 .meas .filters input,
@@ -536,9 +537,9 @@ nav.tabs .tab.active{background:var(--card);color:var(--text);box-shadow:0 1px 0
 }
 .meas .filters input:focus,
 .meas .filters select:focus{outline:2px solid var(--accent);outline-offset:0;border-color:transparent}
-.meas .filters .checkbox{flex-direction:row;align-items:center;gap:6px;text-transform:none;font-size:12.5px;color:var(--text);font-weight:500;letter-spacing:0;padding-top:18px}
+.meas .filters .checkbox{flex-direction:row;align-items:center;gap:6px;text-transform:none;font-size:12.5px;color:var(--text);font-weight:500;letter-spacing:0}
 .meas .filters .checkbox input{margin:0;accent-color:var(--accent)}
-.meas .filters .actions{display:flex;align-items:flex-end;gap:6px;padding-top:18px}
+.meas .filters .actions{display:flex;align-items:flex-end;gap:6px;align-self:end}
 .meas .filters .actions button{
   font:600 12px/1 'Inter',sans-serif;
   padding:8px 12px;border-radius:6px;border:1px solid var(--border);
@@ -569,16 +570,39 @@ nav.tabs .tab.active{background:var(--card);color:var(--text);box-shadow:0 1px 0
 .meas tbody td.value.missing{color:var(--red);font-weight:500}
 .meas tbody td.empty{padding:32px 14px;text-align:center;color:var(--subtle);font-style:italic;font-size:12.5px}
 .meas .pager{
-  display:flex;justify-content:space-between;align-items:center;gap:10px;
+  display:flex;justify-content:space-between;align-items:center;gap:12px;
   padding:8px 12px;border-top:1px solid var(--border);background:var(--surface);
   font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;
+  flex-wrap:wrap;
 }
-.meas .pager button{
-  font:600 11.5px/1 'Inter',sans-serif;
-  padding:6px 10px;border-radius:5px;border:1px solid var(--border);
+.meas .pager-size{display:flex;align-items:center;gap:6px}
+.meas .pager-size select{
+  font:500 12px/1 'Inter',sans-serif;color:var(--text);
+  padding:5px 7px;border:1px solid var(--border);border-radius:5px;background:var(--card);
+  cursor:pointer;
+}
+.meas .pager-nav{display:flex;align-items:center;gap:2px}
+.meas .pager-nav button{
+  font:600 13px/1 'Inter',sans-serif;
+  width:30px;height:28px;display:inline-flex;align-items:center;justify-content:center;
+  border-radius:5px;border:1px solid var(--border);
   background:var(--card);color:var(--text);cursor:pointer;
+  padding:0;
 }
-.meas .pager button:disabled{opacity:.4;cursor:not-allowed}
+.meas .pager-nav button:hover:not(:disabled){background:var(--inset)}
+.meas .pager-nav button:disabled{opacity:.35;cursor:not-allowed}
+.meas .pager-nav input[type=number]{
+  font:500 12px/1 'Inter',sans-serif;color:var(--text);text-align:center;
+  width:48px;height:28px;border:1px solid var(--border);border-radius:5px;
+  background:var(--card);margin:0 2px;
+  -moz-appearance:textfield;
+}
+.meas .pager-nav input[type=number]::-webkit-inner-spin-button,
+.meas .pager-nav input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.meas .pager-nav input:focus{outline:2px solid var(--accent);outline-offset:0;border-color:transparent}
+.meas .pager-nav .sep{margin:0 3px;color:var(--subtle);font-weight:500}
+.meas .pager-nav .total-pages{font-weight:600;color:var(--text);min-width:16px}
+.meas .pager-info{font-size:11.5px;color:var(--subtle)}
 .meas .station-status{display:flex;gap:8px;flex-wrap:wrap;font-size:11.5px;color:var(--muted)}
 .meas .station-status .chip{padding:3px 7px;border:1px solid var(--border);border-radius:999px;font-weight:600}
 .meas .station-status .chip.ok{color:oklch(36% .12 150);background:var(--green-soft);border-color:oklch(78% .08 150)}
@@ -759,11 +783,20 @@ nav.tabs .tab.active{background:var(--card);color:var(--text);box-shadow:0 1px 0
       </tbody>
     </table>
     <div class="pager">
-      <span id="measPageInfo">--</span>
-      <div style="display:flex;gap:6px">
-        <button type="button" id="measPrev" data-i18n="meas.prev">prethodna</button>
-        <button type="button" id="measNext" data-i18n="meas.next">sljedeća</button>
+      <div class="pager-size">
+        <select id="measPageSize"><option value="25">25</option><option value="50">50</option><option value="100" selected>100</option><option value="250">250</option><option value="500">500</option></select>
+        <span data-i18n="pager.per_page">po stranici</span>
       </div>
+      <div class="pager-nav">
+        <button type="button" id="measFirst" title="First">&laquo;</button>
+        <button type="button" id="measPrev" title="Previous">&lsaquo;</button>
+        <input type="number" id="measPageInput" min="1" value="1">
+        <span class="sep">/</span>
+        <span class="total-pages" id="measPageTotal">1</span>
+        <button type="button" id="measNext" title="Next">&rsaquo;</button>
+        <button type="button" id="measLast" title="Last">&raquo;</button>
+      </div>
+      <span id="measPageInfo" class="pager-info">--</span>
     </div>
   </div>
 </section>
@@ -805,11 +838,20 @@ nav.tabs .tab.active{background:var(--card);color:var(--text);box-shadow:0 1px 0
       </tbody>
     </table>
     <div class="pager">
-      <span id="predPageInfo">--</span>
-      <div style="display:flex;gap:6px">
-        <button type="button" id="predPrev" data-i18n="meas.prev">prethodna</button>
-        <button type="button" id="predNext" data-i18n="meas.next">sljedeća</button>
+      <div class="pager-size">
+        <select id="predPageSize"><option value="25">25</option><option value="50">50</option><option value="100" selected>100</option><option value="250">250</option><option value="500">500</option></select>
+        <span data-i18n="pager.per_page">po stranici</span>
       </div>
+      <div class="pager-nav">
+        <button type="button" id="predFirst" title="First">&laquo;</button>
+        <button type="button" id="predPrev" title="Previous">&lsaquo;</button>
+        <input type="number" id="predPageInput" min="1" value="1">
+        <span class="sep">/</span>
+        <span class="total-pages" id="predPageTotal">1</span>
+        <button type="button" id="predNext" title="Next">&rsaquo;</button>
+        <button type="button" id="predLast" title="Last">&raquo;</button>
+      </div>
+      <span id="predPageInfo" class="pager-info">--</span>
     </div>
   </div>
 </section>
@@ -862,11 +904,20 @@ nav.tabs .tab.active{background:var(--card);color:var(--text);box-shadow:0 1px 0
       </tbody>
     </table>
     <div class="pager">
-      <span id="chainPageInfo">--</span>
-      <div style="display:flex;gap:6px">
-        <button type="button" id="chainPrev" data-i18n="meas.prev">prethodna</button>
-        <button type="button" id="chainNext" data-i18n="meas.next">sljedeća</button>
+      <div class="pager-size">
+        <select id="chainPageSize"><option value="25">25</option><option value="50">50</option><option value="100" selected>100</option><option value="250">250</option><option value="500">500</option></select>
+        <span data-i18n="pager.per_page">po stranici</span>
       </div>
+      <div class="pager-nav">
+        <button type="button" id="chainFirst" title="First">&laquo;</button>
+        <button type="button" id="chainPrev" title="Previous">&lsaquo;</button>
+        <input type="number" id="chainPageInput" min="1" value="1">
+        <span class="sep">/</span>
+        <span class="total-pages" id="chainPageTotal">1</span>
+        <button type="button" id="chainNext" title="Next">&rsaquo;</button>
+        <button type="button" id="chainLast" title="Last">&raquo;</button>
+      </div>
+      <span id="chainPageInfo" class="pager-info">--</span>
     </div>
   </div>
 </section>
@@ -923,6 +974,7 @@ const I18N = {
     'meas.col.value':       'vrijednost',
     'meas.prev':            'prethodna',
     'meas.next':            'sljedeća',
+    'pager.per_page':       'po stranici',
     'meas.page_info':       '{from}–{to} od {total} · stranica {page}/{pages} · keširano {age}',
     'meas.cache_age_now':   'sada',
     'meas.cache_age':       'prije {sec}s',
@@ -1067,6 +1119,8 @@ const I18N = {
     'anomalies.soiling_warn':'inverter kasni {min}m za senzorima zračenja',
     'anomalies.soiling_err':'inverter kasni {min}m za senzorima zračenja, moguć kvar',
     'anomalies.soiling_label':'Solarna elektrana · čišćenje panela',
+    'anomalies.medium_one':  '{n} metrika s umjerenim odstupanjem',
+    'anomalies.medium_many': '{n} metrika s umjerenim odstupanjima',
 
     // ledger card
     'ledger.proofs_total_one':'{n} zapis ukupno',
@@ -1177,6 +1231,7 @@ const I18N = {
     'meas.col.value':       'value',
     'meas.prev':            'prev',
     'meas.next':            'next',
+    'pager.per_page':       'per page',
     'meas.page_info':       '{from}–{to} of {total} · page {page}/{pages} · cached {age}',
     'meas.cache_age_now':   'just now',
     'meas.cache_age':       '{sec}s ago',
@@ -1309,6 +1364,8 @@ const I18N = {
     'anomalies.soiling_warn':'inverter {min}m behind irradiance sensors',
     'anomalies.soiling_err':'inverter {min}m behind irradiance sensors, possible fault',
     'anomalies.soiling_label':'Solar plant · panel soiling check',
+    'anomalies.medium_one':  '{n} metric with moderate deviation',
+    'anomalies.medium_many': '{n} metrics with moderate deviations',
 
     'ledger.proofs_total_one':'{n} proof total',
     'ledger.proofs_total_many':'{n} proofs total',
@@ -1979,7 +2036,13 @@ function stationLabel(code){
 
 function renderAnomalies(anomalies){
   const data = anomalies?.data || [];
-  const flagged = data.filter(row => (row.anomalies?.length || 0) > 0);
+  const allWithAnomalies = data.filter(row => (row.anomalies?.length || 0) > 0);
+  const flagged = allWithAnomalies.filter(row =>
+    row.anomalies.some(a => a.severity === 'high')
+  );
+  const mediumOnly = allWithAnomalies.filter(row =>
+    !row.anomalies.some(a => a.severity === 'high')
+  );
   const extras = lastSoilingHint ? [lastSoilingHint] : [];
 
   if (flagged.length === 0 && extras.length === 0){
@@ -2002,7 +2065,10 @@ function renderAnomalies(anomalies){
       return;
     }
     setPill('anomalyPill', t('pill.clear'), 'ok');
-    setHtml('anomalyList', `<div class="muted" style="font-size:12.5px">${t('anomalies.clear')}</div>`);
+    const clearMsg = mediumOnly.length > 0
+      ? `<div class="muted" style="font-size:12.5px">${t('anomalies.clear')}</div><div class="muted" style="font-size:11.5px;color:var(--subtle);padding-top:4px">${t(mediumOnly.length === 1 ? 'anomalies.medium_one' : 'anomalies.medium_many', { n: mediumOnly.length })}</div>`
+      : `<div class="muted" style="font-size:12.5px">${t('anomalies.clear')}</div>`;
+    setHtml('anomalyList', clearMsg);
     return;
   }
 
@@ -2026,7 +2092,10 @@ function renderAnomalies(anomalies){
       : t('anomalies.soiling_warn', { min: x.skew });
     return `<div class="row"><span class="k">${t('anomalies.soiling_label')}</span><span class="v" style="color:var(--${x.kind === 'err' ? 'red' : 'amber'})">${escapeHtml(txt)}</span></div>`;
   });
-  setHtml('anomalyList', [...extraRows, ...flaggedRows].join(''));
+  const mediumLine = mediumOnly.length > 0
+    ? `<div class="row muted" style="font-size:11.5px;color:var(--subtle);padding-top:4px">${t(mediumOnly.length === 1 ? 'anomalies.medium_one' : 'anomalies.medium_many', { n: mediumOnly.length })}</div>`
+    : '';
+  setHtml('anomalyList', [...extraRows, ...flaggedRows, mediumLine].filter(Boolean).join(''));
 }
 
 // background soiling check, runs every 60s, updates the last hint, never blocks
@@ -2462,6 +2531,63 @@ document.querySelectorAll('header.app .tabs [data-tab]').forEach(btn => {
 });
 window.addEventListener('hashchange', () => applyTab(location.hash.slice(1) || 'overview'));
 
+/* ── pager helpers ─────────────────────────────────────────
+ * Reusable pagination wiring for all three table views.
+ * `wirePager(prefix, stateObj, refreshFn)` binds all pager controls.
+ * `updatePager(prefix, offset, limit, total, cacheAge)` syncs UI after data loads. */
+function updatePager(prefix, offset, limit, total, cacheAge) {
+  const page = Math.floor(offset / limit) + 1;
+  const pages = Math.max(1, Math.ceil(total / limit));
+  const from = total === 0 ? 0 : offset + 1;
+  const to = Math.min(offset + limit, total);
+  const el = (suffix) => $(prefix + suffix);
+  el('First').disabled = offset <= 0;
+  el('Prev').disabled = offset <= 0;
+  el('Next').disabled = offset + limit >= total;
+  el('Last').disabled = offset + limit >= total;
+  el('PageInput').value = page;
+  el('PageInput').max = pages;
+  el('PageTotal').textContent = pages;
+  el('PageSize').value = String(limit);
+  setText(prefix + 'PageInfo', t('meas.page_info', { from, to, total, page, pages, age: cacheAge || t('meas.cache_age_now') }));
+}
+
+function wirePager(prefix, stateObj, refreshFn) {
+  $(prefix + 'PageSize').addEventListener('change', function() {
+    stateObj.limit = Number(this.value);
+    stateObj.offset = 0;
+    refreshFn();
+  });
+  $(prefix + 'First').addEventListener('click', function() {
+    stateObj.offset = 0;
+    refreshFn();
+  });
+  $(prefix + 'Prev').addEventListener('click', function() {
+    stateObj.offset = Math.max(0, stateObj.offset - stateObj.limit);
+    refreshFn();
+  });
+  $(prefix + 'Next').addEventListener('click', function() {
+    stateObj.offset += stateObj.limit;
+    refreshFn();
+  });
+  $(prefix + 'Last').addEventListener('click', function() {
+    const totalForCalc = stateObj._lastTotal || 0;
+    const pages = Math.max(1, Math.ceil(totalForCalc / stateObj.limit));
+    stateObj.offset = (pages - 1) * stateObj.limit;
+    refreshFn();
+  });
+  $(prefix + 'PageInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const totalForCalc = stateObj._lastTotal || 0;
+      const pages = Math.max(1, Math.ceil(totalForCalc / stateObj.limit));
+      const p = Math.max(1, Math.min(Number(this.value) || 1, pages));
+      stateObj.offset = (p - 1) * stateObj.limit;
+      refreshFn();
+    }
+  });
+}
+
 /* ── measurements view ─────────────────────────────────────
  * Calls /prediction/measurements via the dashboard's existing proxy.
  * Filters and sort are sent server-side; pagination uses limit/offset. */
@@ -2560,17 +2686,8 @@ function renderMeasurements(payload) {
   });
   measurements.total = payload.total || 0;
   measurements.cachedAt = payload.cachedAt;
-  const offset = measurements.state.offset;
-  const limit = measurements.state.limit;
-  const from = measurements.total === 0 ? 0 : offset + 1;
-  const to = Math.min(offset + limit, measurements.total);
-  const page = Math.floor(offset / limit) + 1;
-  const pages = Math.max(1, Math.ceil(measurements.total / limit));
-  setText('measPageInfo', t('meas.page_info', {
-    from, to, total: measurements.total, page, pages, age: cacheAgeText(payload.cachedAt),
-  }));
-  $('measPrev').disabled = offset <= 0;
-  $('measNext').disabled = offset + limit >= measurements.total;
+  measurements.state._lastTotal = measurements.total;
+  updatePager('meas', measurements.state.offset, measurements.state.limit, measurements.total, cacheAgeText(payload.cachedAt));
   // station-status chips
   const ss = $('measStationStatus');
   ss.innerHTML = (payload.stationStatus || []).map(s =>
@@ -2622,14 +2739,7 @@ $('measReset').addEventListener('click', () => {
   measurements.state.sort = 'timestamp'; measurements.state.sortDir = 'desc'; measurements.state.offset = 0;
   refreshMeasurements();
 });
-$('measPrev').addEventListener('click', () => {
-  measurements.state.offset = Math.max(0, measurements.state.offset - measurements.state.limit);
-  refreshMeasurements();
-});
-$('measNext').addEventListener('click', () => {
-  measurements.state.offset += measurements.state.limit;
-  refreshMeasurements();
-});
+wirePager('meas', measurements.state, refreshMeasurements);
 document.querySelectorAll('#viewMeasurements thead th[data-sort]').forEach(th => {
   th.addEventListener('click', () => {
     const col = th.dataset.sort;
@@ -2762,13 +2872,8 @@ function refreshPredictions() {
     } else {
       tbody.innerHTML = items.map(r => `<tr>${cfg.row(r).map(c => `<td>${c}</td>`).join('')}</tr>`).join('');
     }
-    const from = total === 0 ? 0 : offset + 1;
-    const to = Math.min(offset + limit, total);
-    const page = Math.floor(offset / limit) + 1;
-    const pages = Math.max(1, Math.ceil(total / limit));
-    setText('predPageInfo', t('meas.page_info', { from, to, total, page, pages, age: t('meas.cache_age_now') }));
-    $('predPrev').disabled = offset <= 0;
-    $('predNext').disabled = offset + limit >= total;
+    predictionsView.state._lastTotal = total;
+    updatePager('pred', offset, limit, total);
     setText('predMeta', `${total} ${safeLowerLabel(t('pred.title'), 'predictions')}`);
   }).catch(err => {
     setText('predMeta', t('meas.error', { msg: err.message || String(err) }));
@@ -2795,8 +2900,7 @@ $('predReset').addEventListener('click', () => {
   $('predSource').value = ''; $('predMetric').value = ''; $('predSearch').value = '';
   predictionsView.state.offset = 0; refreshPredictions();
 });
-$('predPrev').addEventListener('click', () => { predictionsView.state.offset = Math.max(0, predictionsView.state.offset - predictionsView.state.limit); refreshPredictions(); });
-$('predNext').addEventListener('click', () => { predictionsView.state.offset += predictionsView.state.limit; refreshPredictions(); });
+wirePager('pred', predictionsView.state, refreshPredictions);
 
 /* ── chain view (blockchain anchored events) ──────────────── */
 const chainView = {
@@ -2842,13 +2946,8 @@ function refreshChain() {
         </tr>`;
       }).join('');
     }
-    const from = total === 0 ? 0 : offset + 1;
-    const to = Math.min(offset + limit, total);
-    const page = Math.floor(offset / limit) + 1;
-    const pages = Math.max(1, Math.ceil(total / limit));
-    setText('chainPageInfo', t('meas.page_info', { from, to, total, page, pages, age: t('meas.cache_age_now') }));
-    $('chainPrev').disabled = offset <= 0;
-    $('chainNext').disabled = offset + limit >= total;
+    chainView.state._lastTotal = total;
+    updatePager('chain', offset, limit, total);
     setText('chainMeta', `${total} ${safeLowerLabel(t('chain.title'), 'chain events')}`);
   }).catch(err => {
     setText('chainMeta', t('meas.error', { msg: err.message || String(err) }));
@@ -2868,8 +2967,7 @@ $('chainReset').addEventListener('click', () => {
   $('chainStatus').value = ''; $('chainSearch').value = '';
   chainView.state.offset = 0; refreshChain();
 });
-$('chainPrev').addEventListener('click', () => { chainView.state.offset = Math.max(0, chainView.state.offset - chainView.state.limit); refreshChain(); });
-$('chainNext').addEventListener('click', () => { chainView.state.offset += chainView.state.limit; refreshChain(); });
+wirePager('chain', chainView.state, refreshChain);
 
 // Wire up language switcher and apply initial translations before any data
 // fetch starts so first paint is in the user's chosen language.
@@ -2880,6 +2978,7 @@ document.querySelectorAll('[data-lang]').forEach(btn => {
 
 startRealtime();
 fallbackPoll();
+setInterval(fallbackPoll, 60_000);
 refreshSoiling();
 setInterval(refreshSoiling, 60_000);
 

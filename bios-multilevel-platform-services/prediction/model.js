@@ -145,6 +145,34 @@ function forecast(series, horizonHours) {
   };
 }
 
+// Approximate sunrise/sunset for Osijek, Croatia (45.55°N, 18.69°E).
+// Uses the standard solar declination formula so the window shifts correctly
+// through the year (~05:00-20:30 in June, ~07:30-16:00 in December).
+const SITE_LAT_DEG = 45.55;
+const SITE_LNG_DEG = 18.69;
+
+function solarDayBounds(timestampSeconds) {
+  const d = new Date(timestampSeconds * 1000);
+  const start = new Date(d.getUTCFullYear(), 0, 1);
+  const dayOfYear = Math.floor((d - start) / 86400000) + 1;
+  const declination = 23.44 * Math.sin((2 * Math.PI * (dayOfYear - 81)) / 365);
+  const decRad = (declination * Math.PI) / 180;
+  const latRad = (SITE_LAT_DEG * Math.PI) / 180;
+  const cosHA = -Math.tan(latRad) * Math.tan(decRad);
+  if (cosHA >= 1) return { sunrise: 12, sunset: 12 };
+  if (cosHA <= -1) return { sunrise: 0, sunset: 24 };
+  const ha = (Math.acos(cosHA) * 180) / Math.PI / 15;
+  const solarNoonUTC = 12 - SITE_LNG_DEG / 15;
+  return { sunrise: solarNoonUTC - ha, sunset: solarNoonUTC + ha };
+}
+
+function isSolarNight(timestampSeconds) {
+  const hourUTC = new Date(timestampSeconds * 1000).getUTCHours()
+    + new Date(timestampSeconds * 1000).getUTCMinutes() / 60;
+  const { sunrise, sunset } = solarDayBounds(timestampSeconds);
+  return hourUTC < sunrise || hourUTC > sunset;
+}
+
 function anomalies(series) {
   if (series.length < 6) return [];
   const model = chooseModel(series.slice(0, Math.max(3, Math.floor(series.length * 0.7))));
@@ -155,15 +183,17 @@ function anomalies(series) {
   return series.flatMap(point => {
     const expected = model.predict(point.timestamp);
     const deviation = Math.abs(point.value - expected);
-    if (deviation < sigma * 2) return [];
+    if (deviation < sigma * 3) return [];
+    const nighttime = isSolarNight(point.timestamp);
     return [{
       timestamp: point.timestamp,
       actual: point.value,
       expected: Number(expected.toFixed(4)),
       deviation: Number(deviation.toFixed(4)),
-      severity: deviation >= sigma * 3 ? 'high' : 'medium',
+      severity: 'high',
+      nighttime,
     }];
   });
 }
 
-module.exports = { forecast, anomalies, chooseModel, inferStepSeconds };
+module.exports = { forecast, anomalies, chooseModel, inferStepSeconds, isSolarNight, solarDayBounds };

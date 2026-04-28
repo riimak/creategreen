@@ -1,6 +1,6 @@
 const http = require('http');
 const { loadRecords, seriesFor, fieldsFor, METEO_FIELDS, SOLAX_FIELDS } = require('./bios-data');
-const { forecast, anomalies } = require('./model');
+const { forecast, anomalies, isSolarNight } = require('./model');
 const { createStore: createJsonStore } = require('./store');
 const { METRICS, metricInfo, targetInfo } = require('./metrics');
 
@@ -151,9 +151,18 @@ function numberParam(name, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+function isSolarSource(source) {
+  return String(source || '').toUpperCase().startsWith('SOLAX');
+}
+
 function dataQuality({ source, metric, hours, records, series }) {
   const expectedSampleMinutes = numberParam('PREDICTION_EXPECTED_SAMPLE_MINUTES', 10);
-  const staleAfterMinutes = numberParam('PREDICTION_STALE_AFTER_MINUTES', 30);
+  const staleDefault = numberParam('PREDICTION_STALE_AFTER_MINUTES', 30);
+  const staleSolar = numberParam('PREDICTION_STALE_AFTER_MINUTES_SOLAR', 720);
+  const solar = isSolarSource(source);
+  const now = Math.floor(Date.now() / 1000);
+  const nighttime = solar && isSolarNight(now);
+  const staleAfterMinutes = nighttime ? staleSolar : staleDefault;
   const missingWarn = numberParam('PREDICTION_MISSING_RATIO_WARN', 0.3);
   const minSamples = numberParam('PREDICTION_MIN_SAMPLES', 6);
   const expectedSamples = Math.max(1, Math.floor((Number(hours) * 60) / expectedSampleMinutes));
@@ -161,7 +170,6 @@ function dataQuality({ source, metric, hours, records, series }) {
   const missingSamples = Math.max(0, expectedSamples - observedSamples);
   const missingRatio = Number((missingSamples / expectedSamples).toFixed(4));
   const latestTimestamp = records.reduce((max, row) => Math.max(max, row.timestamp || 0), 0) || null;
-  const now = Math.floor(Date.now() / 1000);
   const dataAgeMinutes = latestTimestamp ? Math.max(0, Math.round((now - latestTimestamp) / 60)) : null;
   let status = 'ok';
   const reasons = [];
@@ -173,8 +181,8 @@ function dataQuality({ source, metric, hours, records, series }) {
     status = 'stale';
     reasons.push('latest_sample_too_old');
   } else if (missingRatio > missingWarn) {
-    status = 'partial';
-    reasons.push('missing_ratio_above_threshold');
+    status = nighttime ? 'ok' : 'partial';
+    if (!nighttime) reasons.push('missing_ratio_above_threshold');
   }
 
   return {
@@ -183,6 +191,8 @@ function dataQuality({ source, metric, hours, records, series }) {
     metric,
     metricInfo: metricInfo(metric),
     inputSource: inputSourceInfo(),
+    solar,
+    nighttime,
     input: {
       hours,
       expectedSampleMinutes,

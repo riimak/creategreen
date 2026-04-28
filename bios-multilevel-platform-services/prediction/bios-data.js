@@ -106,16 +106,38 @@ async function getMars2Token(apiBase, username, password) {
   return mars2Token;
 }
 
-async function loadFromMars2(apiBase, username, password, source, hours) {
+function fmtMars2Utc(d) {
+  return d.toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+}
+
+function parseMars2Payload(raw, source) {
+  const fields = fieldsFor(source);
+  let text = raw;
+  if (text.startsWith('"') && text.endsWith('"')) text = text.slice(1, -1);
+  const parts = text.split('!', 2);
+  if (parts.length < 2) return [];
+  return parts[1].split(/0xa|\n/).filter(r => r.trim()).map(rec => {
+    const cols = rec.split(';');
+    const ts = parseInt(cols[0], 10);
+    if (isNaN(ts)) return null;
+    const row = { source, timestamp: ts };
+    for (let i = 0; i < fields.length; i++) row[fields[i]] = parseNumber(cols[i + 1]);
+    return row;
+  }).filter(Boolean).sort((a, b) => a.timestamp - b.timestamp);
+}
+
+async function loadFromMars2Range(apiBase, username, password, source, from, to) {
   const token = await getMars2Token(apiBase, username, password);
-  const now = new Date();
-  const from = new Date(now.getTime() - hours * 3600000);
-  const fmt = d => d.toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+  const fromDate = new Date(from);
+  const toDate = new Date(to);
+  if (!Number.isFinite(fromDate.getTime()) || !Number.isFinite(toDate.getTime())) {
+    throw new Error(`invalid Mars2 range for ${source}`);
+  }
   const url = `${apiBase}/api/public/CustomDataExport/BIOS/${encodeURIComponent(source)}`
-    + `?fromUTC=${encodeURIComponent(fmt(from))}&toUTC=${encodeURIComponent(fmt(now))}`;
+    + `?fromUTC=${encodeURIComponent(fmtMars2Utc(fromDate))}&toUTC=${encodeURIComponent(fmtMars2Utc(toDate))}`;
   if (ingestLogEnabled()) {
     console.log(
-      `${new Date().toISOString()} prediction mars2: GET CustomDataExport station=${source} windowHours=${hours} fromUTC=${fmt(from)} host=${mars2Host(apiBase)}`,
+      `${new Date().toISOString()} prediction mars2: GET CustomDataExport station=${source} fromUTC=${fmtMars2Utc(fromDate)} toUTC=${fmtMars2Utc(toDate)} host=${mars2Host(apiBase)}`,
     );
   }
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
@@ -139,24 +161,25 @@ async function loadFromMars2(apiBase, username, password, source, hours) {
     }
     return [];
   }
-  const fields = fieldsFor(source);
-  let text = raw;
-  if (text.startsWith('"') && text.endsWith('"')) text = text.slice(1, -1);
-  const parts = text.split('!', 2);
-  if (parts.length < 2) {
+  const rows = parseMars2Payload(raw, source);
+  if (rows.length === 0 && ingestLogEnabled()) {
+    const trimmed = String(raw).replace(/^"|"$/g, '');
+    if (!trimmed.includes('!')) {
+      console.warn(`${new Date().toISOString()} prediction mars2: no payload delimiter station=${source} host=${mars2Host(apiBase)} bodyChars=${trimmed.length}`);
+    }
+  }
+  if (rows.length === 0 && ingestLogEnabled()) {
+    const maybeEmpty = String(raw).replace(/^"|"$/g, '').trim();
+    if (!maybeEmpty || maybeEmpty === '""') {
+      console.warn(`${new Date().toISOString()} prediction mars2: empty parsed rows station=${source} host=${mars2Host(apiBase)}`);
+    }
+  }
+  if (rows.length === 0 && String(raw).replace(/^"|"$/g, '').split('!', 2).length < 2) {
     if (ingestLogEnabled()) {
+      const text = String(raw).replace(/^"|"$/g, '');
       console.warn(`${new Date().toISOString()} prediction mars2: no payload delimiter station=${source} host=${mars2Host(apiBase)} bodyChars=${text.length}`);
     }
-    return [];
   }
-  const rows = parts[1].split(/0xa|\n/).filter(r => r.trim()).map(rec => {
-    const cols = rec.split(';');
-    const ts = parseInt(cols[0], 10);
-    if (isNaN(ts)) return null;
-    const row = { source, timestamp: ts };
-    for (let i = 0; i < fields.length; i++) row[fields[i]] = parseNumber(cols[i + 1]);
-    return row;
-  }).filter(Boolean).sort((a, b) => a.timestamp - b.timestamp);
 
   if (ingestLogEnabled()) {
     const tMin = rows[0]?.timestamp;
@@ -170,6 +193,12 @@ async function loadFromMars2(apiBase, username, password, source, hours) {
     );
   }
   return rows;
+}
+
+async function loadFromMars2(apiBase, username, password, source, hours) {
+  const now = new Date();
+  const from = new Date(now.getTime() - hours * 3600000);
+  return loadFromMars2Range(apiBase, username, password, source, from, now);
 }
 
 async function loadRecords({ source, hours = 72, dataDir, apiBase, mars2ApiBase, mars2Username, mars2Password }) {
@@ -225,5 +254,6 @@ module.exports = {
   fieldsFor,
   parseExportText,
   loadRecords,
+  loadFromMars2Range,
   seriesFor,
 };

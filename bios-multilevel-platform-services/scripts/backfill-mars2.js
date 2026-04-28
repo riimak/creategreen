@@ -29,7 +29,7 @@
 'use strict';
 
 const path = require('path');
-const { loadRecords, fieldsFor, METEO_FIELDS, SOLAX_FIELDS } = require(path.resolve(__dirname, '..', 'prediction', 'bios-data'));
+const { loadFromMars2Range, fieldsFor, METEO_FIELDS, SOLAX_FIELDS } = require(path.resolve(__dirname, '..', 'prediction', 'bios-data'));
 const { createPgPredictionStore } = require(path.resolve(__dirname, '..', 'database', 'pg-prediction-store'));
 
 function parseArgs(argv) {
@@ -94,39 +94,32 @@ async function backfillStationRange(store, cfg, station, fromDate, toDate, chunk
   let emptyChunks = 0;
   while (cursor < toDate) {
     const chunkEnd = new Date(Math.min(cursor.getTime() + chunkDays * 86400000, toDate.getTime()));
-    const hours = Math.ceil((chunkEnd - cursor) / 3600000);
     const t0 = Date.now();
     let records = [];
     try {
-      records = await loadRecords({
-        source: station,
-        hours,
-        mars2ApiBase: cfg.mars2ApiBase,
-        mars2Username: cfg.mars2Username,
-        mars2Password: cfg.mars2Password,
-        apiBase: cfg.apiBase,
-        dataDir: cfg.dataDir,
-      });
+      records = await loadFromMars2Range(
+        cfg.mars2ApiBase,
+        cfg.mars2Username,
+        cfg.mars2Password,
+        station,
+        cursor,
+        chunkEnd,
+      );
     } catch (err) {
       console.error(`  ${station}  ${fmt(cursor)} → ${fmt(chunkEnd)}  FAIL  ${err.message}`);
       cursor = chunkEnd;
       continue;
     }
-    // Mars2 returns the LAST `hours` of data ending now, NOT the requested range.
-    // Filter the response down to the chunk window we actually asked for.
-    const cutoffStart = Math.floor(cursor.getTime() / 1000);
-    const cutoffEnd = Math.floor(chunkEnd.getTime() / 1000);
-    const inWindow = records.filter(r => r.timestamp >= cutoffStart && r.timestamp < cutoffEnd);
     let persisted = 0;
-    if (!dryRun && inWindow.length > 0) {
-      const r = await store.persistRawRecords(station, fields, inWindow);
+    if (!dryRun && records.length > 0) {
+      const r = await store.persistRawRecords(station, fields, records);
       persisted = r.inserted || 0;
     }
-    totalRows += inWindow.length;
+    totalRows += records.length;
     totalPersisted += persisted;
     chunks += 1;
-    emptyChunks = inWindow.length === 0 ? emptyChunks + 1 : 0;
-    console.log(`  ${station}  ${fmt(cursor)} → ${fmt(chunkEnd)}  rows=${inWindow.length}/${records.length}  persisted=${persisted}  ${Date.now() - t0}ms`);
+    emptyChunks = records.length === 0 ? emptyChunks + 1 : 0;
+    console.log(`  ${station}  ${fmt(cursor)} → ${fmt(chunkEnd)}  rows=${records.length}  persisted=${persisted}  ${Date.now() - t0}ms`);
     cursor = chunkEnd;
   }
   return { totalRows, totalPersisted, chunks, emptyChunks };
@@ -141,37 +134,32 @@ async function backfillStationAuto(store, cfg, station, toDate, chunkDays, maxEm
   let consecutiveEmpty = 0;
   while (consecutiveEmpty < maxEmpty) {
     const cursorStart = new Date(cursorEnd.getTime() - chunkDays * 86400000);
-    const hours = Math.ceil((cursorEnd - cursorStart) / 3600000);
     const t0 = Date.now();
     let records = [];
     try {
-      records = await loadRecords({
-        source: station,
-        hours,
-        mars2ApiBase: cfg.mars2ApiBase,
-        mars2Username: cfg.mars2Username,
-        mars2Password: cfg.mars2Password,
-        apiBase: cfg.apiBase,
-        dataDir: cfg.dataDir,
-      });
+      records = await loadFromMars2Range(
+        cfg.mars2ApiBase,
+        cfg.mars2Username,
+        cfg.mars2Password,
+        station,
+        cursorStart,
+        cursorEnd,
+      );
     } catch (err) {
       console.error(`  ${station}  ${fmt(cursorStart)} → ${fmt(cursorEnd)}  FAIL  ${err.message}`);
       cursorEnd = cursorStart;
       continue;
     }
-    const cutoffStart = Math.floor(cursorStart.getTime() / 1000);
-    const cutoffEnd = Math.floor(cursorEnd.getTime() / 1000);
-    const inWindow = records.filter(r => r.timestamp >= cutoffStart && r.timestamp < cutoffEnd);
     let persisted = 0;
-    if (!dryRun && inWindow.length > 0) {
-      const r = await store.persistRawRecords(station, fields, inWindow);
+    if (!dryRun && records.length > 0) {
+      const r = await store.persistRawRecords(station, fields, records);
       persisted = r.inserted || 0;
     }
-    totalRows += inWindow.length;
+    totalRows += records.length;
     totalPersisted += persisted;
     chunks += 1;
-    consecutiveEmpty = inWindow.length === 0 ? consecutiveEmpty + 1 : 0;
-    console.log(`  ${station}  ${fmt(cursorStart)} → ${fmt(cursorEnd)}  rows=${inWindow.length}/${records.length}  persisted=${persisted}  emptyStreak=${consecutiveEmpty}/${maxEmpty}  ${Date.now() - t0}ms`);
+    consecutiveEmpty = records.length === 0 ? consecutiveEmpty + 1 : 0;
+    console.log(`  ${station}  ${fmt(cursorStart)} → ${fmt(cursorEnd)}  rows=${records.length}  persisted=${persisted}  emptyStreak=${consecutiveEmpty}/${maxEmpty}  ${Date.now() - t0}ms`);
     cursorEnd = cursorStart;
   }
   return { totalRows, totalPersisted, chunks, earliestReached: cursorEnd.toISOString() };

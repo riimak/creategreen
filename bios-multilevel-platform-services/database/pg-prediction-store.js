@@ -183,27 +183,24 @@ function createPgPredictionStore(databaseUrl) {
    * DO UPDATE so re-running the cycle / backfill is idempotent. */
   async function persistRawRecords(source, fields, records) {
     if (!records || records.length === 0) return { inserted: 0 };
-    // Build a single multi-row insert. cap chunk size to keep param count under
-    // libpq's 65535 parameter limit (5 params per row → 13107 rows max).
-    const ROWS_PER_BATCH = 5000;
+    // IMPORTANT: batch by EXPANDED measurement rows, not source records.
+    // SOLAX can return ~2k timestamps * ~14 metrics => ~28k measurement rows.
+    // At 5 bind params per row, libpq's 65535 param limit can be exceeded.
+    const PARAMS_PER_ROW = 5;
+    const MAX_BIND_PARAMS = 60000; // leave headroom under 65535
+    const MAX_ROWS_PER_BATCH = Math.floor(MAX_BIND_PARAMS / PARAMS_PER_ROW);
     let total = 0;
-    for (let start = 0; start < records.length; start += ROWS_PER_BATCH) {
-      const slice = records.slice(start, start + ROWS_PER_BATCH);
+    const batch = new Map();
+
+    const flush = async () => {
+      if (batch.size === 0) return;
       const values = [];
       const tuples = [];
       let p = 1;
-      for (const row of slice) {
-        const station = row.source || source;
-        if (!Number.isFinite(row.timestamp)) continue;
-        const tsIso = new Date(row.timestamp * 1000).toISOString();
-        for (const metric of fields) {
-          const v = row[metric];
-          const isMissing = !Number.isFinite(v);
-          tuples.push(`($${p++},$${p++},$${p++},$${p++},$${p++})`);
-          values.push(station, metric, tsIso, isMissing ? null : v, isMissing);
-        }
+      for (const row of batch.values()) {
+        tuples.push(`($${p++},$${p++},$${p++},$${p++},$${p++})`);
+        values.push(...row);
       }
-      if (tuples.length === 0) continue;
       const sql = `INSERT INTO raw_measurements (source, metric, ts, value, is_missing)
                    VALUES ${tuples.join(',')}
                    ON CONFLICT (source, metric, ts) DO UPDATE
@@ -212,7 +209,26 @@ function createPgPredictionStore(databaseUrl) {
                          ingested_at = now()`;
       const r = await pool.query(sql, values);
       total += r.rowCount || 0;
+      batch.clear();
+    };
+
+    for (const row of records) {
+      const station = row.source || source;
+      if (!Number.isFinite(row.timestamp)) continue;
+      const tsIso = new Date(row.timestamp * 1000).toISOString();
+      for (const metric of fields) {
+        const v = row[metric];
+        const isMissing = !Number.isFinite(v);
+        // Mars2 exports can include duplicate timestamps in a single window.
+        // Deduplicate inside each SQL batch to avoid ON CONFLICT self-conflicts.
+        const key = `${station}\x1f${metric}\x1f${tsIso}`;
+        batch.set(key, [station, metric, tsIso, isMissing ? null : v, isMissing]);
+        if (batch.size >= MAX_ROWS_PER_BATCH) {
+          await flush();
+        }
+      }
     }
+    await flush();
     return { inserted: total };
   }
 

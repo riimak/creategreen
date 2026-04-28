@@ -447,12 +447,30 @@ async function listFromStore(kind, params) {
   const source = params.get('source');
   const metric = params.get('metric');
   const limit = Math.min(Number(params.get('limit') || 100), 500);
+  // IMPORTANT: For Postgres, filter in SQL before LIMIT. Filtering after a
+  // global LIMIT can hide valid rows for a specific source/metric.
+  if (typeof store.listPaginated === 'function') {
+    const paged = await S(store.listPaginated(
+      kind,
+      { source: source || undefined, metric: metric || undefined },
+      { limit, offset: 0, sort: kind === 'runs' ? 'created_at' : 'computed_at', sortDir: 'desc' },
+    ));
+    if (paged && Array.isArray(paged.data)) return paged.data;
+  }
   return await S(store.list(kind, row => (!source || row.source === source) && (!metric || row.metric === metric), limit));
 }
 
 async function latestFromStore(kind, params) {
   const source = params.get('source');
   const metric = params.get('metric');
+  if (typeof store.listPaginated === 'function') {
+    const paged = await S(store.listPaginated(
+      kind,
+      { source: source || undefined, metric: metric || undefined },
+      { limit: 1, offset: 0, sort: kind === 'runs' ? 'created_at' : 'computed_at', sortDir: 'desc' },
+    ));
+    if (paged && Array.isArray(paged.data) && paged.data[0]) return paged.data[0];
+  }
   return await S(store.latest(kind, row => (!source || row.source === source) && (!metric || row.metric === metric)));
 }
 

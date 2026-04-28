@@ -509,6 +509,11 @@ nav.tabs .tab:hover{color:var(--text)}
 nav.tabs .tab.active{background:var(--card);color:var(--text);box-shadow:0 1px 0 rgba(0,0,0,.04)}
 
 .view[hidden]{display:none}
+/* Keep legacy overview layout: its inner cards must remain direct grid items of <main>. */
+#viewOverview{display:contents}
+#viewOverview[hidden]{display:none}
+/* Data-browser views should span the full dashboard grid width. */
+.view.meas{grid-column:1 / -1}
 
 /* ── measurements view ─────────────────────────────────────── */
 .meas{display:flex;flex-direction:column;gap:14px;min-height:0}
@@ -1400,7 +1405,25 @@ function applyStaticTranslations() {
   document.documentElement.lang = currentLang;
   document.querySelectorAll('[data-i18n]').forEach(el => {
     const key = el.getAttribute('data-i18n');
-    el.textContent = t(key);
+    const translated = t(key);
+    if (el.childElementCount === 0) {
+      el.textContent = translated;
+      return;
+    }
+    // Preserve nested controls/icons (e.g. label > select/input) while
+    // translating only the leading text node.
+    let textNode = null;
+    for (const node of el.childNodes) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        textNode = node;
+        break;
+      }
+    }
+    if (textNode) {
+      textNode.textContent = `${translated}\n      `;
+    } else {
+      el.insertBefore(document.createTextNode(`${translated} `), el.firstChild);
+    }
   });
   document.querySelectorAll('[data-i18n-title]').forEach(el => {
     const key = el.getAttribute('data-i18n-title');
@@ -2502,6 +2525,11 @@ function cacheAgeText(iso) {
   return sec < 2 ? t('meas.cache_age_now') : t('meas.cache_age', { sec });
 }
 
+function safeLowerLabel(value, fallback = '') {
+  if (value === null || value === undefined) return fallback;
+  return String(value).toLowerCase();
+}
+
 function renderMeasurements(payload) {
   const data = payload.data || [];
   const tbody = $('measTbody');
@@ -2566,7 +2594,10 @@ function refreshMeasurements() {
   setText('measMeta', t('meas.loading'));
   fetch(`/prediction/measurements?${buildMeasurementsQuery()}`)
     .then(r => r.json())
-    .then(renderMeasurements)
+    .then(payload => {
+      if (payload && payload.error) throw new Error(payload.error);
+      renderMeasurements(payload);
+    })
     .catch(err => {
       setText('measMeta', t('meas.error', { msg: err.message || String(err) }));
       $('measTbody').innerHTML = `<tr><td colspan="4" class="empty">${escapeHtml(err.message || String(err))}</td></tr>`;
@@ -2721,6 +2752,7 @@ function refreshPredictions() {
   if (metric) params.set('metric', metric);
   if (search) params.set('search', search);
   fetch(`${cfg.endpoint}?${params}`).then(r => r.json()).then(payload => {
+    if (payload && payload.error) throw new Error(payload.error);
     const items = payload?.data || [];
     const total = Number(payload?.total ?? items.length);
     predictionsView.total = total;
@@ -2737,7 +2769,7 @@ function refreshPredictions() {
     setText('predPageInfo', t('meas.page_info', { from, to, total, page, pages, age: t('meas.cache_age_now') }));
     $('predPrev').disabled = offset <= 0;
     $('predNext').disabled = offset + limit >= total;
-    setText('predMeta', `${total} ${t('pred.title').toLowerCase()}`);
+    setText('predMeta', `${total} ${safeLowerLabel(t('pred.title'), 'predictions')}`);
   }).catch(err => {
     setText('predMeta', t('meas.error', { msg: err.message || String(err) }));
     $('predTbody').innerHTML = `<tr><td colspan="${cfg.columns.length}" class="empty">${escapeHtml(err.message || String(err))}</td></tr>`;
@@ -2783,6 +2815,7 @@ function refreshChain() {
   if (status) params.set('status', status);
   if (search) params.set('search', search);
   fetch(`/blockchain/events/page?${params}`).then(r => r.json()).then(payload => {
+    if (payload && payload.error) throw new Error(payload.error);
     const items = payload?.data || [];
     const total = Number(payload?.total ?? items.length);
     chainView.total = total;
@@ -2816,7 +2849,7 @@ function refreshChain() {
     setText('chainPageInfo', t('meas.page_info', { from, to, total, page, pages, age: t('meas.cache_age_now') }));
     $('chainPrev').disabled = offset <= 0;
     $('chainNext').disabled = offset + limit >= total;
-    setText('chainMeta', `${total} ${t('chain.title').toLowerCase()}`);
+    setText('chainMeta', `${total} ${safeLowerLabel(t('chain.title'), 'chain events')}`);
   }).catch(err => {
     setText('chainMeta', t('meas.error', { msg: err.message || String(err) }));
     $('chainTbody').innerHTML = `<tr><td colspan="7" class="empty">${escapeHtml(err.message || String(err))}</td></tr>`;

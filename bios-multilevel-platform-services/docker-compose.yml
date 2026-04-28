@@ -1,4 +1,21 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-bios}"
+      POSTGRES_USER: "${POSTGRES_USER:-bios}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-bios}"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   prediction:
     build:
       context: ..
@@ -9,7 +26,6 @@ services:
       PREDICTION_PORT: "8091"
       BIOS_OUTPUT_DIR: /app/output
       PREDICTION_DB_PATH: /data/prediction-store.json
-      PREDICTION_INTERVAL_MINUTES: "${PREDICTION_INTERVAL_MINUTES:-10}"
       PREDICTION_TARGETS: "${PREDICTION_TARGETS:-auto}"
       PREDICTION_STATIONS: "${PREDICTION_STATIONS:-OS1BIOS,OS2BIOS,SOLAXBIOS}"
       PREDICTION_INIT_MODE: "${PREDICTION_INIT_MODE:-resume}"
@@ -26,11 +42,15 @@ services:
       PREDICTION_DATA_API_BASE: "${PREDICTION_DATA_API_BASE:-}"
       WEATHER_API_BASE: "${WEATHER_API_BASE:-}"
       WEATHER_API_KEY: "${WEATHER_API_KEY:-}"
+      DATABASE_URL: "${DATABASE_URL:-postgresql://bios:bios@postgres:5432/bios}"
     volumes:
       - ../output:/app/output:ro
       - prediction-data:/data
     ports:
       - "8091:8091"
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8091/health"]
       interval: 30s
@@ -77,6 +97,7 @@ services:
       STEALTH_WALLET_SEED_FILE: "${STEALTH_WALLET_SEED_FILE:-}"
       STEALTH_RAW_TX_BUILDER_URL: "${STEALTH_RAW_TX_BUILDER_URL:-}"
       STEALTH_FEEWORK_TIMEOUT_SECONDS: "${STEALTH_FEEWORK_TIMEOUT_SECONDS:-120}"
+      DATABASE_URL: "${DATABASE_URL:-postgresql://bios:bios@postgres:5432/bios}"
     volumes:
       - blockchain-data:/data
       - ../secrets/stealth-wif.txt:/run/secrets/stealth-wif:ro
@@ -84,6 +105,7 @@ services:
       - "8092:8092"
     depends_on:
       - prediction
+      - postgres
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8092/health"]
       interval: 30s
@@ -110,5 +132,6 @@ services:
       retries: 3
 
 volumes:
+  postgres-data:
   prediction-data:
   blockchain-data:

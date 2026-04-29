@@ -79,7 +79,9 @@ header.app .brand{display:flex;align-items:baseline;gap:.55rem;font-weight:700;l
 header.app .brand .mark{font-size:15.5px}
 header.app .brand .sub{color:var(--muted);font-size:12.5px;font-weight:500;font-family:'Inter',sans-serif;letter-spacing:0}
 header.app .header-right{display:flex;align-items:center;gap:18px;min-width:0}
-header.app .live{display:flex;align-items:center;gap:.55rem;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+header.app .live{display:flex;align-items:center;gap:.55rem;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;flex:0 0 auto;justify-content:flex-end;min-width:0}
+header.app .live .live-age{white-space:nowrap}
+header.app .live .live-age-digits{display:inline-block;min-width:4ch;text-align:right;font-variant-numeric:tabular-nums;vertical-align:bottom}
 header.app .live .dot{width:7px;height:7px;border-radius:999px;background:var(--amber);box-shadow:0 0 0 3px oklch(66% .15 70 / .15)}
 header.app .live .dot.on{background:var(--green);animation:live-dot-pulse-header 2.2s ease-in-out infinite}
 header.app .live .dot.off{background:var(--red);box-shadow:0 0 0 3px oklch(56% .18 25 / .15)}
@@ -979,7 +981,7 @@ const I18N = {
     // header / shell
     'partners.with':        'partneri',
     'live.connecting':      'spajanje',
-    'live.last_update':     'uživo · ažurirano u {time}',
+    'live.last_update':     'uživo · ažurirano u {clock}',
     'live.disconnected':    'prekinuto u {time}, ponovni pokušaj',
     'lang.label':           'Jezik',
 
@@ -1238,7 +1240,7 @@ const I18N = {
   en: {
     'partners.with':        'with',
     'live.connecting':      'connecting',
-    'live.last_update':     'live · last update {time}',
+    'live.last_update':     'live · last update {clock}',
     'live.disconnected':    'disconnected at {time}, retrying',
     'lang.label':           'Language',
 
@@ -1541,6 +1543,7 @@ function setLanguage(lang) {
   rerenderSide();
   rerenderLedger();
   syncOverviewPairHeaders();
+  if (liveStreamUp) updateLiveStatusLabel();
 }
 
 /* Keep forecast + ledger card headers the same height when either grows (picker Assigned pills, ledger chips). */
@@ -2486,19 +2489,29 @@ const TABS = ['overview', 'measurements', 'predictions', 'chain'];
 
 function updateLiveStatusLabel(){
   if (!liveStreamUp) return;
+  const el = $('liveStatus');
+  if (!el) return;
   const tStr = new Date().toLocaleTimeString([], { hour12: false });
   const ageSec = lastLiveDataAt ? Math.max(0, Math.round((Date.now() - lastLiveDataAt) / 1000)) : 0;
-  setText('liveStatus', t('live.last_update', { time: `${tStr} · ${ageSec}s` }));
+  const main = t('live.last_update', { clock: escapeHtml(tStr) });
+  const ageDigits = escapeHtml(String(ageSec));
+  el.innerHTML = `${main} <span class="live-age">· <span class="live-age-digits">${ageDigits}</span>s</span>`;
 }
 
 setInterval(() => { updateLiveStatusLabel(); }, 1000);
 
 function setLive(state, message){
   const dot = $('liveDot');
+  if (!dot) return;
   dot.classList.remove('on','off');
-  if (state === 'on') dot.classList.add('on');
-  if (state === 'off') dot.classList.add('off');
-  setText('liveStatus', message);
+  if (state === 'on') {
+    dot.classList.add('on');
+    if (liveStreamUp) updateLiveStatusLabel();
+    else if (message) setText('liveStatus', message);
+  } else {
+    if (state === 'off') dot.classList.add('off');
+    if (message) setText('liveStatus', message);
+  }
 }
 
 const tabRefreshTimers = { measurements: null, predictions: null, chain: null };
@@ -2544,8 +2557,7 @@ function startRealtime(){
       if (type === 'dashboard.connected' || type === 'dashboard.heartbeat' || type === 'dashboard.tick'){
         liveStreamUp = true;
         if (type === 'dashboard.tick' || type === 'dashboard.connected' || type === 'dashboard.heartbeat') lastLiveDataAt = Date.now();
-        setLive('on', t('live.last_update', { time: new Date().toLocaleTimeString([], { hour12: false }) }));
-        updateLiveStatusLabel();
+        setLive('on');
         return;
       }
       if (type === 'dashboard.error'){ return; }
@@ -2556,8 +2568,7 @@ function startRealtime(){
       lastLiveDataAt = Date.now();
       ingest(type, parsed);
       onPushMaybeRefreshTabs(type);
-      setLive('on', t('live.last_update', { time: new Date().toLocaleTimeString([], { hour12: false }) }));
-      updateLiveStatusLabel();
+      setLive('on');
     });
   });
   stream.onerror = () => {

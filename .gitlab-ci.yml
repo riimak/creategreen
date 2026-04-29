@@ -4,6 +4,9 @@ include:
     file: GitlabFlow/Deploy-custom.yml
 
 # Monorepo root for bios-multilevel-platform-services/{dashboard,prediction,blockchain}
+# All production deploy jobs share one resource group so they never run in parallel.
+# Parallel helm upgrades were stressing admission webhooks (e.g. Kyverno) and failing;
+# the same jobs succeed when run one after another.
 variables:
   MONOREPO_TARGET_DIR: bios-multilevel-platform-services
 
@@ -22,6 +25,7 @@ build-dashboard:
 production-dashboard:
   extends: .production
   stage: deploy
+  resource_group: bios-multilevel-production
   variables:
     TARGET_APP: dashboard
     APPLICATION_IMAGE_NAME_TAG: dashboard
@@ -54,6 +58,7 @@ build-prediction:
 production-prediction:
   extends: .production
   stage: deploy
+  resource_group: bios-multilevel-production
   variables:
     TARGET_APP: prediction
     APPLICATION_IMAGE_NAME_TAG: prediction
@@ -114,6 +119,7 @@ build-blockchain:
 production-blockchain:
   extends: .production
   stage: deploy
+  resource_group: bios-multilevel-production
   variables:
     TARGET_APP: blockchain
     APPLICATION_IMAGE_NAME_TAG: blockchain

@@ -36,6 +36,44 @@ const state = {
   nextRunAt: null,
 };
 
+/** Server-sent events clients (`GET /stream`) — push to the dashboard without it polling. */
+const sseClients = new Set();
+
+function sseEmit(eventName, payload) {
+  const line = `event: ${eventName}\ndata: ${JSON.stringify(payload)}\n\n`;
+  for (const res of [...sseClients]) {
+    try {
+      res.write(line);
+    } catch {
+      sseClients.delete(res);
+    }
+  }
+}
+
+function attachSseStream(res, req) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  });
+  sseClients.add(res);
+  res.write(`event: connected\ndata: ${JSON.stringify({ service: 'prediction', at: new Date().toISOString() })}\n\n`);
+  const keep = setInterval(() => {
+    try {
+      res.write(': keepalive\n\n');
+    } catch {
+      clearInterval(keep);
+      sseClients.delete(res);
+    }
+  }, 25000);
+  req.on('close', () => {
+    clearInterval(keep);
+    sseClients.delete(res);
+  });
+}
+
 function json(res, status, body) {
   res.writeHead(status, {
     'Content-Type': 'application/json',
@@ -125,6 +163,12 @@ async function expandTargets(targets, hours) {
         try {
           const persistResult = await S(store.persistRawRecords(source, fields, records));
           stationOutcome.push(`${source}=ok(rows=${records.length},metrics=${expanded.length - before},persisted=${persistResult.inserted ?? 0})`);
+          sseEmit('raw_measurements', {
+            source,
+            rows: records.length,
+            inserted: persistResult?.inserted ?? 0,
+            at: new Date().toISOString(),
+          });
         } catch (persistErr) {
           log('warn', `persist raw_measurements failed for ${source}: ${persistErr.message}`);
           stationOutcome.push(`${source}=ok(rows=${records.length},metrics=${expanded.length - before},persist=failed)`);
@@ -365,6 +409,12 @@ async function processTarget(target, reason = 'scheduled') {
     reason,
   };
   await S(store.checkpoint(checkpoint.target, checkpoint));
+  sseEmit('forecast', { artifact: forecastArtifact, at: new Date().toISOString() });
+  if (quality) {
+    sseEmit('data_quality', { artifact: quality, at: new Date().toISOString() });
+  }
+  const anomalyList = { data: await S(store.list('anomalies', () => true, 5)) };
+  sseEmit('anomaly_list', anomalyList);
   return checkpoint;
 }
 
@@ -374,6 +424,7 @@ async function runCycle(reason = 'scheduled') {
   const startedAt = new Date();
   const results = [];
   try {
+    sseEmit('cycle', { phase: 'started', reason, at: startedAt.toISOString() });
     const hours = numberParam('PREDICTION_BACKFILL_HOURS', 72);
     const targets = await expandTargets(parseTargets(), hours);
     for (const target of targets) {
@@ -397,6 +448,9 @@ async function runCycle(reason = 'scheduled') {
     const okN = results.filter(r => r.status === 'ok').length;
     const brief = results.map((r) => `${r.target}:${r.status === 'ok' ? 'ok' : (r.error || 'fail')}`).join(' · ');
     log('info', `cycle: ${reason}: ${okN}/${results.length} targets ok — ${brief}`);
+    sseEmit('cycle', { phase: 'finished', reason, lastCycle: state.lastCycle, at: new Date().toISOString() });
+    sseEmit('status', await buildStatusBody());
+    sseEmit('sla', await slaSummary(new URLSearchParams({ window: '24h' })));
     return state.lastCycle;
   } finally {
     state.running = false;
@@ -561,11 +615,29 @@ async function slaSummary(params) {
   return { window, targetPercent, aggregate, sources: sourceSummaries, targets, computedAt: new Date().toISOString() };
 }
 
+async function buildStatusBody() {
+  const lastRun = await S(store.latest('runs'));
+  return {
+    ...state,
+    intervalMinutes: numberParam('PREDICTION_INTERVAL_MINUTES', 10),
+    targets: lastRun?.results?.map((result) => {
+      const [source, metric] = String(result.target || '').split(':');
+      return targetInfo(source, metric);
+    }) || parseTargets().map((target) => targetInfo(target.source, target.metric)),
+    inputSource: inputSourceInfo(),
+    checkpoints: store.read().checkpoints || {},
+  };
+}
+
 async function handle(req, res) {
   if (req.method === 'OPTIONS') return json(res, 204, {});
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   try {
+    if (req.method === 'GET' && url.pathname === '/stream') {
+      attachSseStream(res, req);
+      return;
+    }
     if (req.method === 'GET' && url.pathname === '/health') {
       return json(res, 200, { ok: true, service: 'prediction', store: store.file });
     }
@@ -574,17 +646,7 @@ async function handle(req, res) {
       return json(res, 200, stats);
     }
     if (req.method === 'GET' && url.pathname === '/status') {
-      const lastRun = await S(store.latest('runs'));
-      return json(res, 200, {
-        ...state,
-        intervalMinutes: numberParam('PREDICTION_INTERVAL_MINUTES', 10),
-        targets: lastRun?.results?.map(result => {
-          const [source, metric] = String(result.target || '').split(':');
-          return targetInfo(source, metric);
-        }) || parseTargets().map(target => targetInfo(target.source, target.metric)),
-        inputSource: inputSourceInfo(),
-        checkpoints: store.read().checkpoints || {},
-      });
+      return json(res, 200, await buildStatusBody());
     }
     if (req.method === 'GET' && url.pathname === '/models') {
       return json(res, 200, {

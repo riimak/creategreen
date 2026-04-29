@@ -8,7 +8,6 @@ const stableSignatures = new Map<string, string>();
 const accessLogEnabled = Deno.env.get("DASHBOARD_ACCESS_LOG") !== "false";
 
 function logLine(level: "info" | "warn" | "error", msg: string): void {
-  /** Use a single label; `] [poll]` as two tokens is easy to mis-read as `[dashboard[]` in terminals. */
   const line = `${new Date().toISOString()} dashboard — ${msg}`;
   if (level === "error") console.error(line);
   else if (level === "warn") console.warn(line);
@@ -58,13 +57,7 @@ function broadcast(type: string, data: unknown): void {
   }
 }
 
-// Volatile fields the upstream services stamp every poll. Stripping them
-// before dedup means we only re-broadcast when something substantive
-// changes, instead of pulsing the whole UI every two seconds.
-// Fields stripped before dedup so we only re-broadcast on substantive changes.
-// Do NOT strip computedAt / nextRunAt / startedAt — the rationale widget needs
-// fresh timestamps to render "1m ago" / "in 8m" and SSE was silently swallowing
-// updates when only those fields changed.
+// Used only for the slow safety re-sync path (missed events / process restart).
 const VOLATILE_KEYS = new Set([
   "checkedAt",
   "lastPollAt",
@@ -92,8 +85,6 @@ function stableSignature(payload: unknown): string {
 function broadcastIfChanged(type: string, data: { payload?: unknown }): void {
   const sig = stableSignature(data?.payload);
   if (stableSignatures.get(type) === sig) {
-    // Update cached snapshot so freshly-connecting clients see the
-    // current timestamps, but do not re-broadcast to existing ones.
     latest.set(type, data);
     return;
   }
@@ -101,7 +92,6 @@ function broadcastIfChanged(type: string, data: { payload?: unknown }): void {
   broadcast(type, data);
 }
 
-/** Chain/RPC routes can take 10–60s; default fetch has no deadline and may hang shorter stacks — cap here. */
 function upstreamTimeoutMs(kind: "prediction" | "blockchain", path: string): number {
   if (kind === "blockchain" && /^\/(?:chain\/|feeless\/)/.test(path)) {
     return Number(Deno.env.get("DASHBOARD_UPSTREAM_BLOCKCHAIN_MS") || "120000");
@@ -124,86 +114,253 @@ async function fetchService(kind: "prediction" | "blockchain", path: string): Pr
   }
 }
 
-let lastHeartbeatAt = 0;
-/** Avoid overlapping polls when interval < slow upstream (RPC); prevents duplicate log spam and piled requests. */
 let pollInFlight = false;
 
-async function pollServices(): Promise<void> {
+/** One-shot full snapshot for recovery / 60s safety. Uses dedup. */
+async function safetySync(): Promise<void> {
   if (pollInFlight) return;
   pollInFlight = true;
   try {
-  // Send a heartbeat at most every 15s. The previous code beat on every
-  // poll cycle (2s), which made the live-stream label flicker constantly.
-  const now = Date.now();
-  if (now - lastHeartbeatAt >= 15_000) {
-    lastHeartbeatAt = now;
-    broadcast("dashboard.heartbeat", {
-      type: "dashboard.heartbeat",
-      receivedAt: new Date().toISOString(),
-      clients: clients.size,
-    });
-  }
-
-  const tasks: Array<[string, Promise<unknown>]> = [
-    ["prediction.status", fetchService("prediction", "/status")],
-    ["prediction.sla", fetchService("prediction", "/sla?window=24h")],
-    ["prediction.forecast", fetchService("prediction", "/forecasts/latest")],
-    ["prediction.data_quality", fetchService("prediction", "/data-quality/latest")],
-    ["prediction.anomaly", fetchService("prediction", "/anomalies?limit=5")],
-    ["blockchain.status", fetchService("blockchain", "/status")],
-    ["blockchain.event", fetchService("blockchain", "/events?status=confirmed&limit=100")],
-    // Pull a wider page so the ledger reflects real activity instead of
-    // capping at 10. The dashboard surfaces total + recent slice itself.
-    ["blockchain.tx", fetchService("blockchain", "/chain/transactions?limit=100")],
-    ["blockchain.block", fetchService("blockchain", "/chain/blocks?limit=10")],
-    ["blockchain.chain_status", fetchService("blockchain", "/chain/status")],
-    ["blockchain.feeless", fetchService("blockchain", "/feeless/status")],
-    ["blockchain.decode", fetchService("blockchain", "/events/latest")],
-  ];
-
-  const settled = await Promise.allSettled(tasks.map(([, task]) => task));
-  let okCount = 0;
-  const issues: string[] = [];
-  for (let index = 0; index < settled.length; index += 1) {
-    const result = settled[index];
-    const type = tasks[index][0];
-    let payload = result.status === "fulfilled" ? result.value : null;
-    if (type === "blockchain.decode" && payload && typeof payload === "object" && "payloadHex" in payload) {
-      payload = await fetchService("blockchain", `/decode?payload=${encodeURIComponent(String((payload as { payloadHex?: string }).payloadHex || ""))}`);
+    const tasks: Array<[string, Promise<unknown>]> = [
+      ["prediction.status", fetchService("prediction", "/status")],
+      ["prediction.sla", fetchService("prediction", "/sla?window=24h")],
+      ["prediction.forecast", fetchService("prediction", "/forecasts/latest")],
+      ["prediction.data_quality", fetchService("prediction", "/data-quality/latest")],
+      ["prediction.anomaly", fetchService("prediction", "/anomalies?limit=5")],
+      ["blockchain.status", fetchService("blockchain", "/status")],
+      ["blockchain.event", fetchService("blockchain", "/events?status=confirmed&limit=100")],
+      ["blockchain.tx", fetchService("blockchain", "/chain/transactions?limit=100")],
+      ["blockchain.block", fetchService("blockchain", "/chain/blocks?limit=10")],
+      ["blockchain.chain_status", fetchService("blockchain", "/chain/status")],
+      ["blockchain.feeless", fetchService("blockchain", "/feeless/status")],
+      ["blockchain.decode", fetchService("blockchain", "/events/latest")],
+    ];
+    const settled = await Promise.allSettled(tasks.map(([, task]) => task));
+    const issues: string[] = [];
+    for (let index = 0; index < settled.length; index += 1) {
+      const result = settled[index];
+      const type = tasks[index][0];
+      if (result.status === "rejected") {
+        issues.push(`${type}: ${(result.reason as Error)?.message || String(result.reason)}`);
+        continue;
+      }
+      let payload: unknown = result.value;
+      if (isFetchErrorPayload(payload)) {
+        issues.push(`${type}: ${payload.error}`);
+        continue;
+      }
+      if (type === "blockchain.decode" && payload && typeof payload === "object" && "payloadHex" in payload) {
+        payload = await fetchService(
+          "blockchain",
+          `/decode?payload=${encodeURIComponent(String((payload as { payloadHex?: string }).payloadHex || ""))}`,
+        );
+        if (isFetchErrorPayload(payload)) {
+          issues.push(`${type}: ${payload.error}`);
+          continue;
+        }
+      }
+      const data: { type: string; receivedAt: string; payload: unknown } = {
+        type,
+        receivedAt: new Date().toISOString(),
+        payload: type === "blockchain.decode" ? payload : result.value,
+      };
+      broadcastIfChanged(type, data);
     }
-    if (result.status === "rejected") {
-      const msg = result.reason?.message || String(result.reason);
-      issues.push(`${type}: ${msg}`);
-    } else if (isFetchErrorPayload(payload)) {
-      issues.push(`${type}: ${payload.error}`);
+    if (issues.length) {
+      logLine("warn", `safetySync: ${issues.slice(0, 6).join("; ")}${issues.length > 6 ? "…" : ""}`);
     } else {
-      okCount += 1;
+      logLine("info", "safetySync: ok");
     }
-    const data = result.status === "fulfilled"
-      ? { type, receivedAt: new Date().toISOString(), payload: result.value }
-      : { type, receivedAt: new Date().toISOString(), error: result.reason?.message || String(result.reason) };
-    if (type === "blockchain.decode" && result.status === "fulfilled") (data as { payload?: unknown }).payload = payload;
-    broadcastIfChanged(type, data);
-  }
-
-  const summary = `poll ${okCount}/${tasks.length} upstream ok`;
-  if (issues.length > 0) {
-    const detail = issues.join("; ");
-    logLine("warn", `${summary}; failures: ${detail.length > 800 ? `${detail.slice(0, 800)}…` : detail}`);
-  } else {
-    logLine("info", summary);
-  }
+  } catch (e) {
+    logLine("error", `safetySync: ${e instanceof Error ? e.message : String(e)}`);
   } finally {
     pollInFlight = false;
   }
 }
 
-function startPolling(): void {
-  const seconds = Number(Deno.env.get("DASHBOARD_EVENT_POLL_SECONDS") || 3);
-  pollServices().catch((error) => broadcast("dashboard.error", { error: error.message }));
+function startDashboardTick(): void {
   setInterval(() => {
-    pollServices().catch((error) => broadcast("dashboard.error", { error: error.message }));
-  }, Math.max(1, seconds) * 1000);
+    broadcast("dashboard.tick", {
+      type: "dashboard.tick",
+      receivedAt: new Date().toISOString(),
+    });
+  }, 1000);
+}
+
+function startSafetySync(): void {
+  const sec = Math.max(30, Number(Deno.env.get("DASHBOARD_SAFETY_SYNC_SECONDS") || 60));
+  safetySync().catch((e) => logLine("error", `initial safetySync: ${e?.message || e}`));
+  setInterval(() => {
+    void safetySync();
+  }, sec * 1000);
+}
+
+/** Parse a single HTTP SSE `event:` + `data:` block (one message). */
+function parseSseDataBlock(text: string): { event: string; data: string } | null {
+  let ev = "message";
+  const dataLines: string[] = [];
+  for (const line of text.split("\n")) {
+    if (line.startsWith("event:")) ev = line.slice(6).trim();
+    else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+  }
+  if (dataLines.length === 0) return null;
+  return { event: ev, data: dataLines.join("\n") };
+}
+
+async function forwardPredictionStream(): Promise<void> {
+  const base = serviceUrl("prediction");
+  if (!base) {
+    logLine("warn", "PREDICTION_SERVICE_URL not set; prediction upstream SSE disabled");
+    return;
+  }
+  const url = `${base.replace(/\/$/, "")}/stream`;
+  let attempt = 0;
+  for (;;) {
+    try {
+      const res = await fetch(url, { headers: { Accept: "text/event-stream" } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      attempt = 0;
+      const body = res.body;
+      if (!body) throw new Error("no response body");
+      const reader = body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) throw new Error("stream closed");
+        buf += decoder.decode(value, { stream: true });
+        const chunks = buf.split("\n\n");
+        buf = chunks.pop() || "";
+        for (const c of chunks) {
+          if (!c || c.startsWith(":")) continue;
+          const parsed = parseSseDataBlock(c);
+          if (!parsed) continue;
+          if (parsed.event === "connected") continue;
+          let jsonBody: unknown;
+          try {
+            jsonBody = JSON.parse(parsed.data);
+          } catch {
+            continue;
+          }
+          const receivedAt = new Date().toISOString();
+          if (parsed.event === "raw_measurements") {
+            broadcast("tab.refresh", { type: "tab.refresh", view: "measurements", reason: "raw", receivedAt, payload: jsonBody });
+            continue;
+          }
+          if (parsed.event === "forecast" && jsonBody && typeof jsonBody === "object" && "artifact" in jsonBody) {
+            const art = (jsonBody as { artifact: unknown }).artifact;
+            broadcast("prediction.forecast", { type: "prediction.forecast", receivedAt, payload: art });
+            continue;
+          }
+          if (parsed.event === "data_quality" && jsonBody && typeof jsonBody === "object" && "artifact" in jsonBody) {
+            broadcast("prediction.data_quality", { type: "prediction.data_quality", receivedAt, payload: (jsonBody as { artifact: unknown }).artifact });
+            continue;
+          }
+          if (parsed.event === "anomaly_list" && jsonBody) {
+            broadcast("prediction.anomaly", { type: "prediction.anomaly", receivedAt, payload: jsonBody });
+            continue;
+          }
+          if (parsed.event === "status" && jsonBody) {
+            broadcast("prediction.status", { type: "prediction.status", receivedAt, payload: jsonBody });
+            continue;
+          }
+          if (parsed.event === "sla" && jsonBody) {
+            broadcast("prediction.sla", { type: "prediction.sla", receivedAt, payload: jsonBody });
+            continue;
+          }
+        }
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const delay = Math.min(30_000, 1000 * 2 ** Math.min(attempt++, 5));
+      logLine("warn", `prediction /stream: ${msg}; reconnect in ${delay}ms`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+}
+
+async function forwardBlockchainStream(): Promise<void> {
+  const base = serviceUrl("blockchain");
+  if (!base) {
+    logLine("warn", "BLOCKCHAIN_SERVICE_URL not set; blockchain upstream SSE disabled");
+    return;
+  }
+  const url = `${base.replace(/\/$/, "")}/stream`;
+  let attempt = 0;
+  for (;;) {
+    try {
+      const res = await fetch(url, { headers: { Accept: "text/event-stream" } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      attempt = 0;
+      const body = res.body;
+      if (!body) throw new Error("no response body");
+      const reader = body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) throw new Error("stream closed");
+        buf += decoder.decode(value, { stream: true });
+        const chunks = buf.split("\n\n");
+        buf = chunks.pop() || "";
+        for (const c of chunks) {
+          if (!c || c.startsWith(":")) continue;
+          const parsed = parseSseDataBlock(c);
+          if (!parsed) continue;
+          if (parsed.event === "connected") continue;
+          let jsonBody: unknown;
+          try {
+            jsonBody = JSON.parse(parsed.data);
+          } catch {
+            continue;
+          }
+          const receivedAt = new Date().toISOString();
+          if (parsed.event === "event" && jsonBody) {
+            broadcast("blockchain.event", { type: "blockchain.event", receivedAt, payload: jsonBody });
+            continue;
+          }
+          if (parsed.event === "tx" && jsonBody) {
+            broadcast("blockchain.tx", { type: "blockchain.tx", receivedAt, payload: jsonBody });
+            continue;
+          }
+          if (parsed.event === "block" && jsonBody) {
+            broadcast("blockchain.block", { type: "blockchain.block", receivedAt, payload: jsonBody });
+            continue;
+          }
+          if (parsed.event === "chain_status" && jsonBody) {
+            broadcast("blockchain.chain_status", { type: "blockchain.chain_status", receivedAt, payload: jsonBody });
+            continue;
+          }
+          if (parsed.event === "status" && jsonBody) {
+            broadcast("blockchain.status", { type: "blockchain.status", receivedAt, payload: jsonBody });
+            continue;
+          }
+          if (parsed.event === "feeless" && jsonBody) {
+            broadcast("blockchain.feeless", { type: "blockchain.feeless", receivedAt, payload: jsonBody });
+            continue;
+          }
+          if (parsed.event === "events_latest" && jsonBody) {
+            broadcast("blockchain.event", { type: "blockchain.event", receivedAt, payload: { data: [jsonBody] } });
+            if (typeof jsonBody === "object" && jsonBody && "payloadHex" in jsonBody) {
+              const hex = String((jsonBody as { payloadHex?: string }).payloadHex || "");
+              if (hex) {
+                const dec = await fetchService("blockchain", `/decode?payload=${encodeURIComponent(hex)}`);
+                if (dec && !isFetchErrorPayload(dec)) {
+                  broadcast("blockchain.decode", { type: "blockchain.decode", receivedAt, payload: dec });
+                }
+              }
+            }
+            continue;
+          }
+        }
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const delay = Math.min(30_000, 1000 * 2 ** Math.min(attempt++, 5));
+      logLine("warn", `blockchain /stream: ${msg}; reconnect in ${delay}ms`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
 }
 
 function sseResponse(): Response {
@@ -317,12 +474,14 @@ Deno.serve(async (req: Request) => {
 {
   const pred = Boolean(serviceUrl("prediction"));
   const bc = Boolean(serviceUrl("blockchain"));
-  const sec = Number(Deno.env.get("DASHBOARD_EVENT_POLL_SECONDS") || 3);
   const tGeneral = upstreamTimeoutMs("prediction", "/status");
   const tBc = upstreamTimeoutMs("blockchain", "/chain/status");
   logLine(
     "info",
-    `ready: prediction=${pred ? "set" : "missing"} blockchain=${bc ? "set" : "missing"} poll=${sec}s accessLog=${accessLogEnabled} fetchTimeout=${tGeneral}ms blockchainRpc=${tBc}ms`,
+    `ready: prediction=${pred ? "set" : "missing"} blockchain=${bc ? "set" : "missing"} accessLog=${accessLogEnabled} fetchTimeout=${tGeneral}ms blockchainRpc=${tBc}ms upstreamSse=enabled`,
   );
 }
-startPolling();
+startDashboardTick();
+startSafetySync();
+void forwardPredictionStream();
+void forwardBlockchainStream();

@@ -81,7 +81,7 @@ header.app .brand .sub{color:var(--muted);font-size:12.5px;font-weight:500;font-
 header.app .header-right{display:flex;align-items:center;gap:18px;min-width:0}
 header.app .live{display:flex;align-items:center;gap:.55rem;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
 header.app .live .dot{width:7px;height:7px;border-radius:999px;background:var(--amber);box-shadow:0 0 0 3px oklch(66% .15 70 / .15)}
-header.app .live .dot.on{background:var(--green);box-shadow:0 0 0 3px oklch(56% .16 150 / .18)}
+header.app .live .dot.on{background:var(--green);animation:live-dot-pulse-header 2.2s ease-in-out infinite}
 header.app .live .dot.off{background:var(--red);box-shadow:0 0 0 3px oklch(56% .18 25 / .15)}
 
 /* ── partners badge (dark pill so the white logos render) ── */
@@ -179,7 +179,7 @@ main{
 }
 .pill::before{content:"";width:6px;height:6px;border-radius:999px;background:var(--subtle)}
 .pill.ok{background:var(--green-soft);color:oklch(36% .12 150);border-color:oklch(78% .08 150)}
-.pill.ok::before{background:var(--green)}
+.pill.ok::before{background:var(--green);animation:live-dot-pulse 2.2s ease-in-out infinite}
 .pill.warn{background:var(--amber-soft);color:oklch(40% .12 70);border-color:oklch(80% .09 70)}
 .pill.warn::before{background:var(--amber)}
 .pill.err{background:var(--red-soft);color:oklch(40% .14 25);border-color:oklch(80% .1 25)}
@@ -219,7 +219,7 @@ main{
 .card .head .meta{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
 
 /* ── metric picker ─────────────────────────────────────── */
-.metric-picker{display:flex;gap:1px;background:var(--border);border-radius:7px;overflow:hidden;flex-shrink:0}
+.metric-picker{display:flex;flex-wrap:wrap;gap:1px;background:var(--border);border-radius:7px;overflow:hidden;flex-shrink:0;max-width:100%}
 .metric-picker button{
   background:var(--inset);border:none;color:var(--muted);font-size:11px;font-weight:500;
   padding:4px 10px;cursor:pointer;transition:all .15s var(--ease);white-space:nowrap;
@@ -235,7 +235,7 @@ main{
    reflows the header height. */
 .signal>.head{
   padding:14px 16px 10px;border-bottom:1px solid var(--border);grid-column:1 / -1;
-  display:flex;flex-direction:column;gap:8px;min-width:0;
+  display:flex;flex-direction:column;gap:8px;min-width:0;box-sizing:border-box;
 }
 .signal>.head .head-row{display:flex;align-items:center;gap:12px;min-width:0}
 .signal>.head .head-row-top h2{flex-shrink:0}
@@ -244,7 +244,7 @@ main{
   font-variant-numeric:tabular-nums;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;
 }
-.signal>.head .head-row-bottom{align-items:center;flex-wrap:nowrap;overflow:hidden}
+.signal>.head .head-row-bottom{align-items:center;flex-wrap:wrap;overflow:hidden;gap:6px}
 .signal .chart-wrap{grid-column:1;grid-row:2;padding:8px 14px 14px;min-width:0;min-height:0;display:flex}
 .signal canvas{width:100%!important;height:100%!important;min-height:0;flex:1}
 .signal .rationale{
@@ -280,8 +280,13 @@ main{
 
 /* ── ledger ─────────────────────────────────────────────── */
 .ledger{grid-area:ledger;display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:0;padding:0;overflow:hidden}
-.ledger>.head{padding:14px 16px 10px;border-bottom:1px solid var(--border)}
-.ledger .counts{display:flex;gap:14px;font-variant-numeric:tabular-nums;font-size:12.5px;color:var(--muted);margin-top:4px;flex-wrap:wrap}
+/* Match forecast header rhythm: title block, then counts, then chip rows — JS syncs min-height with #cardSignal > header. */
+.ledger>.head{
+  padding:14px 16px 10px;border-bottom:1px solid var(--border);
+  display:flex;flex-direction:column;gap:8px;align-items:stretch;min-width:0;box-sizing:border-box;
+}
+.ledger>.head > h2{margin:0;font-size:13.5px;font-weight:600;letter-spacing:-0.005em}
+.ledger .counts{display:flex;gap:14px;font-variant-numeric:tabular-nums;font-size:12.5px;color:var(--muted);margin-top:0;flex-wrap:wrap}
 .ledger .counts b{font-weight:600;color:var(--text);font-size:14px;margin-right:2px}
 .ledger .breakdown{display:flex;gap:6px 8px;flex-wrap:wrap;margin-top:8px;align-items:center;font-variant-numeric:tabular-nums}
 .ledger .breakdown:empty{display:none}
@@ -489,9 +494,19 @@ main{
   .strip{grid-template-columns:1fr 1fr}
   .side{grid-template-columns:1fr}
 }
+/* Soft halo pulse on “live” green dots (header + .pill.ok). */
+@keyframes live-dot-pulse-header{
+  0%,100%{box-shadow:0 0 0 3px oklch(56% .16 150 / .18)}
+  50%{box-shadow:0 0 0 8px oklch(56% .16 150 / .1)}
+}
+@keyframes live-dot-pulse{
+  0%,100%{box-shadow:0 0 0 2px oklch(56% .16 150 / .4)}
+  50%{box-shadow:0 0 0 7px oklch(56% .16 150 / .1)}
+}
 @media(prefers-reduced-motion:reduce){
   .card.changed{transition-duration:.01ms}
   .card.loading::after{animation:none;opacity:.4}
+  header.app .live .dot.on,.pill.ok::before{animation:none!important}
 }
 
 .muted{color:var(--muted)}
@@ -512,11 +527,25 @@ nav.tabs .tab.active{background:var(--card);color:var(--text);box-shadow:0 1px 0
 /* Keep legacy overview layout: its inner cards must remain direct grid items of <main>. */
 #viewOverview{display:contents}
 #viewOverview[hidden]{display:none}
-/* Data-browser views should span the full dashboard grid width. */
-.view.meas{grid-column:1 / -1}
+/* Data-browser views span full <main> grid; fill viewport height so inner table scrolls. */
+.view.meas{grid-column:1 / -1;grid-row:1 / -1;min-height:0;align-self:stretch;flex:1}
+/* When a table browser is open, make <main> a column flex so the .meas section gets a real height. */
+main:has(.view.meas:not([hidden])){
+  display:flex;flex-direction:column;min-height:0;
+  height:100%;
+  grid-template-rows:1fr;grid-template-columns:1fr;
+  grid-template-areas:'full'
+}
+main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-height:0}
 
 /* ── measurements view ─────────────────────────────────────── */
-.meas{display:flex;flex-direction:column;gap:14px;min-height:0}
+.meas{display:flex;flex-direction:column;gap:14px;min-height:0;flex:1;min-width:0}
+.meas .table-wrap .table-scroll{
+  flex:1 1 auto;min-height:0;min-width:0;overflow:auto;
+  -webkit-overflow-scrolling:touch;
+}
+.meas .table-wrap{flex:1 1 auto;min-height:0;min-width:0}
+.meas .pager{flex:0 0 auto}
 .meas .toolbar{
   display:flex;justify-content:space-between;align-items:flex-end;gap:14px;flex-wrap:wrap;
   padding:12px 14px;background:var(--card);border:1px solid var(--border);border-radius:10px;
@@ -769,6 +798,7 @@ nav.tabs .tab.active{background:var(--card);color:var(--text);box-shadow:0 1px 0
   </div>
 
   <div class="table-wrap">
+    <div class="table-scroll" role="region" aria-label="Measurements table">
     <table>
       <thead>
         <tr>
@@ -782,6 +812,7 @@ nav.tabs .tab.active{background:var(--card);color:var(--text);box-shadow:0 1px 0
         <tr><td colspan="4" class="empty" data-i18n="meas.loading">učitavanje…</td></tr>
       </tbody>
     </table>
+    </div>
     <div class="pager">
       <div class="pager-size">
         <select id="measPageSize"><option value="25">25</option><option value="50">50</option><option value="100" selected>100</option><option value="250">250</option><option value="500">500</option></select>
@@ -831,12 +862,14 @@ nav.tabs .tab.active{background:var(--card);color:var(--text);box-shadow:0 1px 0
   </div>
 
   <div class="table-wrap">
+    <div class="table-scroll" role="region" aria-label="Predictions table">
     <table>
       <thead id="predThead"></thead>
       <tbody id="predTbody">
         <tr><td colspan="6" class="empty" data-i18n="meas.loading">učitavanje…</td></tr>
       </tbody>
     </table>
+    </div>
     <div class="pager">
       <div class="pager-size">
         <select id="predPageSize"><option value="25">25</option><option value="50">50</option><option value="100" selected>100</option><option value="250">250</option><option value="500">500</option></select>
@@ -887,6 +920,7 @@ nav.tabs .tab.active{background:var(--card);color:var(--text);box-shadow:0 1px 0
   </div>
 
   <div class="table-wrap">
+    <div class="table-scroll" role="region" aria-label="Chain events table">
     <table>
       <thead>
         <tr>
@@ -903,6 +937,7 @@ nav.tabs .tab.active{background:var(--card);color:var(--text);box-shadow:0 1px 0
         <tr><td colspan="7" class="empty" data-i18n="meas.loading">učitavanje…</td></tr>
       </tbody>
     </table>
+    </div>
     <div class="pager">
       <div class="pager-size">
         <select id="chainPageSize"><option value="25">25</option><option value="50">50</option><option value="100" selected>100</option><option value="250">250</option><option value="500">500</option></select>
@@ -1505,6 +1540,26 @@ function setLanguage(lang) {
   rerenderSignal();
   rerenderSide();
   rerenderLedger();
+  syncOverviewPairHeaders();
+}
+
+/* Keep forecast + ledger card headers the same height when either grows (picker Assigned pills, ledger chips). */
+let syncOverviewHeadersRaf = null;
+function syncOverviewPairHeaders(){
+  if (syncOverviewHeadersRaf) cancelAnimationFrame(syncOverviewHeadersRaf);
+  syncOverviewHeadersRaf = requestAnimationFrame(() => {
+    syncOverviewHeadersRaf = null;
+    const ov = $('viewOverview');
+    if (!ov || ov.hidden) return;
+    const sh = document.querySelector('#cardSignal > header.head');
+    const lh = document.querySelector('#cardLedger > header.head');
+    if (!sh || !lh) return;
+    sh.style.minHeight = '';
+    lh.style.minHeight = '';
+    const h = Math.max(sh.getBoundingClientRect().height, lh.getBoundingClientRect().height);
+    sh.style.minHeight = `${h}px`;
+    lh.style.minHeight = `${h}px`;
+  });
 }
 
 const FRIENDLY_METRICS = {
@@ -2171,6 +2226,7 @@ function renderLedger(txPayload){
   /* per-tx list */
   if (!data.length){
     setHtml('txList', `<li class="empty">${t('ledger.no_entries')}</li>`);
+    syncOverviewPairHeaders();
     return;
   }
   const items = data.slice(0, 5).map(tx => {
@@ -2194,6 +2250,7 @@ function renderLedger(txPayload){
     </li>`;
   });
   setHtml('txList', items.join(''));
+  syncOverviewPairHeaders();
 }
 
 function stealthTxUrl(txId){
@@ -2299,6 +2356,7 @@ function buildPicker(targets){
     if (cur) cur.classList.add('active');
   }
   pickerBuilt = true;
+  syncOverviewPairHeaders();
 }
 
 function setMetricLoading(on){
@@ -2422,12 +2480,52 @@ function ingest(type, raw){
   }
 }
 
+let lastLiveDataAt = 0;
+let liveStreamUp = false;
+const TABS = ['overview', 'measurements', 'predictions', 'chain'];
+
+function updateLiveStatusLabel(){
+  if (!liveStreamUp) return;
+  const tStr = new Date().toLocaleTimeString([], { hour12: false });
+  const ageSec = lastLiveDataAt ? Math.max(0, Math.round((Date.now() - lastLiveDataAt) / 1000)) : 0;
+  setText('liveStatus', t('live.last_update', { time: `${tStr} · ${ageSec}s` }));
+}
+
+setInterval(() => { updateLiveStatusLabel(); }, 1000);
+
 function setLive(state, message){
   const dot = $('liveDot');
   dot.classList.remove('on','off');
   if (state === 'on') dot.classList.add('on');
   if (state === 'off') dot.classList.add('off');
   setText('liveStatus', message);
+}
+
+const tabRefreshTimers = { measurements: null, predictions: null, chain: null };
+function getActiveTab(){
+  for (const name of TABS) {
+    const v = name === 'overview' ? 'viewOverview' : name === 'measurements' ? 'viewMeasurements'
+      : name === 'predictions' ? 'viewPredictions' : 'viewChain';
+    if (!$(v).hidden) return name;
+  }
+  return 'overview';
+}
+function debounceTab(name, fn){
+  const k = name;
+  if (tabRefreshTimers[k]) clearTimeout(tabRefreshTimers[k]);
+  tabRefreshTimers[k] = setTimeout(() => { tabRefreshTimers[k] = null; fn(); }, 400);
+}
+function onPushMaybeRefreshTabs(afterIngestType){
+  const tab = getActiveTab();
+  if (tab === 'measurements' && ['prediction.status','tab.refresh','prediction.sla','prediction.anomaly','prediction.raw'].some(x => x === afterIngestType)) {
+    debounceTab('measurements', () => { if (getActiveTab() === 'measurements') refreshMeasurements(); });
+  }
+  if (tab === 'predictions' && /^(prediction\.(status|sla|forecast|data_quality|anomaly|raw))$/.test(afterIngestType)) {
+    debounceTab('predictions', () => { if (getActiveTab() === 'predictions') refreshPredictions(); });
+  }
+  if (tab === 'chain' && /^blockchain\./.test(afterIngestType)) {
+    debounceTab('chain', () => { if (getActiveTab() === 'chain') refreshChain(); });
+  }
 }
 
 function startRealtime(){
@@ -2437,21 +2535,33 @@ function startRealtime(){
     'prediction.anomaly','blockchain.status','blockchain.event','blockchain.tx',
     'blockchain.block','blockchain.chain_status','blockchain.feeless','blockchain.decode',
     'dashboard.connected','dashboard.heartbeat','dashboard.error',
+    'dashboard.tick','tab.refresh',
   ];
   types.forEach(type => {
     stream.addEventListener(type, ev => {
       let parsed;
       try { parsed = JSON.parse(ev.data); } catch { return; }
-      if (type === 'dashboard.connected' || type === 'dashboard.heartbeat'){
+      if (type === 'dashboard.connected' || type === 'dashboard.heartbeat' || type === 'dashboard.tick'){
+        liveStreamUp = true;
+        if (type === 'dashboard.tick' || type === 'dashboard.connected' || type === 'dashboard.heartbeat') lastLiveDataAt = Date.now();
         setLive('on', t('live.last_update', { time: new Date().toLocaleTimeString([], { hour12: false }) }));
+        updateLiveStatusLabel();
         return;
       }
       if (type === 'dashboard.error'){ return; }
+      if (type === 'tab.refresh' && (parsed?.view === 'measurements' || parsed?.payload?.view === 'measurements')){
+        if (getActiveTab() === 'measurements') debounceTab('measurements', () => { if (getActiveTab() === 'measurements') refreshMeasurements(); });
+        return;
+      }
+      lastLiveDataAt = Date.now();
       ingest(type, parsed);
+      onPushMaybeRefreshTabs(type);
       setLive('on', t('live.last_update', { time: new Date().toLocaleTimeString([], { hour12: false }) }));
+      updateLiveStatusLabel();
     });
   });
   stream.onerror = () => {
+    liveStreamUp = false;
     setLive('off', t('live.disconnected', { time: new Date().toLocaleTimeString([], { hour12: false }) }));
     fallbackPoll();
   };
@@ -2500,8 +2610,6 @@ setInterval(() => {
  * Hash-based routing so the URL reflects the current view (#measurements)
  * and the back/forward buttons work. Lazy-loads the measurements data the
  * first time that tab is shown so the overview tab stays snappy. */
-const TABS = ['overview', 'measurements', 'predictions', 'chain'];
-
 function applyTab(name) {
   if (!TABS.includes(name)) name = 'overview';
   document.querySelectorAll('header.app .tabs [data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
@@ -2519,6 +2627,9 @@ function applyTab(name) {
   }
   if (name === 'chain') {
     refreshChain();
+  }
+  if (name === 'overview') {
+    syncOverviewPairHeaders();
   }
 }
 
@@ -2978,12 +3089,22 @@ document.querySelectorAll('[data-lang]').forEach(btn => {
 
 startRealtime();
 fallbackPoll();
-setInterval(fallbackPoll, 60_000);
 refreshSoiling();
 setInterval(refreshSoiling, 60_000);
 
 // Apply initial tab from URL hash; defaults to overview.
 applyTab(location.hash.slice(1) || 'overview');
+
+(function wireOverviewHeaderSync(){
+  const sh = document.querySelector('#cardSignal > header.head');
+  const lh = document.querySelector('#cardLedger > header.head');
+  if (!sh || !lh) return;
+  const ro = new ResizeObserver(() => syncOverviewPairHeaders());
+  ro.observe(sh);
+  ro.observe(lh);
+  window.addEventListener('resize', () => syncOverviewPairHeaders());
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => syncOverviewPairHeaders());
+})();
 </script>
 </body>
 </html>

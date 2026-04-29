@@ -39,6 +39,85 @@ const state = {
   progress: null,
 };
 
+const sseClients = new Set();
+
+function sseEmit(eventName, payload) {
+  const line = `event: ${eventName}\ndata: ${JSON.stringify(payload)}\n\n`;
+  for (const res of [...sseClients]) {
+    try {
+      res.write(line);
+    } catch {
+      sseClients.delete(res);
+    }
+  }
+}
+
+function attachSseStream(res, req) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  });
+  sseClients.add(res);
+  res.write(`event: connected\ndata: ${JSON.stringify({ service: 'blockchain', at: new Date().toISOString() })}\n\n`);
+  const keep = setInterval(() => {
+    try {
+      res.write(': keepalive\n\n');
+    } catch {
+      clearInterval(keep);
+      sseClients.delete(res);
+    }
+  }, 25000);
+  req.on('close', () => {
+    clearInterval(keep);
+    sseClients.delete(res);
+  });
+}
+
+function buildStatusBody() {
+  return {
+    ...state,
+    intervalSeconds: numberParam('BLOCKCHAIN_INTERVAL_SECONDS', 60),
+    sources: eventSources(),
+    normalizedSources: normalizedEventSources(),
+    relayMode: relay.mode,
+    checkpoints: store.read().checkpoints || {},
+  };
+}
+
+let ledgerPushTimer = null;
+function scheduleLedgerPush() {
+  if (ledgerPushTimer) return;
+  ledgerPushTimer = setTimeout(() => {
+    ledgerPushTimer = null;
+    void pushLedgerToSse();
+  }, 80);
+}
+
+async function pushLedgerToSse() {
+  try {
+    const [tx, blocks, cs, fee, evData, latest] = await Promise.all([
+      chainTransactions(100),
+      chainBlocks(10),
+      chainStatus(),
+      feelessStatus(relay),
+      S(store.list((row) => row.status === 'confirmed', 100)).then((data) => ({ data })),
+      S(store.latest()),
+    ]);
+    sseEmit('status', buildStatusBody());
+    sseEmit('event', evData);
+    sseEmit('tx', tx);
+    sseEmit('block', blocks);
+    sseEmit('chain_status', cs);
+    sseEmit('feeless', fee);
+    sseEmit('events_latest', latest || {});
+  } catch (e) {
+    log('warn', `pushLedgerToSse: ${e.message}`);
+  }
+}
+
 function json(res, status, body) {
   res.writeHead(status, {
     'Content-Type': 'application/json',
@@ -144,6 +223,7 @@ async function processEvent(event) {
       record.lastError = `relay cooling down for ${cs.cooldownSecondsRemaining}s`;
       record.updatedAt = new Date().toISOString();
       await S(store.put(record));
+      scheduleLedgerPush();
       return { accepted: false, deferred: true, ...record };
     }
 
@@ -180,6 +260,7 @@ async function processEvent(event) {
       if (record.status === 'confirmed') record.confirmedAt = record.updatedAt;
       await S(store.put(record));
       await S(store.markSeen(key, { id, txId: record.txId, status: record.status, seenAt: record.updatedAt }));
+      scheduleLedgerPush();
       return { accepted: true, ...record };
     } catch (error) {
       record.status = 'retrying';
@@ -195,6 +276,7 @@ async function processEvent(event) {
   record.updatedAt = new Date().toISOString();
   await S(store.put(record));
   await S(store.markSeen(key, { id, status: record.status, seenAt: record.updatedAt }));
+  scheduleLedgerPush();
   return { accepted: true, ...record };
 }
 
@@ -472,6 +554,7 @@ async function runCycle(reason = 'scheduled') {
   const startedAt = new Date();
   const results = [];
   try {
+    sseEmit('cycle', { phase: 'started', reason, at: startedAt.toISOString() });
     const maxBroadcasts = numberParam('BLOCKCHAIN_MAX_BROADCASTS_PER_CYCLE', 3);
     for (const source of normalizedEventSources()) {
       try {
@@ -520,6 +603,8 @@ async function runCycle(reason = 'scheduled') {
       `${r.source}:${r.status}${r.events !== undefined ? `:evt=${r.events}` : ''}${r.accepted !== undefined ? `:accepted=${r.accepted}` : ''}`,
     ).join(' · ');
     log('info', `cycle: ${reason}: ${okN}/${results.length} sources ok — ${detail}`);
+    sseEmit('cycle', { phase: 'finished', reason, lastCycle: state.lastCycle, at: new Date().toISOString() });
+    scheduleLedgerPush();
     return state.lastCycle;
   } finally {
     state.running = false;
@@ -583,6 +668,7 @@ async function reconfirmSentTransactions() {
       promoted += 1;
     }
   }
+  if (promoted > 0) scheduleLedgerPush();
   return { checked: sent.length, promoted, errors };
 }
 
@@ -615,6 +701,10 @@ async function handle(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   try {
+    if (req.method === 'GET' && url.pathname === '/stream') {
+      attachSseStream(res, req);
+      return;
+    }
     if (req.method === 'GET' && url.pathname === '/health') {
       return json(res, 200, { ok: true, service: 'blockchain', relayMode: relay.mode, store: store.file });
     }
@@ -623,14 +713,7 @@ async function handle(req, res) {
       return json(res, 200, stats);
     }
     if (req.method === 'GET' && url.pathname === '/status') {
-      return json(res, 200, {
-        ...state,
-        intervalSeconds: numberParam('BLOCKCHAIN_INTERVAL_SECONDS', 60),
-        sources: eventSources(),
-        normalizedSources: normalizedEventSources(),
-        relayMode: relay.mode,
-        checkpoints: store.read().checkpoints || {},
-      });
+      return json(res, 200, buildStatusBody());
     }
     if (req.method === 'POST' && url.pathname === '/events') {
       return json(res, 202, await processEvent(await readBody(req)));

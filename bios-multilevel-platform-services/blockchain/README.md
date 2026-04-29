@@ -84,19 +84,20 @@ pipeline facts only:
 - `data_batch_seen`
 - `data_quality_changed`
 - `prediction_generated`
-- `anomaly_detected`
 - `sla_breached`
+- `anomaly_detected` (only when `BLOCKCHAIN_ANCHOR_ANOMALIES=true` and the event type is listed in `BLOCKCHAIN_EVENT_FILTERS`)
 
 It does not anchor every measurement row and it does not anchor every poll.
 With `PREDICTION_TARGETS=auto`, the prediction service discovers every numeric
 field in the configured BIOS stations, and the blockchain service receives
 data-window/data-quality/anomaly/SLA events for all discovered fields.
-`prediction_generated` is disabled by default because forecasts are produced on
-every prediction cycle and can dominate the chain feed. Enable it only when you
-want every generated forecast artifact to be independently anchored:
+`prediction_generated` is **enabled** by default via `BLOCKCHAIN_ANCHOR_PREDICTIONS=true` in compose; you can set it to `false` to reduce forecast volume on the chain.
+
+Statistical `anomaly_detected` events (model 3-sigma / quality flags from `/anomalies`) are **not** ingested for anchoring unless you opt in. That avoids noisy `prediction-anomaly` rows in production ledgers. To anchor them (e.g. in a lab), set both:
 
 ```sh
-BLOCKCHAIN_ANCHOR_PREDICTIONS=true
+BLOCKCHAIN_ANCHOR_ANOMALIES=true
+# and include anomaly_detected in BLOCKCHAIN_EVENT_FILTERS
 ```
 
 ## AMQP

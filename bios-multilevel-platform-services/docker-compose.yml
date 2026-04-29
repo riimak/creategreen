@@ -66,7 +66,7 @@ services:
     environment:
       BLOCKCHAIN_PORT: "8092"
       BLOCKCHAIN_DB_PATH: /data/blockchain-store.json
-      BLOCKCHAIN_EVENT_FILTERS: "${BLOCKCHAIN_EVENT_FILTERS:-data_batch_seen,data_quality_changed,prediction_generated,anomaly_detected,sla_breached,sla_recovered,export_file_refreshed,ok,alarm,export,config,critical_measurement}"
+      BLOCKCHAIN_EVENT_FILTERS: "${BLOCKCHAIN_EVENT_FILTERS:-data_batch_seen,data_quality_changed,prediction_generated,sla_breached,sla_recovered,export_file_refreshed,ok,alarm,export,config,critical_measurement}"
       BLOCKCHAIN_MAX_RETRIES: "${BLOCKCHAIN_MAX_RETRIES:-3}"
       BLOCKCHAIN_WALLET_SEED: "${BLOCKCHAIN_WALLET_SEED:-development-seed-change-me}"
       BLOCKCHAIN_AMQP_MODE: "${BLOCKCHAIN_AMQP_MODE:-off}"
@@ -76,6 +76,7 @@ services:
       BLOCKCHAIN_EVENT_SOURCE: "${BLOCKCHAIN_EVENT_SOURCE:-prediction}"
       BLOCKCHAIN_EVENT_SCHEMA: "${BLOCKCHAIN_EVENT_SCHEMA:-v2}"
       BLOCKCHAIN_ANCHOR_PREDICTIONS: "${BLOCKCHAIN_ANCHOR_PREDICTIONS:-true}"
+      BLOCKCHAIN_ANCHOR_ANOMALIES: "${BLOCKCHAIN_ANCHOR_ANOMALIES:-false}"
       BLOCKCHAIN_DEMO_DEVICES: "${BLOCKCHAIN_DEMO_DEVICES:-0x0A1C}"
       BLOCKCHAIN_MAX_BROADCASTS_PER_CYCLE: "${BLOCKCHAIN_MAX_BROADCASTS_PER_CYCLE:-3}"
       BLOCKCHAIN_SHOW_VENDOR_WARNINGS: "${BLOCKCHAIN_SHOW_VENDOR_WARNINGS:-false}"

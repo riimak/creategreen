@@ -480,22 +480,24 @@ async function predictionEvents() {
     });
   }
 
-  const anomalies = await fetchJson(base, '/anomalies?limit=50');
-  for (const artifact of anomalies.data || []) {
-    for (const anomaly of artifact.anomalies || []) {
-      if (anomaly.severity !== 'high' || anomaly.nighttime) continue;
-      events.push({
-        source: artifact.source,
-        metric: artifact.metric,
-        timestamp: anomaly.timestamp || Math.floor(Date.now() / 1000),
-        event_code: 'anomaly_detected',
-        status: anomaly.status || 'detected',
-        value: Math.min(65535, Math.round((anomaly.deviation || anomaly.missingRatio || 1) * 100)),
-        sourceKind: 'prediction-anomaly',
-        sourceRef: `${artifact.id}:${anomaly.timestamp}:${anomaly.type || 'value'}`,
-        dedupeKey: `anomaly:${artifact.source}:${artifact.metric}:${anomaly.timestamp}:${anomaly.type || 'value'}:${anomaly.status || anomaly.severity || 'value'}`,
-        metadata: { source: artifact.source, metric: artifact.metric, severity: anomaly.severity },
-      });
+  if (boolParam('BLOCKCHAIN_ANCHOR_ANOMALIES', false)) {
+    const anomalies = await fetchJson(base, '/anomalies?limit=50');
+    for (const artifact of anomalies.data || []) {
+      for (const anomaly of artifact.anomalies || []) {
+        if (anomaly.severity !== 'high' || anomaly.nighttime) continue;
+        events.push({
+          source: artifact.source,
+          metric: artifact.metric,
+          timestamp: anomaly.timestamp || Math.floor(Date.now() / 1000),
+          event_code: 'anomaly_detected',
+          status: anomaly.status || 'detected',
+          value: Math.min(65535, Math.round((anomaly.deviation || anomaly.missingRatio || 1) * 100)),
+          sourceKind: 'prediction-anomaly',
+          sourceRef: `${artifact.id}:${anomaly.timestamp}:${anomaly.type || 'value'}`,
+          dedupeKey: `anomaly:${artifact.source}:${artifact.metric}:${anomaly.timestamp}:${anomaly.type || 'value'}:${anomaly.status || anomaly.severity || 'value'}`,
+          metadata: { source: artifact.source, metric: artifact.metric, severity: anomaly.severity },
+        });
+      }
     }
   }
 

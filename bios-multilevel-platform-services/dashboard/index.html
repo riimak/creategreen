@@ -1190,6 +1190,10 @@ const I18N = {
     'anomalies.soiling_label':'Solarna elektrana · čišćenje panela',
     'anomalies.medium_one':  '{n} metrika s umjerenim odstupanjem',
     'anomalies.medium_many': '{n} metrika s umjerenim odstupanjima',
+    'anomalies.data_age':    'podaci stari {age}',
+    'anomalies.evaluated':   'provjereno {age}',
+    'anomalies.row_title':   'najstariji incident: {data} (apsolutno: {abs}). Posljednja procjena: {evaluated}.',
+    'anomalies.no_data':     'bez podataka',
 
     // ledger card
     'ledger.proofs_total_one':'{n} zapis ukupno',
@@ -1437,6 +1441,10 @@ const I18N = {
     'anomalies.soiling_label':'Solar plant · panel soiling check',
     'anomalies.medium_one':  '{n} metric with moderate deviation',
     'anomalies.medium_many': '{n} metrics with moderate deviations',
+    'anomalies.data_age':    'data {age} old',
+    'anomalies.evaluated':   'evaluated {age} ago',
+    'anomalies.row_title':   'most recent incident sample: {data} (absolute: {abs}). Last evaluated: {evaluated}.',
+    'anomalies.no_data':     'no data',
 
     'ledger.proofs_total_one':'{n} proof total',
     'ledger.proofs_total_many':'{n} proofs total',
@@ -1642,6 +1650,20 @@ function relativeTime(isoOrSec){
   else if (abs < 86400) { value = Math.round(abs / 3600); unit = 'h'; }
   else { value = Math.round(abs / 86400); unit = 'd'; }
   return future ? `in ${value}${unit}` : `${value}${unit} ago`;
+}
+
+/* Compact past-only duration ("5m", "2h", "3d") for inline labels — no
+ * "ago"/"in" suffix so it slots into translated phrases like "podaci stari 2h"
+ * or "data 2h old" without grammar noise. */
+function ageBrief(unixSecOrIso){
+  if (unixSecOrIso === null || unixSecOrIso === undefined) return '--';
+  const ms = typeof unixSecOrIso === 'number' ? unixSecOrIso * 1000 : Date.parse(unixSecOrIso);
+  if (!Number.isFinite(ms)) return '--';
+  const sec = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  if (sec < 60) return `${sec}s`;
+  if (sec < 3600) return `${Math.round(sec / 60)}m`;
+  if (sec < 86400) return `${Math.round(sec / 3600)}h`;
+  return `${Math.round(sec / 86400)}d`;
 }
 
 function shorten(text, head = 6, tail = 4){
@@ -2174,9 +2196,41 @@ function renderAnomalies(anomalies){
     const label = row.metricInfo?.label || row.metric;
     const pointN = row.anomalies?.length || 0;
     const count = t(pointN === 1 ? 'anomalies.count_one' : 'anomalies.count_many', { n: pointN });
-    const when = row.computedAt ? relativeTime(row.computedAt) : '';
+    // Show the *underlying data age* (most recent flagged sample), not when
+    // the cycle ran. Without this, the panel says "5m ago" because the model
+    // just evaluated, even though the sensor has been silent for hours — which
+    // is exactly the misread that caused operators to assume the feed was live.
+    // Fall back to dataAgeMinutes when an anomaly entry lacks a timestamp.
+    const stamps = (row.anomalies || []).map(a => Number(a.timestamp)).filter(Number.isFinite);
+    let dataIsoTitle = '';
+    let ageLabel = '';
+    if (stamps.length){
+      const latest = Math.max(...stamps);
+      ageLabel = t('anomalies.data_age', { age: ageBrief(latest) });
+      dataIsoTitle = new Date(latest * 1000).toLocaleString();
+    } else {
+      const ageMin = (row.anomalies || [])
+        .map(a => Number(a.dataAgeMinutes))
+        .filter(Number.isFinite)
+        .reduce((max, v) => Math.max(max, v), -Infinity);
+      if (ageMin >= 0){
+        const sec = ageMin * 60;
+        const brief = sec < 60 ? `${Math.round(sec)}s` : sec < 3600 ? `${Math.round(sec/60)}m` : sec < 86400 ? `${Math.round(sec/3600)}h` : `${Math.round(sec/86400)}d`;
+        ageLabel = t('anomalies.data_age', { age: brief });
+      } else {
+        ageLabel = t('anomalies.no_data');
+      }
+    }
+    const evaluatedLabel = row.computedAt ? t('anomalies.evaluated', { age: ageBrief(row.computedAt) }) : '';
+    const title = row.computedAt
+      ? t('anomalies.row_title', {
+          data: ageLabel,
+          abs: dataIsoTitle || '--',
+          evaluated: evaluatedLabel,
+        })
+      : ageLabel;
     const station = stationLabel(row.source);
-    return `<div class="row"><span class="k">${escapeHtml(station)} · ${escapeHtml(label)}</span><span class="v">${count}<span class="dim"> · ${escapeHtml(when)}</span></span></div>`;
+    return `<div class="row" title="${escapeHtml(title)}"><span class="k">${escapeHtml(station)} · ${escapeHtml(label)}</span><span class="v">${count}<span class="dim"> · ${escapeHtml(ageLabel)}</span></span></div>`;
   });
   const extraRows = extras.map(x => {
     const txt = x.kind === 'err'

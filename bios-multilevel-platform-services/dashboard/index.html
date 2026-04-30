@@ -71,15 +71,16 @@ a{color:inherit}
 
 /* ── header ───────────────────────────────────────────────── */
 header.app{
-  display:flex;align-items:center;justify-content:space-between;gap:1.5rem;
-  padding:10px 22px;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;gap:1.25rem;
+  padding:7px 20px;border-bottom:1px solid var(--border);
   background:var(--card);min-height:0;
 }
 header.app .brand{display:flex;align-items:baseline;gap:.55rem;font-weight:700;letter-spacing:-0.018em}
 header.app .brand .mark{font-size:15.5px}
 header.app .brand .sub{color:var(--muted);font-size:12.5px;font-weight:500;font-family:'Inter',sans-serif;letter-spacing:0}
-header.app .header-right{display:flex;align-items:center;gap:18px;min-width:0}
+header.app .header-right{display:flex;align-items:center;gap:14px;min-width:0}
 header.app .live{display:flex;align-items:center;gap:.55rem;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;flex:0 0 auto;justify-content:flex-end;min-width:0}
+header.app .live .live-clock{white-space:nowrap}
 header.app .live .live-age{white-space:nowrap}
 header.app .live .live-age-digits{display:inline-block;min-width:4ch;text-align:right;font-variant-numeric:tabular-nums;vertical-align:bottom}
 header.app .live .dot{width:7px;height:7px;border-radius:999px;background:var(--amber);box-shadow:0 0 0 3px oklch(66% .15 70 / .15)}
@@ -100,7 +101,7 @@ header.app .partners-label{
 header.app .partner{display:inline-flex;align-items:center;line-height:0;text-decoration:none;opacity:.92;transition:opacity .2s var(--ease)}
 header.app .partner:hover,header.app .partner:focus-visible{opacity:1;outline:none}
 header.app .partner:focus-visible{box-shadow:0 0 0 2px oklch(54% .17 245 / .55);border-radius:3px}
-header.app .partner img{height:22px;width:auto;display:block;max-width:140px;object-fit:contain}
+header.app .partner img{height:20px;width:auto;display:block;max-width:130px;object-fit:contain}
 header.app .partner-labeled{gap:6px}
 header.app .partner-name{font-size:11.5px;font-weight:700;color:oklch(88% .01 155);letter-spacing:.02em;white-space:nowrap}
 
@@ -360,13 +361,42 @@ main{
   .signal{grid-template-columns:minmax(0,1.5fr) minmax(210px,240px)}
 }
 
-/* narrow laptop (< 1366×768) — tighten paddings, keep no-scroll */
+/* compact laptop (1101–1500) — too wide for the single-column fallback but
+   too narrow to comfortably fit brand + partners + 4 tabs + lang + verbose
+   "live · last update HH:MM:SS · 40s" timestamp on one row at full size.
+   Trim the header so it eats less vertical space and the right-cluster fits. */
+@media(max-width:1500px){
+  header.app{padding:6px 18px;gap:1rem}
+  header.app .header-right{gap:10px}
+  header.app .partners{padding:3px 9px 3px 7px;gap:9px}
+  header.app .partner img{height:18px;max-width:118px}
+  header.app .partner-name{font-size:10px}
+  header.app .partners-label{display:none}
+  nav.tabs{padding:2px}
+  nav.tabs .tab{padding:5px 10px;font-size:12px}
+  header.app .lang-switch button{padding:3px 8px;font-size:10.5px}
+  /* Drop the wordy "ažurirano u 09:04:19" middle — keep the "uživo" label
+     and the live age digits, which is enough at-a-glance signal. */
+  header.app .live .live-clock{display:none}
+}
+
+/* very narrow laptop (≤1280) — also drop the partner wordmark; the logo
+   alone is recognizable enough and the row is otherwise tight. */
+@media(max-width:1280px){
+  header.app{padding:5px 16px}
+  header.app .partner-name{display:none}
+  header.app .partner-labeled{gap:0}
+}
+
+/* narrow laptop (< 1366×768) — tighten paddings, keep no-scroll. Ordered AFTER
+   the width-only rules above so the height-constrained tightest values win the
+   cascade on actual small no-scroll laptops. */
 @media(max-width:1366px) and (max-height:820px){
   body{font-size:13px}
   main{padding:10px 18px 12px;gap:10px}
-  header.app{padding:7px 18px}
-  header.app .partners{padding:4px 10px 4px 8px;gap:11px}
-  header.app .partner img{height:18px;max-width:118px}
+  header.app{padding:4px 14px}
+  header.app .partners{padding:3px 9px 3px 7px;gap:9px}
+  header.app .partner img{height:16px;max-width:108px}
   header.app .partner-name{font-size:10px}
   header.app .partners-label{font-size:9px}
   .tile{padding:9px 12px 10px}
@@ -981,6 +1011,8 @@ const I18N = {
     // header / shell
     'partners.with':        'partneri',
     'live.connecting':      'spajanje',
+    'live.label':           'uživo',
+    'live.update_at':       '· ažurirano u {clock}',
     'live.last_update':     'uživo · ažurirano u {clock}',
     'live.disconnected':    'prekinuto u {time}, ponovni pokušaj',
     'lang.label':           'Jezik',
@@ -1240,6 +1272,8 @@ const I18N = {
   en: {
     'partners.with':        'with',
     'live.connecting':      'connecting',
+    'live.label':           'live',
+    'live.update_at':       '· last update {clock}',
     'live.last_update':     'live · last update {clock}',
     'live.disconnected':    'disconnected at {time}, retrying',
     'lang.label':           'Language',
@@ -2485,7 +2519,25 @@ function ingest(type, raw){
 
 let lastLiveDataAt = 0;
 let liveStreamUp = false;
+let fallbackPollTimer = null;
 const TABS = ['overview', 'measurements', 'predictions', 'chain'];
+
+/* Bridge SSE outages with periodic REST polls so the UI keeps moving when the
+ * EventSource is disconnected (laptop sleep, ingress hiccup, idle proxy
+ * timeout). The interval is cleared as soon as any SSE event proves the stream
+ * is back up. Skips polling while the tab is hidden to avoid unnecessary load. */
+function startFallbackPolling(){
+  if (fallbackPollTimer) return;
+  fallbackPollTimer = setInterval(() => {
+    if (document.visibilityState === 'hidden') return;
+    fallbackPoll();
+  }, 30_000);
+}
+function stopFallbackPolling(){
+  if (!fallbackPollTimer) return;
+  clearInterval(fallbackPollTimer);
+  fallbackPollTimer = null;
+}
 
 function updateLiveStatusLabel(){
   if (!liveStreamUp) return;
@@ -2493,9 +2545,13 @@ function updateLiveStatusLabel(){
   if (!el) return;
   const tStr = new Date().toLocaleTimeString([], { hour12: false });
   const ageSec = lastLiveDataAt ? Math.max(0, Math.round((Date.now() - lastLiveDataAt) / 1000)) : 0;
-  const main = t('live.last_update', { clock: escapeHtml(tStr) });
+  // Split the label into three parts so narrow viewports can hide the verbose
+  // middle ("· ažurirano u 09:04:19") via CSS while keeping the "uživo" label
+  // and the live age digits ("40s") visible at all times.
+  const label = escapeHtml(t('live.label'));
+  const updateAt = escapeHtml(t('live.update_at', { clock: tStr }));
   const ageDigits = escapeHtml(String(ageSec));
-  el.innerHTML = `${main} <span class="live-age">· <span class="live-age-digits">${ageDigits}</span>s</span>`;
+  el.innerHTML = `${label} <span class="live-clock">${updateAt}</span> <span class="live-age">· <span class="live-age-digits">${ageDigits}</span>s</span>`;
 }
 
 setInterval(() => { updateLiveStatusLabel(); }, 1000);
@@ -2508,6 +2564,7 @@ function setLive(state, message){
     dot.classList.add('on');
     if (liveStreamUp) updateLiveStatusLabel();
     else if (message) setText('liveStatus', message);
+    stopFallbackPolling();
   } else {
     if (state === 'off') dot.classList.add('off');
     if (message) setText('liveStatus', message);
@@ -2575,14 +2632,62 @@ function startRealtime(){
     liveStreamUp = false;
     setLive('off', t('live.disconnected', { time: new Date().toLocaleTimeString([], { hour12: false }) }));
     fallbackPoll();
+    startFallbackPolling();
   };
 }
+
+/* When the tab becomes visible again (browser focus, OS wake), proactively
+ * re-sync REST data and refresh the active tab. Without this, a single failed
+ * poll while the user was away leaves a stale "upstream unreachable" message
+ * on screen until they manually interact. */
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  fallbackPoll();
+  const active = getActiveTab();
+  if (active === 'measurements') refreshMeasurements();
+  else if (active === 'predictions') refreshPredictions();
+  else if (active === 'chain') refreshChain();
+});
 
 /* ── REST fallback (also used for the very first render) ─ */
 async function getJson(path){
   const res = await fetch(path);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
+}
+
+function isRetryableHttp(status){ return status === 0 || (status >= 500 && status <= 599); }
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+/* GET JSON with one short retry on transient upstream issues. The dashboard
+ * proxy returns 502 + `{ error: "upstream unreachable" }` while the prediction
+ * or blockchain pod is restarting (or during a slow query); retrying once
+ * ~1.5s later turns most blips into a successful render instead of a sticky
+ * error message. */
+async function fetchJsonWithRetry(path, { retries = 1, backoffMs = 1500 } = {}){
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt += 1){
+    try {
+      const res = await fetch(path);
+      let payload = null;
+      try { payload = await res.json(); } catch { /* non-JSON body */ }
+      if (!res.ok){
+        const msg = (payload && payload.error) || `HTTP ${res.status}`;
+        if (isRetryableHttp(res.status) && attempt < retries) lastErr = new Error(msg);
+        else throw new Error(msg);
+      } else if (payload && payload.error){
+        if (attempt < retries) lastErr = new Error(payload.error);
+        else throw new Error(payload.error);
+      } else {
+        return payload;
+      }
+    } catch (err){
+      lastErr = err instanceof Error ? err : new Error(String(err));
+      if (attempt >= retries) throw lastErr;
+    }
+    if (attempt < retries) await sleep(backoffMs);
+  }
+  throw lastErr || new Error('fetchJsonWithRetry: exhausted');
 }
 
 async function fallbackPoll(){
@@ -2831,12 +2936,8 @@ function formatNumber(n) {
 function refreshMeasurements() {
   if (measurements.loadTimer) clearTimeout(measurements.loadTimer);
   setText('measMeta', t('meas.loading'));
-  fetch(`/prediction/measurements?${buildMeasurementsQuery()}`)
-    .then(r => r.json())
-    .then(payload => {
-      if (payload && payload.error) throw new Error(payload.error);
-      renderMeasurements(payload);
-    })
+  fetchJsonWithRetry(`/prediction/measurements?${buildMeasurementsQuery()}`)
+    .then(payload => renderMeasurements(payload))
     .catch(err => {
       setText('measMeta', t('meas.error', { msg: err.message || String(err) }));
       $('measTbody').innerHTML = `<tr><td colspan="4" class="empty">${escapeHtml(err.message || String(err))}</td></tr>`;
@@ -2983,8 +3084,7 @@ function refreshPredictions() {
   if (src) params.set('source', src);
   if (metric) params.set('metric', metric);
   if (search) params.set('search', search);
-  fetch(`${cfg.endpoint}?${params}`).then(r => r.json()).then(payload => {
-    if (payload && payload.error) throw new Error(payload.error);
+  fetchJsonWithRetry(`${cfg.endpoint}?${params}`).then(payload => {
     const items = payload?.data || [];
     const total = Number(payload?.total ?? items.length);
     predictionsView.total = total;
@@ -3040,8 +3140,7 @@ function refreshChain() {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
   if (status) params.set('status', status);
   if (search) params.set('search', search);
-  fetch(`/blockchain/events/page?${params}`).then(r => r.json()).then(payload => {
-    if (payload && payload.error) throw new Error(payload.error);
+  fetchJsonWithRetry(`/blockchain/events/page?${params}`).then(payload => {
     const items = payload?.data || [];
     const total = Number(payload?.total ?? items.length);
     chainView.total = total;

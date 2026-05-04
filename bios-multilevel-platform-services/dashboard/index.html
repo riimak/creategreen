@@ -47,8 +47,52 @@ body{
   font:14px/1.45 'Inter','Helvetica Neue',system-ui,-apple-system,'Segoe UI',sans-serif;
   -webkit-font-smoothing:antialiased;
   font-feature-settings:'cv11','ss01','tnum';
-  display:grid;grid-template-rows:auto minmax(0,1fr);
+  display:grid;grid-template-rows:auto auto minmax(0,1fr);
   height:100vh;min-height:0;
+}
+
+/* ── EU funding visibility strip ─────────────────────────────
+   Mandatory for EU-co-funded projects. Kept thin so the no-scroll
+   100vh constraint still holds; always visible above the main grid.
+   Edit the placeholders in the HTML below to match the exact
+   operational programme and project code. */
+.eu-strip{
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  padding:6px 20px;border-bottom:1px solid var(--border);
+  background:var(--surface);color:var(--text);min-height:0;
+  font-size:11.5px;line-height:1.35;
+}
+.eu-strip .eu-flag{
+  display:inline-flex;flex:0 0 auto;
+  width:32px;height:22px;border-radius:2px;overflow:hidden;
+  background:#003399;align-items:center;justify-content:center;
+  box-shadow:0 0 0 1px oklch(78% .02 155);
+}
+.eu-strip .eu-flag svg{width:100%;height:100%;display:block}
+.eu-strip .eu-funding{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1 1 auto}
+.eu-strip .eu-funding .eu-lead{font-weight:600;color:var(--text);letter-spacing:0}
+.eu-strip .eu-funding .eu-project{color:var(--muted);font-size:11px}
+.eu-strip .eu-disclaimer{
+  color:var(--subtle);font-size:10.5px;font-style:italic;
+  max-width:52ch;line-height:1.4;
+}
+@media(max-width:1100px){
+  .eu-strip{padding:5px 16px;gap:10px}
+  .eu-strip .eu-disclaimer{display:none}
+}
+@media(max-width:720px){
+  .eu-strip{padding:5px 12px;gap:8px;font-size:11px}
+  .eu-strip .eu-flag{width:26px;height:18px}
+  .eu-strip .eu-funding .eu-project{display:none}
+}
+@media(min-width:1900px){
+  .eu-strip{padding:8px 32px;font-size:13px}
+  .eu-strip .eu-flag{width:38px;height:26px}
+  .eu-strip .eu-disclaimer{font-size:11.5px;max-width:60ch}
+}
+@media(min-width:2600px){
+  .eu-strip{padding:10px 44px;font-size:15px}
+  .eu-strip .eu-flag{width:46px;height:32px}
 }
 
 /* display font for headings, brand mark */
@@ -248,8 +292,12 @@ main{
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;
 }
 .signal>.head .head-row-bottom{align-items:center;flex-wrap:wrap;overflow:hidden;gap:6px}
-.signal .chart-wrap{grid-column:1;grid-row:2;padding:8px 14px 14px;min-width:0;min-height:0;display:flex}
-.signal canvas{width:100%!important;height:100%!important;min-height:0;flex:1}
+.signal .chart-wrap{grid-column:1;grid-row:2;padding:8px 14px 14px;min-width:0;min-height:0;display:flex;position:relative}
+.signal .chart-wrap .chart-empty{
+  position:absolute;inset:8px 14px 14px;display:flex;align-items:center;justify-content:center;
+  text-align:center;padding:12px;font-size:12.5px;line-height:1.45;color:var(--muted);background:var(--card);border-radius:8px;border:1px dashed var(--border);z-index:1
+}
+.signal canvas{width:100%!important;height:100%!important;min-height:0;flex:1;position:relative;z-index:0}
 .signal .rationale{
   grid-column:2;grid-row:2;
   background:var(--inset);border-left:1px solid var(--border);
@@ -700,6 +748,40 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
   </div>
 </header>
 
+<!-- ── EU funding visibility strip ─────────────────────────────
+     TODO: replace PROGRAMME_NAME and PROJECT_CODE with the actual
+     operational programme and project identifier before release.
+     Keep the EU emblem SVG untouched (official 12-star pattern). -->
+<aside class="eu-strip" role="complementary" aria-label="EU funding visibility">
+  <span class="eu-flag" aria-hidden="true">
+    <svg viewBox="0 0 60 40" xmlns="http://www.w3.org/2000/svg">
+      <rect width="60" height="40" fill="#003399"/>
+      <g fill="#FFCC00">
+        <!-- 12 stars on a circle of radius 9, centered at (30,20), at 30° intervals.
+             Each star is approximated as a small circle (r=1.4) so the emblem stays
+             crisp at 24–46px widths without heavy star path data. -->
+        <circle cx="30" cy="11" r="1.4"/>
+        <circle cx="34.5" cy="12.206" r="1.4"/>
+        <circle cx="37.794" cy="15.5" r="1.4"/>
+        <circle cx="39" cy="20" r="1.4"/>
+        <circle cx="37.794" cy="24.5" r="1.4"/>
+        <circle cx="34.5" cy="27.794" r="1.4"/>
+        <circle cx="30" cy="29" r="1.4"/>
+        <circle cx="25.5" cy="27.794" r="1.4"/>
+        <circle cx="22.206" cy="24.5" r="1.4"/>
+        <circle cx="21" cy="20" r="1.4"/>
+        <circle cx="22.206" cy="15.5" r="1.4"/>
+        <circle cx="25.5" cy="12.206" r="1.4"/>
+      </g>
+    </svg>
+  </span>
+  <div class="eu-funding">
+    <span class="eu-lead" data-i18n="eu.lead">Sufinancirala Europska unija</span>
+    <span class="eu-project" data-i18n="eu.project">Operativni program: PROGRAMME_NAME · Projekt: PROJECT_CODE</span>
+  </div>
+  <span class="eu-disclaimer" data-i18n="eu.disclaimer">Izneseni stavovi i mišljenja su isključivo stavovi autora i ne odražavaju nužno službena stajališta Europske unije. Europska unija ne može se smatrati odgovornom za njih.</span>
+</aside>
+
 <main>
 <section class="view" id="viewOverview">
   <section class="strip" aria-label="System status">
@@ -739,7 +821,10 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
         <div class="metric-picker" id="metricPicker"></div>
       </div>
     </header>
-    <div class="chart-wrap"><canvas id="forecastChart" role="img" aria-label="Forecast chart with confidence bounds"></canvas></div>
+    <div class="chart-wrap">
+      <div id="forecastEmptyState" class="chart-empty" hidden></div>
+      <canvas id="forecastChart" role="img" aria-label="Forecast chart with confidence bounds"></canvas>
+    </div>
     <aside class="rationale" aria-label="Method">
       <h3 data-i18n="card.method.title">How this was computed</h3>
       <div class="decision" id="ratSummary"><span class="skeleton" data-i18n="rationale.first_cycle">awaiting first cycle</span></div>
@@ -1017,6 +1102,11 @@ const I18N = {
     'live.disconnected':    'prekinuto u {time}, ponovni pokušaj',
     'lang.label':           'Jezik',
 
+    // EU funding visibility (edit PROGRAMME_NAME / PROJECT_CODE in the HTML strip)
+    'eu.lead':              'Sufinancirala Europska unija',
+    'eu.project':           'Operativni program: PROGRAMME_NAME · Projekt: PROJECT_CODE',
+    'eu.disclaimer':        'Izneseni stavovi i mišljenja su isključivo stavovi autora i ne odražavaju nužno službena stajališta Europske unije. Europska unija ne može se smatrati odgovornom za njih.',
+
     // tabs
     'tab.overview':         'Pregled',
     'tab.measurements':     'Mjerenja',
@@ -1101,6 +1191,9 @@ const I18N = {
     // cards
     'card.forecast.title':  'Predikcija',
     'card.forecast.empty':  'metrika nije učitana',
+    'chart.forecast_placeholder': 'nema podataka za graf',
+    'chart.forecast_unavailable': 'Graf prognoze nije dostupan — nema dovoljno ulaznih intervala s podacima za ovu metriku.',
+    'chart.forecast_waiting':     'Još nema podataka za graf — čekam prvi ciklus predikcije.',
     'card.method.title':    'Kako je izračunato',
     'card.method.computed': 'Izračunato',
     'card.method.next':     'Sljedeći ciklus',
@@ -1134,7 +1227,8 @@ const I18N = {
 
     // source tile
     'source.stations':      '{n} postaja',
-    'source.samples':       '{got}/{expected} uzoraka · {gap}% gap',
+    'source.samples':       '{got}/{expected} intervala · {gap}% gap',
+    'source.raw_points_title':'više sirovih redaka u istom vremenskom intervalu — broj u zagradi je ukupno očitanja s vrijednošću',
     'source.last_reading':  'zadnje očitanje prije {age}',
     'source.offline_files': 'koristim offline datoteke',
     'source.past_sla':      'izvan 24h SLA',
@@ -1255,6 +1349,8 @@ const I18N = {
     'rationale.holdout':    '; {n} zadržano za bodovanje',
     'rationale.next':       'Sljedećih {h}h: {min} do {max}.',
     'rationale.range':      'Raspon {min} do {max}.',
+    'rationale.insufficient_forecast': 'Predikcija nije izgrađena — nema linije na grafu jer ulaz ne zadovoljava prag (npr. premalo intervala s podacima).',
+    'rationale.insufficient_reason':   'Detalj:',
 
     // model labels (friendly Croatian names)
     'model.daily':          'dnevni ritam',
@@ -1281,6 +1377,11 @@ const I18N = {
     'live.last_update':     'live · last update {clock}',
     'live.disconnected':    'disconnected at {time}, retrying',
     'lang.label':           'Language',
+
+    // EU funding visibility (edit PROGRAMME_NAME / PROJECT_CODE in the HTML strip)
+    'eu.lead':              'Co-funded by the European Union',
+    'eu.project':           'Operational Programme: PROGRAMME_NAME · Project: PROJECT_CODE',
+    'eu.disclaimer':        'Views and opinions expressed are however those of the author(s) only and do not necessarily reflect those of the European Union. Neither the European Union can be held responsible for them.',
 
     'tab.overview':         'Overview',
     'tab.measurements':     'Measurements',
@@ -1360,6 +1461,9 @@ const I18N = {
 
     'card.forecast.title':  'Forecast',
     'card.forecast.empty':  'no metric loaded',
+    'chart.forecast_placeholder': 'no chart data',
+    'chart.forecast_unavailable': 'Forecast chart is not available — not enough filled time intervals for this metric.',
+    'chart.forecast_waiting':     'No chart data yet — awaiting the first prediction cycle.',
     'card.method.title':    'How this was computed',
     'card.method.computed': 'Last computed',
     'card.method.next':     'Next cycle',
@@ -1390,7 +1494,8 @@ const I18N = {
     'skeleton.ledger':      'awaiting ledger',
 
     'source.stations':      '{n} stations',
-    'source.samples':       '{got}/{expected} samples · {gap}% gap',
+    'source.samples':       '{got}/{expected} intervals · {gap}% gap',
+    'source.raw_points_title':'more raw rows fall in the same time bucket — the number in parentheses is total readings with a value',
     'source.last_reading':  'last reading {age} ago',
     'source.offline_files': 'using offline files',
     'source.past_sla':      'past 24h SLA',
@@ -1501,6 +1606,8 @@ const I18N = {
     'rationale.holdout':    '; {n} held back for scoring',
     'rationale.next':       'Next {h}h: {min} to {max}.',
     'rationale.range':      'Range {min} to {max}.',
+    'rationale.insufficient_forecast': 'Forecast was not built — there is no line on the chart because input does not meet the minimum (e.g. too few intervals with data).',
+    'rationale.insufficient_reason':   'Detail:',
 
     'model.daily':          'daily-rhythm',
     'model.trend':          'trend-line',
@@ -1809,7 +1916,13 @@ function renderSourceTile(forecast, quality, status){
   const m1 = [];
   if (uniqueStations.length) m1.push(`<span><b>${t('source.stations', { n: uniqueStations.length })}</b></span>`);
   if (samples !== undefined && samples !== null && expected) {
-    m1.push(`<span>${t('source.samples', { got: samples, expected, gap: missing != null ? (missing * 100).toFixed(0) : '0' })}</span>`);
+    const gapStr = missing != null ? (missing * 100).toFixed(0) : '0';
+    let line = t('source.samples', { got: samples, expected, gap: gapStr });
+    const raw = quality?.input?.rawSamplePoints;
+    if (raw != null && raw > samples) {
+      line += ` <span class="muted" title="${escapeHtml(t('source.raw_points_title'))}">(${raw})</span>`;
+    }
+    m1.push(`<span>${line}</span>`);
   }
   setHtml('srcMeta1', m1.join('') || `<span><b>${escapeHtml(label)}</b></span>`);
 
@@ -1924,10 +2037,18 @@ function renderForecast(forecast){
     : 'no forecast loaded';
   setText('signalMeta', headline);
 
+  const emptyEl = $('forecastEmptyState');
   if (!points.length){
     if (chartState.instance){ chartState.instance.destroy(); chartState.instance = null; }
+    if (emptyEl){
+      emptyEl.hidden = false;
+      if (forecast?.status === 'insufficient_data') emptyEl.textContent = t('chart.forecast_unavailable');
+      else if (forecast?.computedAt) emptyEl.textContent = t('chart.forecast_placeholder');
+      else emptyEl.textContent = t('chart.forecast_waiting');
+    }
     return;
   }
+  if (emptyEl) emptyEl.hidden = true;
 
   const datasets = [
     { label: 'Forecast', data: points.map(p => ({ x: new Date(p.timestamp * 1000), y: p.value })),
@@ -2015,7 +2136,12 @@ function renderRationale(forecast, status){
   const shape = describeShape(forecast);
 
   let summary;
-  if (!model){
+  if (forecast?.status === 'insufficient_data'){
+    summary = t('rationale.insufficient_forecast');
+    if (forecast?.reason) {
+      summary += ` ${t('rationale.insufficient_reason')} <code>${escapeHtml(forecast.reason)}</code>`;
+    }
+  } else if (!model){
     summary = `<span class="skeleton">${t('rationale.first_cycle')}</span>`;
   } else if (model === 'mean-baseline'){
     summary = t('rationale.flat_mean', { n: `<b>${samples ?? '0'}</b>` });
@@ -2084,9 +2210,14 @@ function renderQuality(quality, sla){
   const rows = [];
   if (inputSrc?.label) rows.push([t('input.source'), `<span class="v">${escapeHtml(inputSrc.label)}</span>`]);
   if (quality?.input){
-    const { observedSamples, expectedSamples, missingRatio, latestTimestamp } = quality.input;
+    const { observedSamples, expectedSamples, missingRatio, latestTimestamp, rawSamplePoints } = quality.input;
     if (latestTimestamp) rows.push([t('input.last_reading'), `<span class="v"><time datetime="${new Date(latestTimestamp*1000).toISOString()}" title="${new Date(latestTimestamp*1000).toLocaleString()}">${relativeTime(Number(latestTimestamp))}</time></span>`]);
-    if (observedSamples !== undefined) rows.push([t('input.samples'), `<span class="v">${observedSamples} <span class="dim">/ ${expectedSamples ?? '--'} ${t('input.expected')}</span></span>`]);
+    if (observedSamples !== undefined) {
+      const rawHint = rawSamplePoints != null && rawSamplePoints > observedSamples
+        ? ` <span class="dim" title="${escapeHtml(t('source.raw_points_title'))}">(${rawSamplePoints})</span>`
+        : '';
+      rows.push([t('input.samples'), `<span class="v">${observedSamples}${rawHint} <span class="dim">/ ${expectedSamples ?? '--'} ${t('input.expected')}</span></span>`]);
+    }
     if (missingRatio !== undefined) rows.push([t('input.gap'), `<span class="v">${(missingRatio * 100).toFixed(1)}%</span>`]);
   }
   if (sla?.aggregate){

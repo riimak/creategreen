@@ -38,4 +38,17 @@ const quality = dataQuality({
 assert.strictEqual(quality.status, 'insufficient_data');
 assert.ok(quality.input.missingRatio > 0);
 
+const denseQuality = dataQuality({
+  source: 'OS1BIOS',
+  metric: 'PM2_5',
+  hours: 24,
+  records,
+  series: [
+    { timestamp: 1717699200, value: 4 },
+    { timestamp: 1717699260, value: 9 },
+  ],
+});
+assert.strictEqual(denseQuality.input.rawSamplePoints, 2);
+assert.strictEqual(denseQuality.input.observedSamples, 1);
+
 console.log('prediction tests passed');

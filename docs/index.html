@@ -217,6 +217,53 @@ header{
 .pill-group.cyan button.active{background:var(--cyan);color:oklch(15.5% .015 215)}
 .pill-group.amber button.active{background:var(--amber);color:oklch(15.5% .015 215)}
 
+/* ── EU funding visibility strip ─────────────────────────
+   Mandatory for EU-co-funded projects. Sits just below the header
+   so it stays in the viewport on first render. Edit the placeholders
+   in the HTML (PROGRAMME_NAME / PROJECT_CODE) before release. */
+.eu-strip{
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  max-width:1440px;margin:0 auto;
+  padding:10px 24px;
+  border-bottom:1px solid var(--border);
+  background:oklch(17% .015 215 / .6);
+  position:relative;z-index:1;
+  font-size:12px;color:var(--text);
+  line-height:1.4;
+}
+.eu-strip .eu-flag{
+  flex:0 0 auto;width:36px;height:24px;
+  border-radius:2px;overflow:hidden;
+  background:#003399;
+  box-shadow:0 0 0 1px var(--border-strong);
+  display:inline-flex;align-items:center;justify-content:center;
+}
+.eu-strip .eu-flag svg{width:100%;height:100%;display:block}
+.eu-strip .eu-funding{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1 1 auto}
+.eu-strip .eu-funding .eu-lead{
+  font-family:'Space Grotesk',sans-serif;
+  font-weight:600;color:var(--text);font-size:12.5px;
+  letter-spacing:-.005em;
+}
+.eu-strip .eu-funding .eu-project{
+  font-family:'JetBrains Mono',monospace;
+  color:var(--muted);font-size:11px;letter-spacing:.02em;
+}
+.eu-strip .eu-disclaimer{
+  color:var(--subtle);font-size:10.5px;
+  font-style:italic;
+  max-width:52ch;line-height:1.5;
+}
+@media(max-width:900px){
+  .eu-strip{padding:9px 16px;gap:10px}
+  .eu-strip .eu-disclaimer{display:none}
+}
+@media(max-width:560px){
+  .eu-strip{padding:8px 14px;gap:8px;font-size:11px}
+  .eu-strip .eu-flag{width:28px;height:19px}
+  .eu-strip .eu-funding .eu-project{font-size:10px}
+}
+
 /* ── main layout ───────────────────────────────────────── */
 main{
   max-width:1440px;margin:0 auto;
@@ -556,6 +603,37 @@ footer .num{color:var(--text);font-weight:600}
   </div>
 </header>
 
+<!-- ── EU funding visibility strip ─────────────────────────────
+     TODO: replace PROGRAMME_NAME and PROJECT_CODE placeholders with
+     the actual operational programme and project code. Keep the EU
+     emblem SVG untouched (official 12-star pattern). -->
+<aside class="eu-strip" role="complementary" aria-label="EU funding visibility">
+  <span class="eu-flag" aria-hidden="true">
+    <svg viewBox="0 0 60 40" xmlns="http://www.w3.org/2000/svg">
+      <rect width="60" height="40" fill="#003399"/>
+      <g fill="#FFCC00">
+        <circle cx="30" cy="11" r="1.4"/>
+        <circle cx="34.5" cy="12.206" r="1.4"/>
+        <circle cx="37.794" cy="15.5" r="1.4"/>
+        <circle cx="39" cy="20" r="1.4"/>
+        <circle cx="37.794" cy="24.5" r="1.4"/>
+        <circle cx="34.5" cy="27.794" r="1.4"/>
+        <circle cx="30" cy="29" r="1.4"/>
+        <circle cx="25.5" cy="27.794" r="1.4"/>
+        <circle cx="22.206" cy="24.5" r="1.4"/>
+        <circle cx="21" cy="20" r="1.4"/>
+        <circle cx="22.206" cy="15.5" r="1.4"/>
+        <circle cx="25.5" cy="12.206" r="1.4"/>
+      </g>
+    </svg>
+  </span>
+  <div class="eu-funding">
+    <span class="eu-lead">Sufinancirala Europska unija</span>
+    <span class="eu-project">Operativni program: PROGRAMME_NAME · Projekt: PROJECT_CODE</span>
+  </div>
+  <span class="eu-disclaimer">Izneseni stavovi i mišljenja su isključivo stavovi autora i ne odražavaju nužno službena stajališta Europske unije. Europska unija ne može se smatrati odgovornom za njih.</span>
+</aside>
+
 <main>
   <div class="error-bar" id="errorBar"></div>
 
@@ -647,6 +725,20 @@ footer .num{color:var(--text);font-weight:600}
   live data from Mars2 platform
   <span class="sep">·</span>
   refreshes every <span class="num">5</span> min
+  <div style="margin-top:14px;display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap;opacity:.85">
+    <span class="eu-flag" style="flex:0 0 auto;width:28px;height:19px;border-radius:2px;overflow:hidden;background:#003399;display:inline-flex;align-items:center;justify-content:center" aria-hidden="true">
+      <svg viewBox="0 0 60 40" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;display:block">
+        <rect width="60" height="40" fill="#003399"/>
+        <g fill="#FFCC00">
+          <circle cx="30" cy="11" r="1.4"/><circle cx="34.5" cy="12.206" r="1.4"/><circle cx="37.794" cy="15.5" r="1.4"/>
+          <circle cx="39" cy="20" r="1.4"/><circle cx="37.794" cy="24.5" r="1.4"/><circle cx="34.5" cy="27.794" r="1.4"/>
+          <circle cx="30" cy="29" r="1.4"/><circle cx="25.5" cy="27.794" r="1.4"/><circle cx="22.206" cy="24.5" r="1.4"/>
+          <circle cx="21" cy="20" r="1.4"/><circle cx="22.206" cy="15.5" r="1.4"/><circle cx="25.5" cy="12.206" r="1.4"/>
+        </g>
+      </svg>
+    </span>
+    <span>Sufinancirala Europska unija · Operativni program: <span class="num">PROGRAMME_NAME</span> · Projekt: <span class="num">PROJECT_CODE</span></span>
+  </div>
 </footer>
 
 <script>
@@ -1109,7 +1201,9 @@ function renderSolar() {
     return key ? kpiWithStats(label, d, key, unit, decimals) : null;
   };
 
-  // soiling KPI as the hero card if available
+  // Operational order: current production first, then what you produced today,
+  // then grid interaction and storage. Plant health stays available but at the
+  // end so the hero position is a clear "what am I making right now" number.
   const soiling = detectSoiling();
   const soilingCard = soiling
     ? kpi('Plant health', fmt(soiling.efficiency, 0), '%', {
@@ -1118,43 +1212,29 @@ function renderSolar() {
     : null;
 
   const kpis = [
-    soilingCard,
     kpiFor('AC output', 'kW', 2, 'Inverter.AC.power.total', '33_Total_AC_Output_Power_(Active)'),
-    kpiFor('Grid power', 'kW', 2, 'Grid.power.total', '36_Total_Grid_Power'),
     kpiFor('Daily energy', 'kWh', 1, 'Inverter.AC.energy.out.daily', '35_Daily_Production_(Active)'),
+    kpiFor('Grid power', 'kW', 2, 'Grid.power.total', '36_Total_Grid_Power'),
+    kpiFor('Battery SOC', '%', 0, 'BMS.energy.SOC'),
     kpiFor('To grid', 'kWh', 0, 'Grid.energy.toGrid.total'),
     kpiFor('From grid', 'kWh', 0, 'Grid.energy.fromGrid.total'),
-    kpiFor('Battery SOC', '%', 0, 'BMS.energy.SOC'),
-    kpiFor('Total gen', 'kW', 2, '50_Total_Gen_Power'),
+    soilingCard,
   ].filter(Boolean);
 
   $('solarKpis').innerHTML = kpis.length
     ? kpis.join('')
     : '<div class="kpi"><div class="kpi-label">No data</div><div class="kpi-value">--</div></div>';
 
+  // Operational power chart: AC output leads, grid flow overlays on the same axis
+  // so the reader sees the relationship between production and export at a glance.
+  // The "expected from irradiance" dashed overlay was removed from the default view
+  // — it made the chart look technical to non-operators; helper function is kept
+  // below and can be re-enabled behind an advanced toggle when needed.
   const powerSets = [];
-  if (hasField('Grid.power'))     powerSets.push(ds('Grid power (kW)', ts(d, 'Grid.power.total'), C.green, 'y', withAlpha(C.green, 0.1)));
-  if (hasField('AC.power.total')) powerSets.push(ds('AC output (kW)', ts(d, 'Inverter.AC.power.total'), C.amber, powerSets.length ? 'y2' : 'y'));
-  if (hasField('Total_AC_Output'))powerSets.push(ds('AC output (kW)', ts(d, '33_Total_AC_Output_Power_(Active)'), C.amber, 'y'));
-
-  // Meteo correction: derive an "expected" solar output line from irradiance.
-  // Uses the period's max ratio (kW per kW/m²) as the healthy baseline.
-  const expected = expectedSolarFromIrradiance(d, hasField);
-  if (expected.length > 0) {
-    powerSets.push({
-      label: 'Expected from irradiance (kW)',
-      data: expected,
-      borderColor: C.cyan,
-      backgroundColor: 'transparent',
-      borderWidth: 1.4,
-      borderDash: [4, 4],
-      pointRadius: 0,
-      tension: 0.3,
-      fill: false,
-      yAxisID: powerSets.find(s => s.yAxisID === 'y2') ? 'y2' : 'y',
-    });
-  }
-  buildChart('chartPower', powerSets, { y2: powerSets.some(s => s.yAxisID === 'y2') });
+  if (hasField('AC.power.total')) powerSets.push(ds('AC output (kW)', ts(d, 'Inverter.AC.power.total'), C.amber, 'y', withAlpha(C.amber, 0.12)));
+  if (hasField('Total_AC_Output'))powerSets.push(ds('AC output (kW)', ts(d, '33_Total_AC_Output_Power_(Active)'), C.amber, 'y', withAlpha(C.amber, 0.12)));
+  if (hasField('Grid.power'))     powerSets.push(ds('Grid power (kW)', ts(d, 'Grid.power.total'), C.green, 'y'));
+  buildChart('chartPower', powerSets);
 
   const energySets = [];
   if (hasField('energy.out.daily'))  energySets.push(ds('Daily energy (kWh)', ts(d, 'Inverter.AC.energy.out.daily'), C.blue, 'y', withAlpha(C.blue, 0.1)));

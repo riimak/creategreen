@@ -199,6 +199,17 @@ function isSolarSource(source) {
   return String(source || '').toUpperCase().startsWith('SOLAX');
 }
 
+/** Count unique nominal sampling intervals so dense Mars2 rows do not inflate "observed" vs expected slot count. */
+function distinctSampleBuckets(series, intervalMinutes) {
+  const stepSec = Math.max(60, Number(intervalMinutes) * 60);
+  const seen = new Set();
+  for (const p of series) {
+    if (!p || !Number.isFinite(p.timestamp)) continue;
+    seen.add(Math.floor(p.timestamp / stepSec));
+  }
+  return seen.size;
+}
+
 function dataQuality({ source, metric, hours, records, series }) {
   const expectedSampleMinutes = numberParam('PREDICTION_EXPECTED_SAMPLE_MINUTES', 10);
   const staleDefault = numberParam('PREDICTION_STALE_AFTER_MINUTES', 30);
@@ -210,7 +221,8 @@ function dataQuality({ source, metric, hours, records, series }) {
   const missingWarn = numberParam('PREDICTION_MISSING_RATIO_WARN', 0.3);
   const minSamples = numberParam('PREDICTION_MIN_SAMPLES', 6);
   const expectedSamples = Math.max(1, Math.floor((Number(hours) * 60) / expectedSampleMinutes));
-  const observedSamples = series.length;
+  const rawSamplePoints = series.length;
+  const observedSamples = distinctSampleBuckets(series, expectedSampleMinutes);
   const missingSamples = Math.max(0, expectedSamples - observedSamples);
   const missingRatio = Number((missingSamples / expectedSamples).toFixed(4));
   const latestTimestamp = records.reduce((max, row) => Math.max(max, row.timestamp || 0), 0) || null;
@@ -242,6 +254,7 @@ function dataQuality({ source, metric, hours, records, series }) {
       expectedSampleMinutes,
       expectedSamples,
       observedSamples,
+      rawSamplePoints,
       missingSamples,
       missingRatio,
       latestTimestamp,

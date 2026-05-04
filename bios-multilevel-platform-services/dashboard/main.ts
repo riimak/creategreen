@@ -431,6 +431,15 @@ async function handleRequest(req: Request): Promise<Response> {
     });
   }
 
+  if (url.pathname === "/eu-visibility.html") {
+    try {
+      const euHtml = await Deno.readTextFile(new URL("./eu-visibility.html", import.meta.url));
+      return new Response(euHtml, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    } catch {
+      return new Response("EU visibility page not found", { status: 404 });
+    }
+  }
+
   if (url.pathname === "/events") {
     return sseResponse();
   }

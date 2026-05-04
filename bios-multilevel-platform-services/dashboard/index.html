@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -47,52 +47,8 @@ body{
   font:14px/1.45 'Inter','Helvetica Neue',system-ui,-apple-system,'Segoe UI',sans-serif;
   -webkit-font-smoothing:antialiased;
   font-feature-settings:'cv11','ss01','tnum';
-  display:grid;grid-template-rows:auto auto minmax(0,1fr);
+  display:grid;grid-template-rows:auto minmax(0,1fr);
   height:100vh;min-height:0;
-}
-
-/* ── EU funding visibility strip ─────────────────────────────
-   Mandatory for EU-co-funded projects. Kept thin so the no-scroll
-   100vh constraint still holds; always visible above the main grid.
-   Edit the placeholders in the HTML below to match the exact
-   operational programme and project code. */
-.eu-strip{
-  display:flex;align-items:center;gap:14px;flex-wrap:wrap;
-  padding:6px 20px;border-bottom:1px solid var(--border);
-  background:var(--surface);color:var(--text);min-height:0;
-  font-size:11.5px;line-height:1.35;
-}
-.eu-strip .eu-flag{
-  display:inline-flex;flex:0 0 auto;
-  width:32px;height:22px;border-radius:2px;overflow:hidden;
-  background:#003399;align-items:center;justify-content:center;
-  box-shadow:0 0 0 1px oklch(78% .02 155);
-}
-.eu-strip .eu-flag svg{width:100%;height:100%;display:block}
-.eu-strip .eu-funding{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1 1 auto}
-.eu-strip .eu-funding .eu-lead{font-weight:600;color:var(--text);letter-spacing:0}
-.eu-strip .eu-funding .eu-project{color:var(--muted);font-size:11px}
-.eu-strip .eu-disclaimer{
-  color:var(--subtle);font-size:10.5px;font-style:italic;
-  max-width:52ch;line-height:1.4;
-}
-@media(max-width:1100px){
-  .eu-strip{padding:5px 16px;gap:10px}
-  .eu-strip .eu-disclaimer{display:none}
-}
-@media(max-width:720px){
-  .eu-strip{padding:5px 12px;gap:8px;font-size:11px}
-  .eu-strip .eu-flag{width:26px;height:18px}
-  .eu-strip .eu-funding .eu-project{display:none}
-}
-@media(min-width:1900px){
-  .eu-strip{padding:8px 32px;font-size:13px}
-  .eu-strip .eu-flag{width:38px;height:26px}
-  .eu-strip .eu-disclaimer{font-size:11.5px;max-width:60ch}
-}
-@media(min-width:2600px){
-  .eu-strip{padding:10px 44px;font-size:15px}
-  .eu-strip .eu-flag{width:46px;height:32px}
 }
 
 /* display font for headings, brand mark */
@@ -169,12 +125,12 @@ header.app .lang-switch button:focus-visible{outline:2px solid oklch(54% .17 245
 /* ── main grid ────────────────────────────────────────────── */
 main{
   display:grid;
-  grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);
-  grid-template-rows:auto minmax(0,1fr) auto;
+  grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);
+  grid-template-rows:auto auto minmax(0,1fr);
   grid-template-areas:
     "strip   strip"
-    "signal  ledger"
-    "side    ledger";
+    "energy  side"
+    "power   side";
   gap:12px;
   padding:12px 22px 14px;
   min-height:0;overflow:hidden;
@@ -275,62 +231,70 @@ main{
 .metric-picker button:hover{color:var(--text);background:var(--card)}
 .metric-picker button.active{background:var(--green);color:#fff;font-weight:600}
 
-/* ── signal (forecast + rationale) ──────────────────────── */
-.signal{grid-area:signal;display:grid;grid-template-columns:minmax(0,1.7fr) minmax(220px,260px);grid-template-rows:auto minmax(0,1fr);gap:0;padding:0;overflow:hidden}
-/* Stable 2-row header: row 1 has title + meta (right-aligned, ellipsis),
-   row 2 has the metric picker. No flex-wrap, so changing metric never
-   reflows the header height. */
-.signal>.head{
-  padding:14px 16px 10px;border-bottom:1px solid var(--border);grid-column:1 / -1;
-  display:flex;flex-direction:column;gap:8px;min-width:0;box-sizing:border-box;
+/* ── energy hero card (production + micro-stats + sparkline) */
+.energy-card{
+  grid-area:energy;display:grid;
+  grid-template-columns:auto minmax(0,1fr);grid-template-rows:auto auto;
+  gap:0;padding:0;overflow:hidden;
 }
-.signal>.head .head-row{display:flex;align-items:center;gap:12px;min-width:0}
-.signal>.head .head-row-top h2{flex-shrink:0}
-.signal>.head .head-row-top .meta{
-  margin-left:auto;font-size:12.5px;color:var(--muted);
-  font-variant-numeric:tabular-nums;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;
+.energy-card .hero{
+  grid-column:1;grid-row:1/3;
+  padding:18px 22px;display:flex;flex-direction:column;gap:6px;
+  border-right:1px solid var(--border);min-width:180px;
 }
-.signal>.head .head-row-bottom{align-items:center;flex-wrap:wrap;overflow:hidden;gap:6px}
-.signal .chart-wrap{grid-column:1;grid-row:2;padding:8px 14px 14px;min-width:0;min-height:0;display:flex;position:relative}
-.signal .chart-wrap .chart-empty{
+.energy-card .hero .hero-value{font-size:32px;font-weight:700;font-family:'Space Grotesk',sans-serif;letter-spacing:-.03em;line-height:1.1}
+.energy-card .hero .hero-unit{font-size:13px;color:var(--muted);font-weight:500}
+.energy-card .hero .hero-label{font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--subtle);margin-bottom:4px}
+.energy-card .hero .hero-status{margin-top:auto;padding-top:8px}
+.energy-card .micro-stats{
+  grid-column:2;grid-row:1;
+  display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+  background:var(--border);border-bottom:1px solid var(--border);
+}
+.energy-card .micro-stats .stat{
+  background:var(--card);padding:10px 12px;display:flex;flex-direction:column;gap:3px;
+}
+.energy-card .micro-stats .stat .stat-value{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+.energy-card .micro-stats .stat .stat-label{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;font-weight:500}
+.energy-card .sparkline-wrap{
+  grid-column:2;grid-row:2;padding:8px 14px;min-width:0;min-height:0;display:flex;
+}
+.energy-card .sparkline-wrap canvas{width:100%!important;height:100%!important;min-height:0;flex:1}
+
+/* ── power chart card ──────────────────────────────────── */
+.power-card{
+  grid-area:power;display:flex;flex-direction:column;gap:0;padding:0;overflow:hidden;
+}
+.power-card .head{padding:12px 16px 8px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px}
+.power-card .head h2{font-size:13px;font-weight:600;letter-spacing:-.005em}
+.power-card .head .meta{margin-left:auto;font-size:12px;color:var(--muted)}
+.power-card .chart-wrap{flex:1;padding:8px 14px 14px;min-height:0;display:flex;position:relative}
+.power-card .chart-wrap canvas{width:100%!important;height:100%!important;min-height:0;flex:1}
+.power-card .chart-wrap .chart-empty{
   position:absolute;inset:8px 14px 14px;display:flex;align-items:center;justify-content:center;
   text-align:center;padding:12px;font-size:12.5px;line-height:1.45;color:var(--muted);background:var(--card);border-radius:8px;border:1px dashed var(--border);z-index:1
 }
-.signal canvas{width:100%!important;height:100%!important;min-height:0;flex:1;position:relative;z-index:0}
-.signal .rationale{
-  grid-column:2;grid-row:2;
-  background:var(--inset);border-left:1px solid var(--border);
-  padding:14px 16px;display:flex;flex-direction:column;gap:8px;min-width:0;min-height:0;
-  font-size:13px;overflow:hidden;
-}
-.signal .rationale h3{margin-bottom:2px;flex:0 0 auto}
-.signal .rationale .decision{font-size:12.5px;line-height:1.5;color:var(--text)}
-.signal .rationale .decision:empty{display:none}
-.signal .rationale .decision code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11.5px;background:var(--card);padding:1px 5px;border-radius:4px;border:1px solid var(--border)}
-.signal .rationale .decision .model-name{
-  font-style:normal;font-weight:600;color:var(--text);
-  border-bottom:1px dotted var(--border-strong);
-  cursor:help;
-}
-.signal .rationale .decision b{font-weight:600;color:var(--text);font-variant-numeric:tabular-nums}
-.signal .rationale dl.meta{display:grid;grid-template-columns:1fr auto;row-gap:4px;column-gap:10px;font-variant-numeric:tabular-nums;margin-top:auto;padding-top:8px;border-top:1px solid var(--border)}
-.signal .rationale dl.meta dt{color:var(--muted);font-size:12px;align-self:center}
-.signal .rationale dl.meta dd{font-size:12.5px;font-weight:500;text-align:right}
 
-/* ── side (input + anomalies side by side) ─────────────── */
+/* ── side panel (stacked: compact forecast + ledger summary + alerts) */
 .side{
-  grid-area:side;display:grid;grid-template-columns:1fr 1fr;gap:12px;min-height:0;overflow:hidden;
+  grid-area:side;display:flex;flex-direction:column;gap:10px;min-height:0;overflow:hidden;
 }
-.side .card{padding:12px 14px;overflow:hidden}
+.side .card{padding:12px 14px;overflow:hidden;flex:0 0 auto}
+.side .card.flex-fill{flex:1 1 0;min-height:0}
 .list{display:flex;flex-direction:column;gap:5px;font-variant-numeric:tabular-nums;font-size:12.5px;color:var(--text);min-height:0;overflow:hidden}
 .list .row{display:flex;align-items:baseline;gap:8px;justify-content:space-between}
 .list .row .k{color:var(--muted);font-size:12px}
 .list .row .v{font-weight:500}
 .list .row .v.dim{color:var(--muted);font-weight:400}
 
-/* ── ledger ─────────────────────────────────────────────── */
-.ledger{grid-area:ledger;display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:0;padding:0;overflow:hidden}
+/* compact forecast card in side panel */
+.side .signal-compact{padding:12px 14px;overflow:hidden}
+.side .signal-compact .mini-chart{height:80px;position:relative}
+.side .signal-compact .mini-chart canvas{width:100%!important;height:100%!important}
+.side .signal-compact .metric-picker{margin-top:6px}
+
+/* ── ledger (now lives inside #viewChain, not overview) ── */
+.ledger{display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:0;padding:0;overflow:hidden}
 /* Match forecast header rhythm: title block, then counts, then chip rows — JS syncs min-height with #cardSignal > header. */
 .ledger>.head{
   padding:14px 16px 10px;border-bottom:1px solid var(--border);
@@ -409,7 +373,7 @@ main{
   .signal{grid-template-columns:minmax(0,1.5fr) minmax(210px,240px)}
 }
 
-/* compact laptop (1101–1500) — too wide for the single-column fallback but
+/* compact laptop (1101—1500) — too wide for the single-column fallback but
    too narrow to comfortably fit brand + partners + 4 tabs + lang + verbose
    "live · last update HH:MM:SS · 40s" timestamp on one row at full size.
    Trim the header so it eats less vertical space and the right-cluster fits. */
@@ -461,7 +425,7 @@ main{
 
 /* desktop default — already covered above */
 
-/* large desktop (~1600–1899) — a touch more air */
+/* large desktop (~1600—1899) — a touch more air */
 @media(min-width:1600px){
   body{font-size:14.5px}
   main{padding:14px 28px 18px;gap:14px}
@@ -574,7 +538,7 @@ main{
   .strip{grid-template-columns:1fr 1fr}
   .side{grid-template-columns:1fr}
 }
-/* Soft halo pulse on “live” green dots (header + .pill.ok). */
+/* Soft halo pulse on “liveâ€ green dots (header + .pill.ok). */
 @keyframes live-dot-pulse-header{
   0%,100%{box-shadow:0 0 0 3px oklch(56% .16 150 / .18)}
   50%{box-shadow:0 0 0 8px oklch(56% .16 150 / .1)}
@@ -739,6 +703,7 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
       <button type="button" class="tab" data-tab="measurements" data-i18n="tab.measurements">Mjerenja</button>
       <button type="button" class="tab" data-tab="predictions" data-i18n="tab.predictions">Predikcije</button>
       <button type="button" class="tab" data-tab="chain" data-i18n="tab.chain">Lanac</button>
+      <a href="/eu-visibility.html" class="tab" style="text-decoration:none;color:var(--muted);font-size:11px" title="CREATEGREEN · Interreg IPA HR-RS · HR-RS00158" data-i18n="tab.eu">EU</a>
     </nav>
     <div class="lang-switch" role="group" aria-label="Language">
       <button type="button" data-lang="hr">HR</button>
@@ -748,128 +713,95 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
   </div>
 </header>
 
-<!-- ── EU funding visibility strip ─────────────────────────────
-     TODO: replace PROGRAMME_NAME and PROJECT_CODE with the actual
-     operational programme and project identifier before release.
-     Keep the EU emblem SVG untouched (official 12-star pattern). -->
-<aside class="eu-strip" role="complementary" aria-label="EU funding visibility">
-  <span class="eu-flag" aria-hidden="true">
-    <svg viewBox="0 0 60 40" xmlns="http://www.w3.org/2000/svg">
-      <rect width="60" height="40" fill="#003399"/>
-      <g fill="#FFCC00">
-        <!-- 12 stars on a circle of radius 9, centered at (30,20), at 30° intervals.
-             Each star is approximated as a small circle (r=1.4) so the emblem stays
-             crisp at 24–46px widths without heavy star path data. -->
-        <circle cx="30" cy="11" r="1.4"/>
-        <circle cx="34.5" cy="12.206" r="1.4"/>
-        <circle cx="37.794" cy="15.5" r="1.4"/>
-        <circle cx="39" cy="20" r="1.4"/>
-        <circle cx="37.794" cy="24.5" r="1.4"/>
-        <circle cx="34.5" cy="27.794" r="1.4"/>
-        <circle cx="30" cy="29" r="1.4"/>
-        <circle cx="25.5" cy="27.794" r="1.4"/>
-        <circle cx="22.206" cy="24.5" r="1.4"/>
-        <circle cx="21" cy="20" r="1.4"/>
-        <circle cx="22.206" cy="15.5" r="1.4"/>
-        <circle cx="25.5" cy="12.206" r="1.4"/>
-      </g>
-    </svg>
-  </span>
-  <div class="eu-funding">
-    <span class="eu-lead" data-i18n="eu.lead">Sufinancirala Europska unija</span>
-    <span class="eu-project" data-i18n="eu.project">Operativni program: PROGRAMME_NAME · Projekt: PROJECT_CODE</span>
-  </div>
-  <span class="eu-disclaimer" data-i18n="eu.disclaimer">Izneseni stavovi i mišljenja su isključivo stavovi autora i ne odražavaju nužno službena stajališta Europske unije. Europska unija ne može se smatrati odgovornom za njih.</span>
-</aside>
-
 <main>
 <section class="view" id="viewOverview">
+  <!-- ── Energy-first status strip ──────────────────────── -->
   <section class="strip" aria-label="System status">
-    <article class="tile" id="tileSource">
-      <span class="label" data-i18n="tile.source.label">Source data</span>
-      <div class="head"><span class="name" data-i18n="tile.source.name">Mars2 sensors</span><span id="srcPill" class="pill" data-i18n="pill.checking">checking</span></div>
-      <div class="meta meta-1" id="srcMeta1"><span class="skeleton" data-i18n="skeleton.first_cycle">awaiting first cycle</span></div>
-      <div class="meta meta-2" id="srcMeta2"></div>
+    <article class="tile" id="tileProduction">
+      <span class="label" data-i18n="tile.production.label">Production</span>
+      <div class="head"><span class="name" data-i18n="tile.production.name">Solar output</span><span id="prodPill" class="pill" data-i18n="pill.checking">checking</span></div>
+      <div class="meta meta-1" id="prodMeta1"><span class="skeleton" data-i18n="skeleton.awaiting_data">awaiting data</span></div>
+      <div class="meta meta-2" id="prodMeta2"></div>
     </article>
-    <article class="tile" id="tilePrediction">
-      <span class="label" data-i18n="tile.forecasting.label">Forecasting</span>
-      <div class="head"><span class="name" data-i18n="tile.forecasting.name">Forecast cycle</span><span id="predPill" class="pill" data-i18n="pill.checking">checking</span></div>
-      <div class="meta meta-1" id="predMeta1"><span class="skeleton" data-i18n="skeleton.first_cycle">awaiting first cycle</span></div>
-      <div class="meta meta-2" id="predMeta2"></div>
+    <article class="tile" id="tileStorage">
+      <span class="label" data-i18n="tile.storage.label">Storage</span>
+      <div class="head"><span class="name" data-i18n="tile.storage.name">Battery</span><span id="storagePill" class="pill" data-i18n="pill.checking">checking</span></div>
+      <div class="meta meta-1" id="storageMeta1"><span class="skeleton" data-i18n="skeleton.awaiting_data">awaiting data</span></div>
+      <div class="meta meta-2" id="storageMeta2"></div>
     </article>
-    <article class="tile" id="tileBlockchain">
-      <span class="label" data-i18n="tile.relay.label">Audit relay</span>
-      <div class="head"><span class="name" data-i18n="tile.relay.name">Anchor cycle</span><span id="bcPill" class="pill" data-i18n="pill.checking">checking</span></div>
-      <div class="meta meta-1" id="bcMeta1"><span class="skeleton" data-i18n="skeleton.first_cycle">awaiting first cycle</span></div>
-      <div class="meta meta-2" id="bcMeta2"></div>
+    <article class="tile" id="tileGrid">
+      <span class="label" data-i18n="tile.grid.label">Grid</span>
+      <div class="head"><span class="name" data-i18n="tile.grid.name">Network exchange</span><span id="gridPill" class="pill" data-i18n="pill.checking">checking</span></div>
+      <div class="meta meta-1" id="gridMeta1"><span class="skeleton" data-i18n="skeleton.awaiting_data">awaiting data</span></div>
+      <div class="meta meta-2" id="gridMeta2"></div>
     </article>
-    <article class="tile" id="tileStealth">
-      <span class="label" data-i18n="tile.ledger.label">Audit ledger</span>
-      <div class="head"><span class="name" data-i18n="tile.ledger.name">Stealth mainnet</span><span id="chPill" class="pill" data-i18n="pill.checking">checking</span></div>
-      <div class="meta meta-1" id="chMeta1"><span class="skeleton" data-i18n="skeleton.ledger">awaiting ledger</span></div>
-      <div class="meta meta-2" id="chMeta2"></div>
+    <article class="tile" id="tileHealth">
+      <span class="label" data-i18n="tile.health.label">System health</span>
+      <div class="head"><span class="name" data-i18n="tile.health.name">Services</span><span id="healthPill" class="pill" data-i18n="pill.checking">checking</span></div>
+      <div class="meta meta-1" id="healthMeta1"><span class="skeleton" data-i18n="skeleton.first_cycle">awaiting first cycle</span></div>
+      <div class="meta meta-2" id="healthMeta2"></div>
     </article>
   </section>
 
-  <section class="card signal" id="cardSignal" aria-label="Forecast">
-    <header class="head">
-      <div class="head-row head-row-top">
-        <h2 data-i18n="card.forecast.title">Forecast</h2>
-        <div class="meta" id="signalMeta" data-i18n="card.forecast.empty">no metric loaded</div>
-      </div>
-      <div class="head-row head-row-bottom">
-        <div class="metric-picker" id="metricPicker"></div>
-      </div>
-    </header>
-    <div class="chart-wrap">
-      <div id="forecastEmptyState" class="chart-empty" hidden></div>
-      <canvas id="forecastChart" role="img" aria-label="Forecast chart with confidence bounds"></canvas>
+  <!-- ── Energy hero card ────────────────────────────────── -->
+  <section class="card energy-card" id="cardEnergy" aria-label="Energy now">
+    <div class="hero">
+      <span class="hero-label" data-i18n="card.energy.label">Current production</span>
+      <span class="hero-value" id="heroValue">--</span>
+      <span class="hero-unit">kW</span>
+      <div class="hero-status"><span id="heroPill" class="pill" data-i18n="pill.checking">checking</span></div>
     </div>
-    <aside class="rationale" aria-label="Method">
-      <h3 data-i18n="card.method.title">How this was computed</h3>
-      <div class="decision" id="ratSummary"><span class="skeleton" data-i18n="rationale.first_cycle">awaiting first cycle</span></div>
-      <dl class="meta">
-        <dt data-i18n="card.method.computed">Last computed</dt><dd id="rationaleComputed"><span class="skeleton">--</span></dd>
-        <dt data-i18n="card.method.next">Next cycle</dt><dd id="rationaleNext"><span class="skeleton">--</span></dd>
-      </dl>
-    </aside>
+    <div class="micro-stats">
+      <div class="stat"><span class="stat-value" id="statToday">--</span><span class="stat-label" data-i18n="card.energy.today">Today kWh</span></div>
+      <div class="stat"><span class="stat-value" id="statMonth">--</span><span class="stat-label" data-i18n="card.energy.month">Month kWh</span></div>
+      <div class="stat"><span class="stat-value" id="statGrid">--</span><span class="stat-label" data-i18n="card.energy.grid">Grid kW</span></div>
+      <div class="stat"><span class="stat-value" id="statSOC">--</span><span class="stat-label" data-i18n="card.energy.soc">Battery %</span></div>
+    </div>
+    <div class="sparkline-wrap"><canvas id="sparklineChart" aria-label="24h power sparkline"></canvas></div>
   </section>
 
+  <!-- ── Power chart card ────────────────────────────────── -->
+  <section class="card power-card" id="cardPower" aria-label="Power chart">
+    <div class="head">
+      <h2 data-i18n="card.power.title">Power &amp; Energy</h2>
+      <div class="meta" id="powerMeta"></div>
+    </div>
+    <div class="chart-wrap">
+      <div id="powerEmptyState" class="chart-empty" hidden data-i18n="card.power.empty">awaiting measurements</div>
+      <canvas id="powerChart" role="img" aria-label="Production power chart"></canvas>
+    </div>
+  </section>
+
+  <!-- ── Side panel: compact forecast + ledger summary + alerts ── -->
   <div class="side">
-    <section class="card" id="cardQuality" aria-label="Input data">
-      <div class="head"><h2 data-i18n="card.input.title">Input data</h2><span id="qualityPill" class="pill" data-i18n="pill.checking">checking</span></div>
-      <div class="list" id="qualityList"><div class="skeleton" data-i18n="skeleton.first_cycle">awaiting first cycle</div></div>
+    <section class="card signal-compact" id="cardForecastCompact" aria-label="Forecast">
+      <div class="head">
+        <h2 data-i18n="card.forecast.title">Forecast</h2>
+        <span id="predPill" class="pill" data-i18n="pill.checking">checking</span>
+      </div>
+      <div class="metric-picker" id="metricPicker"></div>
+      <div class="mini-chart">
+        <div id="forecastEmptyState" class="chart-empty" hidden></div>
+        <canvas id="forecastChart" role="img" aria-label="Forecast chart"></canvas>
+      </div>
+      <div class="list" id="forecastMeta" style="margin-top:6px;font-size:11.5px"></div>
     </section>
-    <section class="card" id="cardAnomalies" aria-label="Anomalies">
-      <div class="head"><h2 data-i18n="card.anomalies.title">Anomalies</h2><span id="anomalyPill" class="pill" data-i18n="pill.checking">checking</span></div>
-      <div class="list" id="anomalyList"><div class="skeleton" data-i18n="skeleton.first_scan">awaiting first scan</div></div>
+
+    <section class="card" id="cardLedgerSummary" aria-label="Audit summary">
+      <div class="head"><h2 data-i18n="card.ledger_summary.title">Audit</h2><span id="bcPill" class="pill" data-i18n="pill.checking">checking</span></div>
+      <div class="list" id="ledgerSummaryList">
+        <div class="row"><span class="k" data-i18n="ledger.anchored_24h">Anchored 24h</span><span class="v" id="ledgerAnchored24">--</span></div>
+        <div class="row"><span class="k" data-i18n="ledger.block_height">Block height</span><span class="v" id="ledgerBlockHeight">--</span></div>
+        <div class="row"><span class="k" data-i18n="ledger.relay_status">Relay</span><span class="v" id="ledgerRelayStatus">--</span></div>
+      </div>
+      <a href="#" id="openChainTab" style="font-size:11.5px;color:var(--accent);margin-top:6px;display:inline-block" data-i18n="ledger.open_full">Open full audit →</a>
+    </section>
+
+    <section class="card flex-fill" id="cardAlerts" aria-label="Alerts">
+      <div class="head"><h2 data-i18n="card.alerts.title">Alerts</h2><span id="alertPill" class="pill" data-i18n="pill.checking">checking</span></div>
+      <div class="list" id="alertList"><div class="skeleton" data-i18n="skeleton.first_scan">awaiting first scan</div></div>
     </section>
   </div>
-
-  <section class="card ledger" id="cardLedger" aria-label="Audit ledger">
-    <header class="head">
-      <h2 data-i18n="card.ledger.title">Audit ledger</h2>
-      <div class="counts" id="ledgerCounts"><span class="skeleton" data-i18n="skeleton.first_anchor">awaiting first anchor</span></div>
-      <div class="breakdown" id="ledgerBreakdown" aria-label="Anchored entries broken down by event kind and source"></div>
-    </header>
-    <ol class="tx-list" id="txList"><li class="empty" data-i18n="ledger.no_entries">no proofs anchored yet</li></ol>
-    <aside class="proof" id="proofPanel">
-      <div class="head">
-        <h3 style="margin:0" data-i18n="card.proof.title">Latest proof</h3>
-        <span id="proofPill" class="pill">--</span>
-      </div>
-      <dl class="grid" id="proofGrid">
-        <dt data-i18n="proof.value">value</dt><dd id="proofValue">--</dd>
-        <dt data-i18n="proof.confirmed">confirmed</dt><dd id="proofConfirmedTs">--</dd>
-        <dt data-i18n="proof.tx">tx</dt><dd id="proofTx">--</dd>
-        <dt data-i18n="proof.block">block</dt><dd id="proofBlock">--</dd>
-      </dl>
-      <div class="proof-links">
-        <a class="external" id="monitorLink" href="#" target="_blank" rel="noopener noreferrer" hidden data-i18n="proof.open_tx">Open tx in Stealth Monitor →</a>
-        <a class="external" id="blockMonitorLink" href="#" target="_blank" rel="noopener noreferrer" hidden data-i18n="proof.open_block">Open block →</a>
-      </div>
-    </aside>
-  </section>
 </section><!-- /viewOverview -->
 
 <section class="view meas" id="viewMeasurements" hidden>
@@ -1112,6 +1044,7 @@ const I18N = {
     'tab.measurements':     'Mjerenja',
     'tab.predictions':      'Predikcije',
     'tab.chain':            'Lanac',
+    'tab.eu':               'EU',
 
     // measurements view
     'meas.title':           'Sirovi podaci s Mars2 API-ja (povijesno)',
@@ -1134,7 +1067,7 @@ const I18N = {
     'meas.prev':            'prethodna',
     'meas.next':            'sljedeća',
     'pager.per_page':       'po stranici',
-    'meas.page_info':       '{from}–{to} od {total} · stranica {page}/{pages} · keširano {age}',
+    'meas.page_info':       '{from}—{to} od {total} · stranica {page}/{pages} · keširano {age}',
     'meas.cache_age_now':   'sada',
     'meas.cache_age':       'prije {sec}s',
     'meas.missing':         '—',
@@ -1178,7 +1111,27 @@ const I18N = {
     'chain.filter.event':   'tip događaja',
     'chain.status.all':     'sve',
 
-    // tiles
+    // tiles (energy-first)
+    'tile.production.label':'Proizvodnja',
+    'tile.production.name': 'Solarna elektrana',
+    'tile.production.today':'danas {kWh} kWh',
+    'tile.storage.label':   'Pohrana',
+    'tile.storage.name':    'Baterija',
+    'tile.storage.unavailable':'nema podataka o bateriji',
+    'tile.storage.charging':'punjenje',
+    'tile.storage.discharging':'pražnjenje',
+    'tile.grid.label':      'Mreža',
+    'tile.grid.name':       'Razmjena s mrežom',
+    'tile.grid.unavailable':'nema podataka o mreži',
+    'tile.grid.export':     'izvoz',
+    'tile.grid.import':     'uvoz',
+    'tile.grid.balanced':   'uravnoteženo',
+    'tile.health.label':    'Stanje sustava',
+    'tile.health.name':     'Servisi',
+    'tile.health.data':     'Podaci',
+    'tile.health.forecast': 'Prognoza',
+    'tile.health.chain':    'Lanac',
+    // old tile keys kept for compatibility
     'tile.source.label':    'Izvor podataka',
     'tile.source.name':     'Mars2 senzori',
     'tile.forecasting.label':'Predikcija',
@@ -1189,6 +1142,28 @@ const I18N = {
     'tile.ledger.name':     'Stealth mainnet',
 
     // cards
+    'card.energy.label':    'Trenutna proizvodnja',
+    'card.energy.today':    'Danas kWh',
+    'card.energy.month':    'Mjesec kWh',
+    'card.energy.grid':     'Mreža kW',
+    'card.energy.soc':      'Baterija %',
+    'card.power.title':     'Snaga i energija',
+    'card.power.empty':     'čekam mjerenja',
+    'card.power.ac_output': 'AC izlaz (kW)',
+    'card.power.grid_flow': 'Mreža (kW)',
+    'card.method.model':    'Model',
+    'card.ledger_summary.title':'Revizija',
+    'card.alerts.title':    'Upozorenja',
+    'ledger.anchored_24h':  'Zapisano 24h',
+    'ledger.block_height':  'Visina bloka',
+    'ledger.relay_status':  'Relej',
+    'ledger.open_full':     'Otvori punu reviziju →',
+    'alert.stale_data':     'Podaci stari {age}',
+    'alert.relay_error':    'Greška releja za zapis',
+    'alert.none':           'Nema upozorenja',
+    'pill.degraded':        'degradirano',
+    'pill.partial':         'djelomično',
+    'pill.ok_label':        'OK',
     'card.forecast.title':  'Predikcija',
     'card.forecast.empty':  'metrika nije učitana',
     'chart.forecast_placeholder': 'nema podataka za graf',
@@ -1224,6 +1199,7 @@ const I18N = {
     'skeleton.first_scan':  'čekam prvi skeniranje',
     'skeleton.first_anchor':'čekam prvi zapis',
     'skeleton.ledger':      'čekam stanje',
+    'skeleton.awaiting_data':'čekam podatke',
 
     // source tile
     'source.stations':      '{n} postaja',
@@ -1387,6 +1363,7 @@ const I18N = {
     'tab.measurements':     'Measurements',
     'tab.predictions':      'Predictions',
     'tab.chain':            'Chain',
+    'tab.eu':               'EU',
 
     'meas.title':           'Raw Mars2 measurements (historical)',
     'meas.loading':         'loading…',
@@ -1408,7 +1385,7 @@ const I18N = {
     'meas.prev':            'prev',
     'meas.next':            'next',
     'pager.per_page':       'per page',
-    'meas.page_info':       '{from}–{to} of {total} · page {page}/{pages} · cached {age}',
+    'meas.page_info':       '{from}—{to} of {total} · page {page}/{pages} · cached {age}',
     'meas.cache_age_now':   'just now',
     'meas.cache_age':       '{sec}s ago',
     'meas.missing':         '—',
@@ -1450,6 +1427,49 @@ const I18N = {
     'chain.filter.event':   'event type',
     'chain.status.all':     'all',
 
+    // tiles (energy-first)
+    'tile.production.label':'Production',
+    'tile.production.name': 'Solar output',
+    'tile.production.today':'today {kWh} kWh',
+    'tile.storage.label':   'Storage',
+    'tile.storage.name':    'Battery',
+    'tile.storage.unavailable':'no battery data',
+    'tile.storage.charging':'charging',
+    'tile.storage.discharging':'discharging',
+    'tile.grid.label':      'Grid',
+    'tile.grid.name':       'Network exchange',
+    'tile.grid.unavailable':'no grid data',
+    'tile.grid.export':     'exporting',
+    'tile.grid.import':     'importing',
+    'tile.grid.balanced':   'balanced',
+    'tile.health.label':    'System health',
+    'tile.health.name':     'Services',
+    'tile.health.data':     'Data',
+    'tile.health.forecast': 'Forecast',
+    'tile.health.chain':    'Chain',
+    'card.energy.label':    'Current production',
+    'card.energy.today':    'Today kWh',
+    'card.energy.month':    'Month kWh',
+    'card.energy.grid':     'Grid kW',
+    'card.energy.soc':      'Battery %',
+    'card.power.title':     'Power & Energy',
+    'card.power.empty':     'awaiting measurements',
+    'card.power.ac_output': 'AC output (kW)',
+    'card.power.grid_flow': 'Grid (kW)',
+    'card.method.model':    'Model',
+    'card.ledger_summary.title':'Audit',
+    'card.alerts.title':    'Alerts',
+    'ledger.anchored_24h':  'Anchored 24h',
+    'ledger.block_height':  'Block height',
+    'ledger.relay_status':  'Relay',
+    'ledger.open_full':     'Open full audit \u2192',
+    'alert.stale_data':     'Data stale for {age}',
+    'alert.relay_error':    'Blockchain relay error',
+    'alert.none':           'No alerts',
+    'pill.degraded':        'degraded',
+    'pill.partial':         'partial',
+    'pill.ok_label':        'OK',
+    // old tile keys kept for compatibility
     'tile.source.label':    'Source data',
     'tile.source.name':     'Mars2 sensors',
     'tile.forecasting.label':'Forecasting',
@@ -1492,6 +1512,7 @@ const I18N = {
     'skeleton.first_scan':  'awaiting first scan',
     'skeleton.first_anchor':'awaiting first anchor',
     'skeleton.ledger':      'awaiting ledger',
+    'skeleton.awaiting_data':'awaiting data',
 
     'source.stations':      '{n} stations',
     'source.samples':       '{got}/{expected} intervals · {gap}% gap',
@@ -1691,28 +1712,11 @@ function setLanguage(lang) {
   rerenderSignal();
   rerenderSide();
   rerenderLedger();
-  syncOverviewPairHeaders();
+  
   if (liveStreamUp) updateLiveStatusLabel();
 }
 
-/* Keep forecast + ledger card headers the same height when either grows (picker Assigned pills, ledger chips). */
-let syncOverviewHeadersRaf = null;
-function syncOverviewPairHeaders(){
-  if (syncOverviewHeadersRaf) cancelAnimationFrame(syncOverviewHeadersRaf);
-  syncOverviewHeadersRaf = requestAnimationFrame(() => {
-    syncOverviewHeadersRaf = null;
-    const ov = $('viewOverview');
-    if (!ov || ov.hidden) return;
-    const sh = document.querySelector('#cardSignal > header.head');
-    const lh = document.querySelector('#cardLedger > header.head');
-    if (!sh || !lh) return;
-    sh.style.minHeight = '';
-    lh.style.minHeight = '';
-    const h = Math.max(sh.getBoundingClientRect().height, lh.getBoundingClientRect().height);
-    sh.style.minHeight = `${h}px`;
-    lh.style.minHeight = `${h}px`;
-  });
-}
+/* syncOverviewPairHeaders removed — old signal/ledger split layout no longer exists */
 
 const FRIENDLY_METRICS = {
   'PM2_5':        'Air quality (PM2.5)',
@@ -1724,8 +1728,17 @@ const FRIENDLY_METRICS = {
   'O3':           'Ozone',
   'Buka':         'Noise level',
   'Grid_power_total':   'Grid power',
+  'Grid_energy_toGrid_total': 'Energy to grid',
+  'Grid_energy_fromGrid_total': 'Energy from grid',
   'Inverter_AC_power_total': 'Solar output',
   'Inverter_AC_energy_out_daily': 'Daily solar energy',
+  'BMS_energy_SOC': 'Battery SOC',
+  'Inverter_DC_Battery_power_total': 'Battery power',
+  'Inverter_DC_PV_power_MPPT1': 'PV string 1',
+  'Inverter_DC_PV_power_MPPT2': 'PV string 2',
+  'Inverter_DC_PV_power_MPPT3': 'PV string 3',
+  'Inverter_DC_PV_power_MPPT4': 'PV string 4',
+  'Inverter_Meter2_AC_power_total': 'Meter 2 power',
 };
 const PICKER_METRICS = ['PM2_5','CAQI','Temperatura','Grid_power_total','Inverter_AC_power_total'];
 let activeTarget = null;
@@ -2025,6 +2038,247 @@ function renderStealthTile(chainStatus, blocks, feeless){
   setHtml('chMeta2', m2.join(''));
 }
 
+/* ── energy tile renderers (production / storage / grid / health) ── */
+let energySnap = { ac: null, daily: null, grid: null, soc: null, battPower: null, toGrid: null, fromGrid: null, lastTs: null };
+
+function renderProductionTile(){
+  const ac = energySnap.ac;
+  const daily = energySnap.daily;
+  if (ac === null && daily === null) return;
+  const pillKind = ac !== null ? 'ok' : '';
+  const pillText = ac !== null ? t('pill.live') : t('pill.awaiting');
+  setPill('prodPill', pillText, pillKind);
+  const m1 = [];
+  if (ac !== null) m1.push(`<span><b>${Number(ac).toFixed(2)} kW</b></span>`);
+  if (daily !== null) m1.push(`<span>${t('tile.production.today', { kWh: Number(daily).toFixed(1) })}</span>`);
+  setHtml('prodMeta1', m1.join('') || '--');
+  const m2 = [];
+  if (energySnap.lastTs) m2.push(`<span>${t('source.last_reading', { age: `<b>${ageBrief(energySnap.lastTs)}</b>` })}</span>`);
+  setHtml('prodMeta2', m2.join(''));
+}
+
+function renderStorageTile(){
+  const soc = energySnap.soc;
+  const battPower = energySnap.battPower;
+  if (soc === null) { setHtml('storageMeta1', `<span class="muted">${t('tile.storage.unavailable')}</span>`); return; }
+  const charging = battPower !== null && battPower > 0.05;
+  const discharging = battPower !== null && battPower < -0.05;
+  const pillKind = soc > 20 ? 'ok' : soc > 5 ? 'warn' : 'err';
+  const arrow = charging ? ' \u2191' : discharging ? ' \u2193' : '';
+  setPill('storagePill', `${Number(soc).toFixed(0)}%${arrow}`, pillKind);
+  const m1 = [];
+  m1.push(`<span><b>${Number(soc).toFixed(0)}%</b> SOC</span>`);
+  if (battPower !== null) m1.push(`<span>${Math.abs(battPower).toFixed(2)} kW ${charging ? t('tile.storage.charging') : discharging ? t('tile.storage.discharging') : ''}</span>`);
+  setHtml('storageMeta1', m1.join(''));
+  setHtml('storageMeta2', '');
+}
+
+function renderGridTile(){
+  const grid = energySnap.grid;
+  const toG = energySnap.toGrid;
+  const fromG = energySnap.fromGrid;
+  if (grid === null) { setHtml('gridMeta1', `<span class="muted">${t('tile.grid.unavailable')}</span>`); return; }
+  const exporting = grid < -0.05;
+  const importing = grid > 0.05;
+  const pillKind = exporting ? 'ok' : importing ? 'info' : '';
+  const pillText = exporting ? t('tile.grid.export') : importing ? t('tile.grid.import') : t('tile.grid.balanced');
+  setPill('gridPill', pillText, pillKind);
+  const m1 = [];
+  m1.push(`<span><b>${Math.abs(grid).toFixed(2)} kW</b> ${exporting ? '\u2192' : importing ? '\u2190' : '='}</span>`);
+  setHtml('gridMeta1', m1.join(''));
+  const m2 = [];
+  if (toG !== null) m2.push(`<span>\u2192 ${Number(toG).toFixed(1)} kWh</span>`);
+  if (fromG !== null) m2.push(`<span>\u2190 ${Number(fromG).toFixed(1)} kWh</span>`);
+  setHtml('gridMeta2', m2.join(' '));
+}
+
+function renderHealthTile(predStatus, bcStatus, chainStatus, quality, sla){
+  const ageMin = quality?.input?.dataAgeMinutes;
+  const slaMin = slaWindowMinutes(sla);
+  const dataOk = ageMin != null && ageMin <= slaMin;
+  const predOk = predStatus?.lifecycle === 'idle' || predStatus?.lifecycle === 'running';
+  const bcOk = bcStatus?.lifecycle === 'idle' || bcStatus?.lifecycle === 'running';
+  const chainOk = chainStatus?.ok !== false;
+  const checks = [dataOk, predOk, bcOk, chainOk];
+  const allOk = checks.every(Boolean);
+  const anyErr = checks.filter(c => !c).length >= 2;
+  const pillKind = allOk ? 'ok' : anyErr ? 'err' : 'warn';
+  const pillText = allOk ? t('pill.live') : anyErr ? t('pill.degraded') : t('pill.partial');
+  setPill('healthPill', pillText, pillKind);
+  const m1 = [];
+  m1.push(`<span>${t('tile.health.data')}: ${dataOk ? '\u2713' : '\u2717'}</span>`);
+  m1.push(`<span>${t('tile.health.forecast')}: ${predOk ? '\u2713' : '\u2717'}</span>`);
+  m1.push(`<span>${t('tile.health.chain')}: ${chainOk ? '\u2713' : '\u2717'}</span>`);
+  setHtml('healthMeta1', m1.join(' '));
+  const m2 = [];
+  if (ageMin != null) m2.push(`<span>${t('source.last_reading', { age: `<b>${ageBrief(energySnap.lastTs || (Date.now()/1000 - ageMin*60))}</b>` })}</span>`);
+  setHtml('healthMeta2', m2.join(''));
+}
+
+/* ── live energy data loading ─────────────────────────────── */
+let energyCharts = { sparkline: null, power: null };
+
+async function loadLiveEnergy(){
+  try {
+    const res = await fetch('/prediction/measurements?source=SOLAXBIOS&hours=24');
+    if (!res.ok) return;
+    const data = await res.json();
+    const records = data?.records || data?.data || [];
+    if (!records.length) return;
+
+    const latest = {};
+    const series = {};
+    for (const r of records) {
+      const ts = r.timestamp || r.ts;
+      const entries = r.values || r;
+      for (const [key, val] of Object.entries(entries)) {
+        if (key === 'timestamp' || key === 'ts' || val === null || val === undefined || !Number.isFinite(Number(val))) continue;
+        if (!series[key]) series[key] = [];
+        series[key].push({ x: new Date(ts * 1000), y: Number(val) });
+        if (!latest[key] || ts > latest[key].ts) latest[key] = { ts, v: Number(val) };
+      }
+    }
+
+    const get = (k) => latest[k]?.v ?? null;
+    energySnap.ac = get('Inverter_AC_power_total');
+    energySnap.daily = get('Inverter_AC_energy_out_daily');
+    energySnap.grid = get('Grid_power_total');
+    energySnap.soc = get('BMS_energy_SOC');
+    energySnap.battPower = get('Inverter_DC_Battery_power_total');
+    energySnap.toGrid = get('Grid_energy_toGrid_total');
+    energySnap.fromGrid = get('Grid_energy_fromGrid_total');
+    energySnap.lastTs = Math.max(...Object.values(latest).map(l => l.ts).filter(Number.isFinite));
+
+    renderEnergyHero();
+    renderPowerChart(series);
+    rerenderTiles();
+  } catch (e) { console.warn('loadLiveEnergy failed:', e); }
+}
+
+function renderEnergyHero(){
+  const ac = energySnap.ac;
+  const el = $('heroValue');
+  if (el) el.textContent = ac !== null ? Number(ac).toFixed(2) : '--';
+  setPill('heroPill', ac !== null ? t('pill.live') : t('pill.awaiting'), ac !== null ? 'ok' : '');
+  setText('statToday', energySnap.daily !== null ? Number(energySnap.daily).toFixed(1) : '--');
+  setText('statMonth', '--');
+  setText('statGrid', energySnap.grid !== null ? Number(energySnap.grid).toFixed(2) : '--');
+  setText('statSOC', energySnap.soc !== null ? `${Number(energySnap.soc).toFixed(0)}` : '--');
+}
+
+function renderPowerChart(series){
+  const acSeries = series?.['Inverter_AC_power_total'] || [];
+  const gridSeries = series?.['Grid_power_total'] || [];
+
+  const emptyEl = $('powerEmptyState');
+  if (!acSeries.length && !gridSeries.length) {
+    if (emptyEl) emptyEl.hidden = false;
+    return;
+  }
+  if (emptyEl) emptyEl.hidden = true;
+
+  const datasets = [];
+  if (acSeries.length) datasets.push({
+    label: t('card.power.ac_output'), data: acSeries,
+    borderColor: cssVar('--amber'), backgroundColor: 'oklch(66% .15 70 / .12)',
+    borderWidth: 1.6, fill: true, pointRadius: 0, tension: 0.2
+  });
+  if (gridSeries.length) datasets.push({
+    label: t('card.power.grid_flow'), data: gridSeries,
+    borderColor: cssVar('--green'), backgroundColor: 'transparent',
+    borderWidth: 1.2, fill: false, pointRadius: 0, tension: 0.2
+  });
+
+  if (energyCharts.power) {
+    energyCharts.power.data.datasets = datasets;
+    energyCharts.power.update('none');
+  } else {
+    energyCharts.power = new Chart($('powerChart'), {
+      type: 'line', data: { datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        animation: { duration: 0 },
+        interaction: { mode: 'nearest', intersect: false },
+        plugins: { legend: { display: true, position: 'top', labels: { boxWidth: 10, font: { size: 11 } } }, tooltip: { mode: 'index', intersect: false } },
+        scales: {
+          x: { type: 'time', ticks: { color: cssVar('--muted'), font: { size: 11 } }, grid: { color: cssVar('--grid'), drawTicks: false } },
+          y: { title: { display: true, text: 'kW', font: { size: 11 } }, ticks: { color: cssVar('--muted'), font: { size: 11 } }, grid: { color: cssVar('--grid'), drawTicks: false } },
+        },
+      },
+    });
+  }
+
+  if (acSeries.length) {
+    if (energyCharts.sparkline) {
+      energyCharts.sparkline.data.datasets[0].data = acSeries;
+      energyCharts.sparkline.update('none');
+    } else {
+      energyCharts.sparkline = new Chart($('sparklineChart'), {
+        type: 'line', data: { datasets: [{ data: acSeries, borderColor: cssVar('--amber'), borderWidth: 1.2, fill: true, backgroundColor: 'oklch(66% .15 70 / .08)', pointRadius: 0, tension: 0.3 }] },
+        options: { responsive: true, maintainAspectRatio: false, animation: { duration: 0 },
+          plugins: { legend: { display: false }, tooltip: { enabled: false } },
+          scales: { x: { display: false, type: 'time' }, y: { display: false } } },
+      });
+    }
+  }
+}
+
+/* ── compact forecast meta (side panel) ────────────────── */
+function renderCompactForecastMeta(forecast, status){
+  const el = $('forecastMeta');
+  if (!el) return;
+  const rows = [];
+  if (forecast?.computedAt) rows.push(`<div class="row"><span class="k">${t('card.method.computed')}</span><span class="v">${relativeTime(forecast.computedAt)}</span></div>`);
+  if (status?.nextRunAt) rows.push(`<div class="row"><span class="k">${t('card.method.next')}</span><span class="v">${relativeTime(status.nextRunAt)}</span></div>`);
+  if (forecast?.model) rows.push(`<div class="row"><span class="k">${t('card.method.model')}</span><span class="v">${modelLabel(forecast.model)}</span></div>`);
+  el.innerHTML = rows.join('');
+  setPill('predPill', lifecyclePillText(status?.lifecycle), pillKindFromLifecycle(status?.lifecycle));
+}
+
+/* ── ledger summary (side panel) ──────────────────────── */
+function renderLedgerSummary(txPayload, chainStatus, bcStatus){
+  const c = txPayload?.counts || { total: 0 };
+  setText('ledgerAnchored24', String(c.total ?? 0));
+  const height = chainStatus?.latestBlock?.height;
+  setText('ledgerBlockHeight', height != null ? String(height) : '--');
+  const relayOk = bcStatus?.lifecycle === 'idle' || bcStatus?.lifecycle === 'running';
+  const relayEl = $('ledgerRelayStatus');
+  if (relayEl) relayEl.innerHTML = relayOk ? `<span class="pill ok" style="font-size:10px">${t('pill.live')}</span>` : `<span class="pill warn" style="font-size:10px">${t('pill.offline')}</span>`;
+  setPill('bcPill', lifecyclePillText(bcStatus?.lifecycle), pillKindFromLifecycle(bcStatus?.lifecycle));
+}
+
+/* ── alerts feed (unified) ─────────────────────────────── */
+function renderAlerts(anomalies, quality, sla, bcStatus){
+  const items = [];
+  if (anomalies?.length) {
+    for (const a of anomalies.slice(0, 5)) {
+      items.push({ time: a.detectedAt || a.timestamp, kind: 'anomaly', msg: a.description || a.metric || 'anomaly', severity: 'warn' });
+    }
+  }
+  const ageMin = quality?.input?.dataAgeMinutes;
+  const slaMin = slaWindowMinutes(sla);
+  if (ageMin != null && ageMin > slaMin) {
+    items.push({ time: Date.now()/1000, kind: 'stale', msg: t('alert.stale_data', { age: formatAge(ageMin) }), severity: 'err' });
+  }
+  if (bcStatus && bcStatus.lifecycle === 'error') {
+    items.push({ time: Date.now()/1000, kind: 'relay', msg: t('alert.relay_error'), severity: 'err' });
+  }
+  items.sort((a,b) => (b.time||0) - (a.time||0));
+  const el = $('alertList');
+  if (!el) return;
+  if (!items.length) {
+    el.innerHTML = `<div class="row" style="color:var(--muted)">${t('alert.none')}</div>`;
+    setPill('alertPill', t('pill.ok_label'), 'ok');
+    return;
+  }
+  setPill('alertPill', String(items.length), items.some(i => i.severity === 'err') ? 'err' : 'warn');
+  el.innerHTML = items.slice(0, 8).map(i => {
+    const ts = i.time ? `<span class="k">${ageBrief(i.time)}</span>` : '';
+    const kindCls = i.kind === 'anomaly' ? 'warn' : i.kind === 'relay' ? 'relay' : 'err';
+    return `<div class="row">${ts}<span class="pill ${kindCls}" style="font-size:10px;padding:1px 5px">${escapeHtml(i.kind)}</span><span class="v" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(i.msg)}</span></div>`;
+  }).join('');
+}
+
 /* ── forecast chart + rationale ────────────────────────── */
 function renderForecast(forecast){
   const points = forecast?.points || [];
@@ -2035,7 +2289,8 @@ function renderForecast(forecast){
   const headline = hasMeta
     ? `${forecast?.source || '--'} · ${chartState.label || forecast?.metric || '--'}${chartState.unit ? ` · ${chartState.unit}` : ''}`
     : 'no forecast loaded';
-  setText('signalMeta', headline);
+  const signalMetaEl = $('signalMeta');
+  if (signalMetaEl) setText('signalMeta', headline);
 
   const emptyEl = $('forecastEmptyState');
   if (!points.length){
@@ -2198,6 +2453,7 @@ function renderRationale(forecast, status){
 
 /* ── input data state + anomalies ──────────────────────── */
 function renderQuality(quality, sla){
+  if (!$('qualityList')) return;
   const pill = qualityPillFor(quality, sla);
   setPill('qualityPill', pill.text, pill.kind);
 
@@ -2280,6 +2536,7 @@ function stationLabel(code){
 }
 
 function renderAnomalies(anomalies){
+  if (!$('anomalyList')) return;
   const data = anomalies?.data || [];
   const allWithAnomalies = data.filter(row => (row.anomalies?.length || 0) > 0);
   const flagged = allWithAnomalies.filter(row =>
@@ -2403,6 +2660,7 @@ function eventKindLabel(name){
 }
 
 function renderLedger(txPayload){
+  if (!$('txList')) return;
   const data = txPayload?.data || [];
   const c = txPayload?.counts || counts.tx;
   counts.tx = c;
@@ -2448,7 +2706,7 @@ function renderLedger(txPayload){
   /* per-tx list */
   if (!data.length){
     setHtml('txList', `<li class="empty">${t('ledger.no_entries')}</li>`);
-    syncOverviewPairHeaders();
+    
     return;
   }
   const items = data.slice(0, 5).map(tx => {
@@ -2472,7 +2730,7 @@ function renderLedger(txPayload){
     </li>`;
   });
   setHtml('txList', items.join(''));
-  syncOverviewPairHeaders();
+  
 }
 
 function stealthTxUrl(txId){
@@ -2483,6 +2741,7 @@ function stealthBlockUrl(hash){
 }
 
 function renderProof(decode, eventLatest){
+  if (!$('proofPanel')) return;
   const proof = decode || {};
   const event = eventLatest || {};
   const value = proof.value ?? event.value;
@@ -2578,11 +2837,11 @@ function buildPicker(targets){
     if (cur) cur.classList.add('active');
   }
   pickerBuilt = true;
-  syncOverviewPairHeaders();
+  
 }
 
 function setMetricLoading(on){
-  $('cardSignal')?.classList.toggle('loading', on);
+  $('cardForecastCompact')?.classList.toggle('loading', on);
   $('cardQuality')?.classList.toggle('loading', on);
 }
 
@@ -2608,23 +2867,23 @@ async function fetchMetricForecast(source, metric){
 }
 
 function rerenderTiles(){
-  renderSourceTile(snap.forecast, snap.quality, snap.predictionStatus);
-  renderPredictionTile(snap.predictionStatus, snap.forecast);
-  renderBlockchainTile(snap.blockchainStatus, snap.tx);
-  renderStealthTile(snap.chainStatus, snap.blocks, snap.feeless);
+  renderProductionTile();
+  renderStorageTile();
+  renderGridTile();
+  renderHealthTile(snap.predictionStatus, snap.blockchainStatus, snap.chainStatus, snap.quality, snap.sla);
 }
 
 function rerenderSignal(){
   if (snap.forecast) renderForecast(snap.forecast);
-  renderRationale(snap.forecast, snap.predictionStatus);
+  renderCompactForecastMeta(snap.forecast, snap.predictionStatus);
 }
 
 function rerenderSide(){
-  if (snap.quality) renderQuality(snap.quality, snap.sla);
-  if (snap.anomalies) renderAnomalies(snap.anomalies);
+  renderAlerts(snap.anomalies, snap.quality, snap.sla, snap.blockchainStatus);
 }
 
 function rerenderLedger(){
+  renderLedgerSummary(snap.tx, snap.chainStatus, snap.blockchainStatus);
   if (snap.tx) renderLedger(snap.tx);
   renderProof(snap.decode, snap.eventLatest);
 }
@@ -2649,13 +2908,13 @@ function ingest(type, raw){
     case 'prediction.status':
       snap.predictionStatus = payload;
       buildPicker(payload?.targets);
-      if (fresh) flashCard('cardSignal');
+      if (fresh) flashCard('cardForecastCompact');
       if (fresh && activeTarget) fetchMetricForecast(activeTarget.source, activeTarget.metric);
       rerenderTiles(); rerenderSignal(); break;
     case 'prediction.forecast':
       if (!matchesActive(payload)) break;
       snap.forecast = payload;
-      if (fresh) flashCard('cardSignal');
+      if (fresh) flashCard('cardForecastCompact');
       rerenderTiles(); rerenderSignal(); break;
     case 'prediction.data_quality':
       if (!matchesActive(payload)) break;
@@ -2672,11 +2931,11 @@ function ingest(type, raw){
       rerenderSide(); break;
     case 'blockchain.status':
       snap.blockchainStatus = payload;
-      if (fresh) flashCard('cardLedger');
+      if (fresh) flashCard('cardLedgerSummary');
       rerenderTiles(); break;
     case 'blockchain.tx':
       snap.tx = payload;
-      if (fresh) flashCard('cardLedger');
+      if (fresh) flashCard('cardLedgerSummary');
       rerenderTiles(); rerenderLedger(); break;
     case 'blockchain.block':
       snap.blocks = payload;
@@ -2689,14 +2948,14 @@ function ingest(type, raw){
       rerenderTiles(); break;
     case 'blockchain.decode':
       snap.decode = payload;
-      if (fresh) flashCard('cardLedger');
+      if (fresh) flashCard('cardLedgerSummary');
       rerenderLedger(); break;
     case 'blockchain.event': {
       const data = payload?.data || [];
       const latest = data[0] || null;
       const previousId = snap.eventLatest?.id;
       snap.eventLatest = latest;
-      if (latest && latest.id !== previousId) flashCard('cardLedger');
+      if (latest && latest.id !== previousId) flashCard('cardLedgerSummary');
       rerenderLedger(); break;
     }
   }
@@ -2930,7 +3189,7 @@ function applyTab(name) {
     refreshChain();
   }
   if (name === 'overview') {
-    syncOverviewPairHeaders();
+    
   }
 }
 
@@ -3390,16 +3649,10 @@ setInterval(refreshSoiling, 60_000);
 // Apply initial tab from URL hash; defaults to overview.
 applyTab(location.hash.slice(1) || 'overview');
 
-(function wireOverviewHeaderSync(){
-  const sh = document.querySelector('#cardSignal > header.head');
-  const lh = document.querySelector('#cardLedger > header.head');
-  if (!sh || !lh) return;
-  const ro = new ResizeObserver(() => syncOverviewPairHeaders());
-  ro.observe(sh);
-  ro.observe(lh);
-  window.addEventListener('resize', () => syncOverviewPairHeaders());
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => syncOverviewPairHeaders());
-})();
+// Wire energy data loading on startup
+loadLiveEnergy();
+setInterval(loadLiveEnergy, 60_000);
+$('openChainTab')?.addEventListener('click', (e) => { e.preventDefault(); applyTab('chain'); });
 </script>
 </body>
 </html>

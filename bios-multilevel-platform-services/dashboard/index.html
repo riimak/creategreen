@@ -281,7 +281,6 @@ main{
 .env-row{
   grid-area:env;display:flex;align-items:stretch;gap:0;padding:0;overflow:hidden;
 }
-.env-row[hidden]{display:none}
 .env-row .env-stats{
   display:flex;gap:1px;background:var(--border);width:100%;border-radius:0;
 }
@@ -290,6 +289,10 @@ main{
 }
 .env-row .env-stats .env-stat .env-value{font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
 .env-row .env-stats .env-stat .env-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;font-weight:500}
+.env-row .env-stats .env-stale{
+  width:100%;padding:4px 14px;font-size:10.5px;color:var(--subtle);font-style:italic;
+  background:var(--inset);border-top:1px solid var(--border);text-align:center;
+}
 
 /* ── plant breakdown (inside energy card) ──────────────── */
 .energy-card .plant-breakdown{
@@ -791,9 +794,14 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
     <div class="plant-breakdown" id="plantBreakdown"></div>
   </section>
 
-  <!-- ── Environment row (meteo context) ─────────────────── -->
-  <section class="card env-row" id="cardEnvironment" hidden aria-label="Environment">
-    <div class="env-stats" id="envStats"></div>
+  <!-- ── Environment row (meteo context — always visible) ── -->
+  <section class="card env-row" id="cardEnvironment" aria-label="Environment">
+    <div class="env-stats" id="envStats">
+      <div class="env-stat"><span class="env-value">--</span><span class="env-label">Temperatura</span></div>
+      <div class="env-stat"><span class="env-value">--</span><span class="env-label">Zračenje</span></div>
+      <div class="env-stat"><span class="env-value">--</span><span class="env-label">Vlažnost</span></div>
+      <div class="env-stat"><span class="env-value">--</span><span class="env-label">Kvaliteta zraka</span></div>
+    </div>
   </section>
 
   <!-- ── Power chart card ────────────────────────────────── -->
@@ -1203,6 +1211,8 @@ const I18N = {
     'env.radiation':        'Sunčevo zračenje',
     'env.humidity':         'Vlažnost',
     'env.aqi':              'Kvaliteta zraka',
+    'env.no_data':          'Meteo stanice ne šalju podatke',
+    'env.stale':            'Zadnji podaci primljeni prije {age}',
     'pill.degraded':        'degradirano',
     'pill.partial':         'djelomično',
     'pill.ok_label':        'OK',
@@ -1514,6 +1524,8 @@ const I18N = {
     'env.radiation':        'Solar radiation',
     'env.humidity':         'Humidity',
     'env.aqi':              'Air quality',
+    'env.no_data':          'Meteo stations not reporting',
+    'env.stale':            'Last data received {age} ago',
     'pill.degraded':        'degraded',
     'pill.partial':         'partial',
     'pill.ok_label':        'OK',
@@ -2391,21 +2403,33 @@ function renderPowerChart(series){
   }
 }
 
-/* ── environment row (meteo data) ──────────────────────── */
+/* ── environment row (meteo data — always visible) ─────── */
 function renderEnvironment(){
   const el = $('envStats');
   if (!el) return;
-  const stats = [];
-  if (meteoSnap.temp !== null) stats.push({ value: `${Number(meteoSnap.temp).toFixed(1)}°C`, label: t('env.temperature') });
-  if (meteoSnap.radiation !== null) stats.push({ value: `${Number(meteoSnap.radiation).toFixed(0)} W/m²`, label: t('env.radiation') });
-  if (meteoSnap.humidity !== null) stats.push({ value: `${Number(meteoSnap.humidity).toFixed(0)}%`, label: t('env.humidity') });
-  if (meteoSnap.aqi !== null) stats.push({ value: `${Number(meteoSnap.aqi).toFixed(0)}`, label: t('env.aqi') });
-  if (!stats.length) {
-    $('cardEnvironment').hidden = true;
-    return;
-  }
   $('cardEnvironment').hidden = false;
-  el.innerHTML = stats.map(s => `<div class="env-stat"><span class="env-value">${s.value}</span><span class="env-label">${s.label}</span></div>`).join('');
+
+  const staleThresholdH = 72;
+  const isStale = meteoSnap.lastTs && ((Date.now()/1000 - meteoSnap.lastTs) > staleThresholdH * 3600);
+  const noData = meteoSnap.temp === null && meteoSnap.radiation === null && meteoSnap.humidity === null && meteoSnap.aqi === null;
+
+  const stats = [
+    { value: meteoSnap.temp !== null ? `${Number(meteoSnap.temp).toFixed(1)}\u00B0C` : '--', label: t('env.temperature') },
+    { value: meteoSnap.radiation !== null ? `${Number(meteoSnap.radiation).toFixed(0)} W/m\u00B2` : '--', label: t('env.radiation') },
+    { value: meteoSnap.humidity !== null ? `${Number(meteoSnap.humidity).toFixed(0)}%` : '--', label: t('env.humidity') },
+    { value: meteoSnap.aqi !== null ? `${Number(meteoSnap.aqi).toFixed(0)}` : '--', label: t('env.aqi') },
+  ];
+
+  let footer = '';
+  if (noData) {
+    footer = `<div class="env-stale">${t('env.no_data')}</div>`;
+  } else if (isStale) {
+    footer = `<div class="env-stale">${t('env.stale', { age: ageBrief(meteoSnap.lastTs) })}</div>`;
+  }
+
+  el.innerHTML = stats.map(s =>
+    `<div class="env-stat"><span class="env-value">${s.value}</span><span class="env-label">${s.label}</span></div>`
+  ).join('') + footer;
 }
 
 /* ── per-plant breakdown ───────────────────────────────── */

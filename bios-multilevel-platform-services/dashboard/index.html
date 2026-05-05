@@ -738,6 +738,16 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
 .meas-chart-body .chart-empty[hidden]{display:none}
 
 /* Toolbar tool buttons (graph/export) — subtle icon+label */
+/* ── status legend (shown in alerts card when no alerts) ── */
+.status-legend{
+  display:grid;grid-template-columns:1fr 1fr;gap:2px 16px;font-size:10.5px;color:var(--muted);
+}
+.status-legend .legend-section{grid-column:1/-1;margin-top:6px}
+.status-legend .legend-section:first-child{margin-top:0}
+.status-legend .legend-cat{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--subtle)}
+.status-legend .legend-row{display:flex;align-items:center;gap:6px;padding:1px 0}
+.status-legend .legend-row .pill{flex-shrink:0;min-width:70px;justify-content:center;font-size:9.5px;padding:1px 5px}
+
 .meas-tools{display:flex;gap:6px;align-items:center}
 .meas-tools .tool-btn{
   display:inline-flex;align-items:center;gap:5px;
@@ -878,9 +888,14 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
       <a href="#" id="openChainTab" style="font-size:11.5px;color:var(--accent);margin-top:6px;display:inline-block" data-i18n="ledger.open_full">Open full audit →</a>
     </section>
 
-    <section class="card flex-fill" id="cardAlerts" aria-label="Alerts">
+    <section class="card" id="cardAlerts" aria-label="Alerts">
       <div class="head"><h2 data-i18n="card.alerts.title">Alerts</h2><span id="alertPill" class="pill" data-i18n="pill.checking">checking</span></div>
       <div class="list" id="alertList"><div class="skeleton" data-i18n="skeleton.first_scan">awaiting first scan</div></div>
+    </section>
+
+    <section class="card" id="cardLegend" aria-label="Legend">
+      <div class="head"><h2 data-i18n="legend.title">Legenda</h2></div>
+      <div class="status-legend" id="legendContent"></div>
     </section>
   </div>
 </section><!-- /viewOverview -->
@@ -1268,23 +1283,68 @@ const I18N = {
     'card.power.ac_output': 'AC izlaz (kW)',
     'card.power.grid_flow': 'Mreža (kW)',
     'card.method.model':    'Model',
-    'card.ledger_summary.title':'Revizija',
+    'card.ledger_summary.title':'Lanac',
     'card.alerts.title':    'Upozorenja',
     'ledger.anchored_24h':  'Zapisano 24h',
     'ledger.block_height':  'Visina bloka',
-    'ledger.relay_status':  'Relej',
-    'ledger.open_full':     'Otvori punu reviziju →',
+    'ledger.relay_status':  'Zapisivanje',
+    'ledger.open_full':     'Otvori Lanac →',
     'alert.stale_data':     'Podaci stari {age}',
     'alert.relay_error':    'Greška releja za zapis',
     'alert.none':           'Nema upozorenja',
+    'legend.title':         'Značenje statusa',
+    'legend.cat_solar':     'Proizvodnja',
+    'legend.cat_grid':      'Mreža',
+    'legend.cat_services':  'Sustav',
+    'legend.cat_predictions':'Predikcije',
+    'legend.cat_chain':     'Lanac',
+    'legend.live':          'Elektrana proizvodi, podaci stižu redovito',
+    'legend.stale':         'Podaci stariji od 15 min — noć/mirovanje/bez veze',
+    'legend.no_data_yet':   'Još nema podataka s ove elektrane',
+    'legend.export':        'Višak energije ide u mrežu',
+    'legend.import':        'Elektrana troši iz mreže',
+    'legend.balanced':      'Razmjena s mrežom blizu nule',
+    'legend.all_services':  'Svi servisi rade normalno',
+    'legend.partial_service':'Jedan servis ograničen ili u kašnjenju',
+    'legend.offline':       'Više servisa ne radi',
+    'legend.pred_ok':       'Prognoza uspješno izračunata',
+    'legend.pred_running':  'Izračun prognoze u tijeku',
+    'legend.pred_error':    'Prognoza nije uspjela',
+    'legend.chain_ok':      'Podaci se zapisuju na lanac',
+    'legend.chain_demo':    'Demo način — simulacija bez zapisa na pravi lanac',
+    'legend.chain_off':     'Zapisivanje na lanac neaktivno ili nema vezu',
     'env.temperature':      'Temperatura',
     'env.radiation':        'Sunčevo zračenje',
     'env.humidity':         'Vlažnost',
     'env.aqi':              'Kvaliteta zraka',
     'env.no_data':          'Meteo stanice ne šalju podatke',
     'env.stale':            'Zadnji podaci primljeni prije {age}',
-    'pill.degraded':        'degradirano',
+    'pill.degraded':        'ograničeno',
     'pill.partial':         'djelomično',
+    'pill.stale':           'zastario',
+
+    // contextual pill labels (self-explanatory per widget)
+    'cpill.producing':      'proizvodi {kW} kW',
+    'cpill.standby':        'mirovanje',
+    'cpill.awaiting_data':  'čeka podatke',
+    'cpill.export_kw':      'izvoz {kW} kW',
+    'cpill.import_kw':      'uvoz {kW} kW',
+    'cpill.balanced':       '~0 kW',
+    'cpill.no_data':        'nema podataka',
+    'cpill.all_ok':         'sve radi',
+    'cpill.one_limited':    '1 servis ograničen',
+    'cpill.n_down':         '{n} servisa ne rade',
+    'cpill.computing':      'računam...',
+    'cpill.computed_ago':   'izračunato {age}',
+    'cpill.ready':          'spremno',
+    'cpill.error':          'greška',
+    'cpill.waiting_first':  'čekam prvi ciklus',
+    'cpill.relay_active':   'zapisuje',
+    'cpill.relay_starting': 'pokretanje...',
+    'cpill.relay_offline':  'ne zapisuje',
+    'cpill.relay_demo':     'demo način',
+    'cpill.no_alerts':      'nema upozorenja',
+    'cpill.n_alerts':       '{n} upozorenja',
     'pill.ok_label':        'OK',
     'card.forecast.title':  'Predikcija',
     'card.forecast.empty':  'metrika nije učitana',
@@ -1591,15 +1651,36 @@ const I18N = {
     'card.power.ac_output': 'AC output (kW)',
     'card.power.grid_flow': 'Grid (kW)',
     'card.method.model':    'Model',
-    'card.ledger_summary.title':'Audit',
+    'card.ledger_summary.title':'Chain',
     'card.alerts.title':    'Alerts',
     'ledger.anchored_24h':  'Anchored 24h',
     'ledger.block_height':  'Block height',
     'ledger.relay_status':  'Relay',
-    'ledger.open_full':     'Open full audit \u2192',
+    'ledger.open_full':     'Open Chain tab \u2192',
     'alert.stale_data':     'Data stale for {age}',
     'alert.relay_error':    'Blockchain relay error',
     'alert.none':           'No alerts',
+    'legend.title':         'Status legend',
+    'legend.cat_solar':     'Production',
+    'legend.cat_grid':      'Grid',
+    'legend.cat_services':  'System',
+    'legend.cat_predictions':'Predictions',
+    'legend.cat_chain':     'Blockchain',
+    'legend.live':          'Plant producing, data arriving regularly',
+    'legend.stale':         'Data older than 15 min — night/standby/connection lost',
+    'legend.no_data_yet':   'No data received from this plant yet',
+    'legend.export':        'Surplus energy fed to grid',
+    'legend.import':        'Plant consuming from grid',
+    'legend.balanced':      'Grid exchange near zero',
+    'legend.all_services':  'All services running normally',
+    'legend.partial_service':'One service limited or delayed',
+    'legend.offline':       'Multiple services down',
+    'legend.pred_ok':       'Forecast computed successfully',
+    'legend.pred_running':  'Forecast computation in progress',
+    'legend.pred_error':    'Forecast failed',
+    'legend.chain_ok':      'Blockchain relay anchoring normally',
+    'legend.chain_demo':    'Demo mode — not writing to real chain',
+    'legend.chain_off':     'Relay inactive or disconnected',
     'env.temperature':      'Temperature',
     'env.radiation':        'Solar radiation',
     'env.humidity':         'Humidity',
@@ -1608,6 +1689,30 @@ const I18N = {
     'env.stale':            'Last data received {age} ago',
     'pill.degraded':        'degraded',
     'pill.partial':         'partial',
+    'pill.stale':           'stale',
+
+    // contextual pill labels
+    'cpill.producing':      'producing {kW} kW',
+    'cpill.standby':        'standby',
+    'cpill.awaiting_data':  'awaiting data',
+    'cpill.export_kw':      'export {kW} kW',
+    'cpill.import_kw':      'import {kW} kW',
+    'cpill.balanced':       '~0 kW',
+    'cpill.no_data':        'no data',
+    'cpill.all_ok':         'all systems go',
+    'cpill.one_limited':    '1 service limited',
+    'cpill.n_down':         '{n} services down',
+    'cpill.computing':      'computing...',
+    'cpill.computed_ago':   'computed {age}',
+    'cpill.ready':          'ready',
+    'cpill.error':          'error',
+    'cpill.waiting_first':  'awaiting first cycle',
+    'cpill.relay_active':   'relay active',
+    'cpill.relay_starting': 'starting...',
+    'cpill.relay_offline':  'relay offline',
+    'cpill.relay_demo':     'demo mode',
+    'cpill.no_alerts':      'no alerts',
+    'cpill.n_alerts':       '{n} alerts',
     'pill.ok_label':        'OK',
     // old tile keys kept for compatibility
     'tile.source.label':    'Source data',
@@ -1844,6 +1949,7 @@ function setLanguage(lang) {
   currentLang = lang;
   try { localStorage.setItem('bios.lang', lang); } catch {}
   applyStaticTranslations();
+  renderLegend();
   // Rebuild metric picker labels (friendly names depend on lang)
   pickerBuilt = false;
   if (snap.predictionStatus?.targets) buildPicker(snap.predictionStatus.targets);
@@ -2188,21 +2294,30 @@ function renderStealthTile(chainStatus, blocks, feeless){
 }
 
 /* ── energy tile renderers (production / storage / grid / health) ── */
-let energySnap = { ac: null, daily: null, grid: null, soc: null, battPower: null, toGrid: null, fromGrid: null, lastTs: null };
+let energySnap = { ac: null, daily: null, monthly: null, grid: null, soc: null, battPower: null, toGrid: null, fromGrid: null, lastTs: null };
 
 function renderProductionTile(){
   const ac = energySnap.ac;
   const daily = energySnap.daily;
   if (ac === null && daily === null) return;
-  const pillKind = ac !== null ? 'ok' : '';
-  const pillText = ac !== null ? t('pill.live') : t('pill.awaiting');
-  setPill('prodPill', pillText, pillKind);
+  const ageSeconds = energySnap.lastTs ? Math.max(0, (Date.now()/1000) - energySnap.lastTs) : null;
+  const staleThreshold = 15 * 60;
+  const isStale = ageSeconds !== null && ageSeconds > staleThreshold;
+  if (ac !== null && !isStale) {
+    setPill('prodPill', t('cpill.producing', { kW: Number(ac).toFixed(1) }), 'ok');
+  } else if (ac !== null && isStale) {
+    setPill('prodPill', t('cpill.standby'), 'warn');
+  } else {
+    setPill('prodPill', t('cpill.awaiting_data'), '');
+  }
   const m1 = [];
   if (ac !== null) m1.push(`<span><b>${Number(ac).toFixed(2)} kW</b></span>`);
   if (daily !== null) m1.push(`<span>${t('tile.production.today', { kWh: Number(daily).toFixed(1) })}</span>`);
   setHtml('prodMeta1', m1.join('') || '--');
   const m2 = [];
-  if (energySnap.lastTs) m2.push(`<span>${t('source.last_reading', { age: `<b>${ageBrief(energySnap.lastTs)}</b>` })}</span>`);
+  if (isStale && energySnap.lastTs) {
+    m2.push(`<span>${t('source.last_reading', { age: `<b>${ageBrief(energySnap.lastTs)}</b>` })}</span>`);
+  }
   setHtml('prodMeta2', m2.join(''));
 }
 
@@ -2231,12 +2346,16 @@ function renderGridTile(){
   const grid = energySnap.grid;
   const toG = energySnap.toGrid;
   const fromG = energySnap.fromGrid;
-  if (grid === null) { setHtml('gridMeta1', `<span class="muted">${t('tile.grid.unavailable')}</span>`); return; }
+  if (grid === null) {
+    setPill('gridPill', t('cpill.no_data'), '');
+    setHtml('gridMeta1', `<span class="muted">${t('tile.grid.unavailable')}</span>`);
+    return;
+  }
   const exporting = grid < -0.05;
   const importing = grid > 0.05;
-  const pillKind = exporting ? 'ok' : importing ? 'info' : '';
-  const pillText = exporting ? t('tile.grid.export') : importing ? t('tile.grid.import') : t('tile.grid.balanced');
-  setPill('gridPill', pillText, pillKind);
+  if (exporting) setPill('gridPill', t('cpill.export_kw', { kW: Math.abs(grid).toFixed(1) }), 'ok');
+  else if (importing) setPill('gridPill', t('cpill.import_kw', { kW: Math.abs(grid).toFixed(1) }), 'info');
+  else setPill('gridPill', t('cpill.balanced'), '');
   const m1 = [];
   m1.push(`<span><b>${Math.abs(grid).toFixed(2)} kW</b> ${exporting ? '\u2192' : importing ? '\u2190' : '='}</span>`);
   setHtml('gridMeta1', m1.join(''));
@@ -2251,22 +2370,18 @@ function renderHealthTile(predStatus, bcStatus, chainStatus, quality, sla){
   const slaMin = slaWindowMinutes(sla);
   const dataOk = ageMin != null && ageMin <= slaMin;
   const predOk = predStatus?.lifecycle === 'idle' || predStatus?.lifecycle === 'running';
-  const bcOk = bcStatus?.lifecycle === 'idle' || bcStatus?.lifecycle === 'running';
-  const chainOk = chainStatus?.ok !== false;
-  const checks = [dataOk, predOk, bcOk, chainOk];
-  const allOk = checks.every(Boolean);
-  const anyErr = checks.filter(c => !c).length >= 2;
-  const pillKind = allOk ? 'ok' : anyErr ? 'err' : 'warn';
-  const pillText = allOk ? t('pill.live') : anyErr ? t('pill.degraded') : t('pill.partial');
-  setPill('healthPill', pillText, pillKind);
+  const chainOk = (bcStatus?.lifecycle === 'idle' || bcStatus?.lifecycle === 'running') && chainStatus?.ok !== false;
+  const checks = [dataOk, predOk, chainOk];
+  const failCount = checks.filter(c => !c).length;
+  if (failCount === 0) setPill('healthPill', t('cpill.all_ok'), 'ok');
+  else if (failCount === 1) setPill('healthPill', t('cpill.one_limited'), 'warn');
+  else setPill('healthPill', t('cpill.n_down', { n: failCount }), 'err');
   const m1 = [];
   m1.push(`<span>${t('tile.health.data')}: ${dataOk ? '\u2713' : '\u2717'}</span>`);
   m1.push(`<span>${t('tile.health.forecast')}: ${predOk ? '\u2713' : '\u2717'}</span>`);
   m1.push(`<span>${t('tile.health.chain')}: ${chainOk ? '\u2713' : '\u2717'}</span>`);
   setHtml('healthMeta1', m1.join(' '));
-  const m2 = [];
-  if (ageMin != null) m2.push(`<span>${t('source.last_reading', { age: `<b>${ageBrief(energySnap.lastTs || (Date.now()/1000 - ageMin*60))}</b>` })}</span>`);
-  setHtml('healthMeta2', m2.join(''));
+  setHtml('healthMeta2', '');
 }
 
 /* ── live energy data loading (multi-plant) ───────────────── */
@@ -2394,6 +2509,29 @@ async function loadLiveEnergy(){
     energySnap.fromGrid = totalFromGrid || null;
     energySnap.lastTs = latestTs || null;
 
+    // Monthly yield: fetch 30d of cumulative energy counter (just first+last point per station)
+    try {
+      const monthResults = await Promise.allSettled(
+        solarPlants.map(p =>
+          fetch(`/prediction/measurements?source=${encodeURIComponent(p.source)}&hours=720&metric=Inverter_AC_energy_out_daily&limit=1&sort=timestamp&sortDir=asc`)
+            .then(r => r.json()).then(payload => {
+              const oldest = payload?.data?.[0];
+              if (!oldest || oldest.value === null) return null;
+              const { latest: lat } = processStationRows(p.data);
+              const latestVal = lat['Inverter_AC_energy_out_daily']?.v;
+              if (latestVal === null || latestVal === undefined) return null;
+              return latestVal - oldest.value;
+            })
+        )
+      );
+      let totalMonthly = 0;
+      let hasAny = false;
+      for (const r of monthResults) {
+        if (r.status === 'fulfilled' && r.value !== null && r.value > 0) { totalMonthly += r.value; hasAny = true; }
+      }
+      energySnap.monthly = hasAny ? totalMonthly : null;
+    } catch { energySnap.monthly = null; }
+
     // Process meteo stations
     for (const station of meteoStations) {
       const { latest } = processStationRows(station.data);
@@ -2419,9 +2557,13 @@ function renderEnergyHero(){
   const ac = energySnap.ac;
   const el = $('heroValue');
   if (el) el.textContent = ac !== null ? Number(ac).toFixed(2) : '--';
-  setPill('heroPill', ac !== null ? t('pill.live') : t('pill.awaiting'), ac !== null ? 'ok' : '');
+  const ageS = energySnap.lastTs ? Math.max(0, (Date.now()/1000) - energySnap.lastTs) : null;
+  const heroStale = ageS !== null && ageS > 15*60;
+  if (ac !== null && !heroStale) setPill('heroPill', t('cpill.producing', { kW: Number(ac).toFixed(1) }), 'ok');
+  else if (ac !== null && heroStale) setPill('heroPill', t('cpill.standby'), 'warn');
+  else setPill('heroPill', t('cpill.awaiting_data'), '');
   setText('statToday', energySnap.daily !== null ? Number(energySnap.daily).toFixed(1) : '--');
-  setText('statMonth', '--');
+  setText('statMonth', energySnap.monthly !== null ? Number(energySnap.monthly).toFixed(0) : '--');
   setText('statGrid', energySnap.grid !== null ? Number(energySnap.grid).toFixed(2) : '--');
   setText('statSOC', energySnap.soc !== null ? `${Number(energySnap.soc).toFixed(0)}` : '--');
 }
@@ -2535,7 +2677,13 @@ function renderCompactForecastMeta(forecast, status){
   if (status?.nextRunAt) rows.push(`<div class="row"><span class="k">${t('card.method.next')}</span><span class="v">${relativeTime(status.nextRunAt)}</span></div>`);
   if (forecast?.model) rows.push(`<div class="row"><span class="k">${t('card.method.model')}</span><span class="v">${modelLabel(forecast.model)}</span></div>`);
   el.innerHTML = rows.join('');
-  setPill('predPill', lifecyclePillText(status?.lifecycle), pillKindFromLifecycle(status?.lifecycle));
+  const lc = status?.lifecycle;
+  if (lc === 'running') setPill('predPill', t('cpill.computing'), 'info');
+  else if (lc === 'idle' || lc === 'ready') {
+    const ago = forecast?.computedAt ? ageBrief(forecast.computedAt) : '';
+    setPill('predPill', ago ? t('cpill.computed_ago', { age: ago }) : t('cpill.ready'), 'ok');
+  } else if (lc === 'failed' || lc === 'degraded') setPill('predPill', t('cpill.error'), 'err');
+  else setPill('predPill', t('cpill.waiting_first'), '');
 }
 
 /* ── ledger summary (side panel) ──────────────────────── */
@@ -2545,9 +2693,47 @@ function renderLedgerSummary(txPayload, chainStatus, bcStatus){
   const height = chainStatus?.latestBlock?.height;
   setText('ledgerBlockHeight', height != null ? String(height) : '--');
   const relayOk = bcStatus?.lifecycle === 'idle' || bcStatus?.lifecycle === 'running';
+  const isMock = chainStatus?.relayMode === 'mock';
   const relayEl = $('ledgerRelayStatus');
-  if (relayEl) relayEl.innerHTML = relayOk ? `<span class="pill ok" style="font-size:10px">${t('pill.live')}</span>` : `<span class="pill warn" style="font-size:10px">${t('pill.offline')}</span>`;
-  setPill('bcPill', lifecyclePillText(bcStatus?.lifecycle), pillKindFromLifecycle(bcStatus?.lifecycle));
+  if (relayEl) {
+    if (relayOk) relayEl.innerHTML = `<span class="pill ok" style="font-size:10px">${t('cpill.relay_active')}</span>`;
+    else if (isMock) relayEl.innerHTML = `<span class="pill warn" style="font-size:10px">${t('cpill.relay_demo')}</span>`;
+    else relayEl.innerHTML = `<span class="pill err" style="font-size:10px">${t('cpill.relay_offline')}</span>`;
+  }
+  const lc = bcStatus?.lifecycle;
+  if (lc === 'idle' || lc === 'running') setPill('bcPill', t('cpill.relay_active'), 'ok');
+  else if (lc === 'initializing') setPill('bcPill', t('cpill.relay_starting'), 'warn');
+  else if (lc === 'failed' || lc === 'degraded') setPill('bcPill', t('cpill.relay_offline'), 'err');
+  else setPill('bcPill', t('cpill.relay_demo'), 'warn');
+}
+
+/* ── status legend card ─────────────────────────────────── */
+function renderLegend(){
+  const el = $('legendContent');
+  if (!el) return;
+  const ps = 'style="font-size:10px;padding:1px 6px"';
+  el.innerHTML = `
+    <div class="legend-section"><span class="legend-cat">${t('legend.cat_solar')}</span></div>
+    <div class="legend-row"><span class="pill ok" ${ps}>${t('cpill.producing',{kW:'X'})}</span><span>${t('legend.live')}</span></div>
+    <div class="legend-row"><span class="pill warn" ${ps}>${t('cpill.standby')}</span><span>${t('legend.stale')}</span></div>
+    <div class="legend-row"><span class="pill" ${ps}>${t('cpill.awaiting_data')}</span><span>${t('legend.no_data_yet')}</span></div>
+    <div class="legend-section"><span class="legend-cat">${t('legend.cat_grid')}</span></div>
+    <div class="legend-row"><span class="pill ok" ${ps}>${t('cpill.export_kw',{kW:'X'})}</span><span>${t('legend.export')}</span></div>
+    <div class="legend-row"><span class="pill info" ${ps}>${t('cpill.import_kw',{kW:'X'})}</span><span>${t('legend.import')}</span></div>
+    <div class="legend-row"><span class="pill" ${ps}>${t('cpill.balanced')}</span><span>${t('legend.balanced')}</span></div>
+    <div class="legend-section"><span class="legend-cat">${t('legend.cat_services')}</span></div>
+    <div class="legend-row"><span class="pill ok" ${ps}>${t('cpill.all_ok')}</span><span>${t('legend.all_services')}</span></div>
+    <div class="legend-row"><span class="pill warn" ${ps}>${t('cpill.one_limited')}</span><span>${t('legend.partial_service')}</span></div>
+    <div class="legend-row"><span class="pill err" ${ps}>${t('cpill.n_down',{n:2})}</span><span>${t('legend.offline')}</span></div>
+    <div class="legend-section"><span class="legend-cat">${t('legend.cat_predictions')}</span></div>
+    <div class="legend-row"><span class="pill ok" ${ps}>${t('cpill.computed_ago',{age:'Xm'})}</span><span>${t('legend.pred_ok')}</span></div>
+    <div class="legend-row"><span class="pill info" ${ps}>${t('cpill.computing')}</span><span>${t('legend.pred_running')}</span></div>
+    <div class="legend-row"><span class="pill err" ${ps}>${t('cpill.error')}</span><span>${t('legend.pred_error')}</span></div>
+    <div class="legend-section"><span class="legend-cat">${t('legend.cat_chain')}</span></div>
+    <div class="legend-row"><span class="pill ok" ${ps}>${t('cpill.relay_active')}</span><span>${t('legend.chain_ok')}</span></div>
+    <div class="legend-row"><span class="pill warn" ${ps}>${t('cpill.relay_demo')}</span><span>${t('legend.chain_demo')}</span></div>
+    <div class="legend-row"><span class="pill err" ${ps}>${t('cpill.relay_offline')}</span><span>${t('legend.chain_off')}</span></div>
+  `;
 }
 
 /* ── alerts feed (unified) ─────────────────────────────── */
@@ -2570,11 +2756,11 @@ function renderAlerts(anomalies, quality, sla, bcStatus){
   const el = $('alertList');
   if (!el) return;
   if (!items.length) {
+    setPill('alertPill', t('cpill.no_alerts'), 'ok');
     el.innerHTML = `<div class="row" style="color:var(--muted)">${t('alert.none')}</div>`;
-    setPill('alertPill', t('pill.ok_label'), 'ok');
     return;
   }
-  setPill('alertPill', String(items.length), items.some(i => i.severity === 'err') ? 'err' : 'warn');
+  setPill('alertPill', t('cpill.n_alerts', { n: items.length }), items.some(i => i.severity === 'err') ? 'err' : 'warn');
   el.innerHTML = items.slice(0, 8).map(i => {
     const ts = i.time ? `<span class="k">${ageBrief(i.time)}</span>` : '';
     const kindCls = i.kind === 'anomaly' ? 'warn' : i.kind === 'relay' ? 'relay' : 'err';
@@ -4126,6 +4312,7 @@ wirePager('chain', chainView.state, refreshChain);
 // Wire up language switcher and apply initial translations before any data
 // fetch starts so first paint is in the user's chosen language.
 applyStaticTranslations();
+renderLegend();
 document.querySelectorAll('[data-lang]').forEach(btn => {
   btn.addEventListener('click', () => setLanguage(btn.dataset.lang));
 });

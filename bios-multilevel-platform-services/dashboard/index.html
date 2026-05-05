@@ -713,6 +713,39 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
 .meas .station-status .chip{padding:3px 7px;border:1px solid var(--border);border-radius:999px;font-weight:600}
 .meas .station-status .chip.ok{color:oklch(36% .12 150);background:var(--green-soft);border-color:oklch(78% .08 150)}
 .meas .station-status .chip.bad{color:oklch(40% .14 25);background:var(--red-soft);border-color:oklch(80% .1 25)}
+
+/* Custom chart panel inside Mjerenja */
+.meas-chart-panel{
+  background:var(--card);border:1px solid var(--border);border-radius:8px;
+  margin:12px 18px 0;display:flex;flex-direction:column;min-height:280px;max-height:340px;overflow:hidden;
+}
+.meas-chart-panel[hidden]{display:none}
+.meas-chart-head{
+  display:flex;align-items:center;gap:12px;padding:8px 14px;border-bottom:1px solid var(--border);min-height:0;
+}
+.meas-chart-head .meas-chart-title{font-size:13px;font-weight:600}
+.meas-chart-head .meas-chart-info{font-size:11.5px;color:var(--muted);flex:1;font-variant-numeric:tabular-nums}
+.meas-chart-head .meas-chart-close{
+  background:transparent;border:0;font-size:20px;line-height:1;color:var(--muted);cursor:pointer;padding:2px 8px;border-radius:4px;
+}
+.meas-chart-head .meas-chart-close:hover{background:var(--inset);color:var(--text)}
+.meas-chart-body{flex:1;padding:8px 14px 14px;min-height:0;display:flex;position:relative}
+.meas-chart-body canvas{width:100%!important;height:100%!important;min-height:0;flex:1}
+.meas-chart-body .chart-empty{
+  position:absolute;inset:8px 14px 14px;display:flex;align-items:center;justify-content:center;
+  text-align:center;padding:12px;font-size:12.5px;color:var(--muted);background:var(--card);border-radius:8px;border:1px dashed var(--border);
+}
+.meas-chart-body .chart-empty[hidden]{display:none}
+
+/* Action buttons */
+.meas .actions button{
+  background:var(--card);border:1px solid var(--border);color:var(--text);
+  padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12.5px;font-weight:500;
+  transition:all .15s var(--ease);
+}
+.meas .actions button:hover{background:var(--inset);border-color:var(--border-strong)}
+.meas .actions button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.meas .actions button.primary:hover{filter:brightness(1.08)}
 </style>
 </head>
 <body>
@@ -887,6 +920,21 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
     <div class="actions">
       <button type="button" id="measRefresh" class="primary" data-i18n="meas.refresh">osvježi</button>
       <button type="button" id="measReset" data-i18n="meas.reset">poništi</button>
+      <button type="button" id="measExport" data-i18n="meas.export">izvoz CSV</button>
+      <button type="button" id="measChart" data-i18n="meas.show_chart">prikaži graf</button>
+    </div>
+  </div>
+
+  <!-- Custom chart panel (hidden by default, toggled by 'prikaži graf') -->
+  <div class="meas-chart-panel" id="measChartPanel" hidden>
+    <div class="meas-chart-head">
+      <span class="meas-chart-title" data-i18n="meas.chart_title">Graf trenutnih filtera</span>
+      <span class="meas-chart-info" id="measChartInfo"></span>
+      <button type="button" id="measChartClose" class="meas-chart-close" aria-label="Close">×</button>
+    </div>
+    <div class="meas-chart-body">
+      <div id="measChartEmpty" class="chart-empty" hidden></div>
+      <canvas id="measChartCanvas" role="img"></canvas>
     </div>
   </div>
 
@@ -1104,6 +1152,14 @@ const I18N = {
     'meas.filter.missing':  'samo s nedostajućim vrijednostima',
     'meas.refresh':         'osvježi',
     'meas.reset':           'poništi',
+    'meas.export':          'izvoz CSV',
+    'meas.exporting':       'preuzimam…',
+    'meas.export_failed':   'Izvoz nije uspio: {msg}',
+    'meas.show_chart':      'prikaži graf',
+    'meas.chart_title':     'Graf trenutnih filtera',
+    'meas.chart_empty':     'Nema podataka za prikaz s odabranim filterima.',
+    'meas.chart_failed':    'Učitavanje grafa nije uspjelo: {msg}',
+    'meas.chart_info':      '{n} točaka · {series} serija · zadnjih {hours}h',
     'meas.col.time':        'vrijeme',
     'meas.col.station':     'stanica',
     'meas.col.metric':      'metrika',
@@ -1429,6 +1485,14 @@ const I18N = {
     'meas.filter.search':   'search',
     'meas.filter.missing':  'missing only',
     'meas.refresh':         'refresh',
+    'meas.export':          'export CSV',
+    'meas.exporting':       'downloading\u2026',
+    'meas.export_failed':   'Export failed: {msg}',
+    'meas.show_chart':      'show chart',
+    'meas.chart_title':     'Chart of current filters',
+    'meas.chart_empty':     'No data to chart with the selected filters.',
+    'meas.chart_failed':    'Chart load failed: {msg}',
+    'meas.chart_info':      '{n} points \u00B7 {series} series \u00B7 last {hours}h',
     'meas.reset':           'reset',
     'meas.col.time':        'time',
     'meas.col.station':     'station',
@@ -3629,6 +3693,189 @@ $('measReset').addEventListener('click', () => {
   measurements.state.sort = 'timestamp'; measurements.state.sortDir = 'desc'; measurements.state.offset = 0;
   refreshMeasurements();
 });
+
+/* ── CSV export with current filters ───────────────────── */
+function csvEscape(value) {
+  if (value === null || value === undefined) return '';
+  const s = String(value);
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+async function exportMeasurementsCsv() {
+  const btn = $('measExport');
+  const origLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = t('meas.exporting');
+  try {
+    // Reuse current filter state but bypass paging — fetch up to 5000 rows in one go.
+    const p = new URLSearchParams();
+    const src = $('measSource').value;
+    const metric = $('measMetric').value;
+    const hours = $('measHours').value || '24';
+    const vmin = $('measValueMin').value;
+    const vmax = $('measValueMax').value;
+    const search = $('measSearch').value.trim();
+    const missing = $('measMissing').checked;
+    if (src) p.set('source', src);
+    if (metric) p.set('metric', metric);
+    p.set('hours', hours);
+    if (vmin !== '') p.set('valueMin', vmin);
+    if (vmax !== '') p.set('valueMax', vmax);
+    if (search) p.set('search', search);
+    if (missing) p.set('missingOnly', 'true');
+    p.set('sort', measurements.state.sort);
+    p.set('sortDir', measurements.state.sortDir);
+    p.set('limit', '5000');
+    p.set('offset', '0');
+
+    const res = await fetch(`/prediction/measurements?${p.toString()}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const payload = await res.json();
+    const rows = payload?.data || [];
+
+    const header = ['timestamp_iso', 'timestamp_unix', 'station', 'station_label', 'metric', 'metric_label', 'value', 'is_missing'];
+    const lines = [header.join(',')];
+    for (const r of rows) {
+      const iso = new Date(r.timestamp * 1000).toISOString();
+      lines.push([
+        csvEscape(iso),
+        csvEscape(r.timestamp),
+        csvEscape(r.source),
+        csvEscape(stationLabel(r.source)),
+        csvEscape(r.metric),
+        csvEscape(FRIENDLY_METRICS[r.metric] || r.metric),
+        csvEscape(r.value),
+        csvEscape(r.isMissing ? 'true' : 'false'),
+      ].join(','));
+    }
+    const csv = lines.join('\r\n');
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    const parts = ['mjerenja', src || 'sve', metric || 'sve', `${hours}h`, stamp];
+    a.href = url;
+    a.download = parts.join('_') + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e) {
+    alert(t('meas.export_failed', { msg: e.message || String(e) }));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origLabel;
+  }
+}
+$('measExport').addEventListener('click', exportMeasurementsCsv);
+
+/* ── Custom chart from current filters ─────────────────── */
+let measChartInstance = null;
+
+async function showMeasurementsChart() {
+  const panel = $('measChartPanel');
+  panel.hidden = false;
+  const empty = $('measChartEmpty');
+  empty.hidden = true;
+  $('measChartInfo').textContent = '';
+
+  // Fetch up to 5000 points sorted ascending for time-series rendering
+  const p = new URLSearchParams();
+  const src = $('measSource').value;
+  const metric = $('measMetric').value;
+  const hours = $('measHours').value || '24';
+  const vmin = $('measValueMin').value;
+  const vmax = $('measValueMax').value;
+  const search = $('measSearch').value.trim();
+  const missing = $('measMissing').checked;
+  if (src) p.set('source', src);
+  if (metric) p.set('metric', metric);
+  p.set('hours', hours);
+  if (vmin !== '') p.set('valueMin', vmin);
+  if (vmax !== '') p.set('valueMax', vmax);
+  if (search) p.set('search', search);
+  if (missing) p.set('missingOnly', 'true');
+  p.set('sort', 'timestamp');
+  p.set('sortDir', 'asc');
+  p.set('limit', '5000');
+  p.set('offset', '0');
+
+  try {
+    const res = await fetch(`/prediction/measurements?${p.toString()}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const payload = await res.json();
+    const rows = (payload?.data || []).filter(r => r.value !== null && !r.isMissing && Number.isFinite(Number(r.value)));
+
+    if (!rows.length) {
+      empty.hidden = false;
+      empty.textContent = t('meas.chart_empty');
+      if (measChartInstance) { measChartInstance.destroy(); measChartInstance = null; }
+      return;
+    }
+
+    // Group rows by (source + metric) so multiple series render on the same chart
+    const groups = {};
+    for (const r of rows) {
+      const key = `${r.source}::${r.metric}`;
+      if (!groups[key]) groups[key] = { source: r.source, metric: r.metric, points: [] };
+      groups[key].points.push({ x: new Date(r.timestamp * 1000), y: Number(r.value) });
+    }
+
+    const palette = [
+      cssVar('--green'), cssVar('--amber'), cssVar('--accent'), cssVar('--pink'),
+      cssVar('--red'), '#7c3aed', '#0891b2', '#65a30d', '#ea580c', '#0284c7',
+    ];
+    const datasets = Object.values(groups).map((g, i) => ({
+      label: `${stationLabel(g.source)} · ${FRIENDLY_METRICS[g.metric] || g.metric}`,
+      data: g.points,
+      borderColor: palette[i % palette.length],
+      backgroundColor: palette[i % palette.length] + '22',
+      borderWidth: 1.5,
+      pointRadius: 0,
+      tension: 0.2,
+      fill: false,
+    }));
+
+    $('measChartInfo').textContent = t('meas.chart_info', {
+      n: rows.length, series: datasets.length, hours,
+    });
+
+    if (measChartInstance) {
+      measChartInstance.data.datasets = datasets;
+      measChartInstance.update('none');
+    } else {
+      measChartInstance = new Chart($('measChartCanvas'), {
+        type: 'line',
+        data: { datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          animation: { duration: 0 },
+          interaction: { mode: 'nearest', intersect: false },
+          plugins: {
+            legend: { display: true, position: 'top', labels: { boxWidth: 10, font: { size: 11 } } },
+            tooltip: { mode: 'index', intersect: false },
+          },
+          scales: {
+            x: { type: 'time', ticks: { color: cssVar('--muted'), font: { size: 11 } }, grid: { color: cssVar('--grid'), drawTicks: false } },
+            y: { ticks: { color: cssVar('--muted'), font: { size: 11 } }, grid: { color: cssVar('--grid'), drawTicks: false } },
+          },
+        },
+      });
+    }
+  } catch (e) {
+    empty.hidden = false;
+    empty.textContent = t('meas.chart_failed', { msg: e.message || String(e) });
+    if (measChartInstance) { measChartInstance.destroy(); measChartInstance = null; }
+  }
+}
+
+$('measChart').addEventListener('click', showMeasurementsChart);
+$('measChartClose').addEventListener('click', () => {
+  $('measChartPanel').hidden = true;
+  if (measChartInstance) { measChartInstance.destroy(); measChartInstance = null; }
+});
+
 wirePager('meas', measurements.state, refreshMeasurements);
 document.querySelectorAll('#viewMeasurements thead th[data-sort]').forEach(th => {
   th.addEventListener('click', () => {

@@ -126,10 +126,11 @@ header.app .lang-switch button:focus-visible{outline:2px solid oklch(54% .17 245
 main{
   display:grid;
   grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);
-  grid-template-rows:auto auto minmax(0,1fr);
+  grid-template-rows:auto auto auto minmax(0,1fr);
   grid-template-areas:
     "strip   strip"
     "energy  side"
+    "env     side"
     "power   side";
   gap:12px;
   padding:12px 22px 14px;
@@ -275,6 +276,34 @@ main{
   text-align:center;padding:12px;font-size:12.5px;line-height:1.45;color:var(--muted);background:var(--card);border-radius:8px;border:1px dashed var(--border);z-index:1
 }
 .power-card .chart-wrap .chart-empty[hidden]{display:none}
+
+/* ── environment row (meteo context) ───────────────────── */
+.env-row{
+  grid-area:env;display:flex;align-items:stretch;gap:0;padding:0;overflow:hidden;
+}
+.env-row[hidden]{display:none}
+.env-row .env-stats{
+  display:flex;gap:1px;background:var(--border);width:100%;border-radius:0;
+}
+.env-row .env-stats .env-stat{
+  background:var(--card);padding:8px 14px;flex:1;text-align:center;display:flex;flex-direction:column;gap:2px;justify-content:center;
+}
+.env-row .env-stats .env-stat .env-value{font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+.env-row .env-stats .env-stat .env-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;font-weight:500}
+
+/* ── plant breakdown (inside energy card) ──────────────── */
+.energy-card .plant-breakdown{
+  grid-column:1/-1;border-top:1px solid var(--border);
+  padding:8px 16px;font-size:12px;display:flex;flex-direction:column;gap:3px;
+}
+.energy-card .plant-breakdown:empty{display:none}
+.energy-card .plant-breakdown .plant-row{
+  display:flex;align-items:center;gap:12px;
+}
+.energy-card .plant-breakdown .plant-name{flex:1;font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.energy-card .plant-breakdown .plant-kw{font-weight:600;font-variant-numeric:tabular-nums;min-width:70px;text-align:right}
+.energy-card .plant-breakdown .plant-daily{color:var(--muted);font-variant-numeric:tabular-nums;min-width:80px;text-align:right}
+.energy-card .plant-breakdown .plant-age{font-size:11px;min-width:40px;text-align:right}
 
 /* ── side panel (stacked: compact forecast + ledger summary + alerts) */
 .side{
@@ -759,6 +788,12 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
       <div class="stat"><span class="stat-value" id="statSOC">--</span><span class="stat-label" data-i18n="card.energy.soc">Battery %</span></div>
     </div>
     <div class="sparkline-wrap"><canvas id="sparklineChart" aria-label="24h power sparkline"></canvas></div>
+    <div class="plant-breakdown" id="plantBreakdown"></div>
+  </section>
+
+  <!-- ── Environment row (meteo context) ─────────────────── -->
+  <section class="card env-row" id="cardEnvironment" hidden aria-label="Environment">
+    <div class="env-stats" id="envStats"></div>
   </section>
 
   <!-- ── Power chart card ────────────────────────────────── -->
@@ -1164,6 +1199,10 @@ const I18N = {
     'alert.stale_data':     'Podaci stari {age}',
     'alert.relay_error':    'Greška releja za zapis',
     'alert.none':           'Nema upozorenja',
+    'env.temperature':      'Temperatura',
+    'env.radiation':        'Sunčevo zračenje',
+    'env.humidity':         'Vlažnost',
+    'env.aqi':              'Kvaliteta zraka',
     'pill.degraded':        'degradirano',
     'pill.partial':         'djelomično',
     'pill.ok_label':        'OK',
@@ -1471,6 +1510,10 @@ const I18N = {
     'alert.stale_data':     'Data stale for {age}',
     'alert.relay_error':    'Blockchain relay error',
     'alert.none':           'No alerts',
+    'env.temperature':      'Temperature',
+    'env.radiation':        'Solar radiation',
+    'env.humidity':         'Humidity',
+    'env.aqi':              'Air quality',
     'pill.degraded':        'degraded',
     'pill.partial':         'partial',
     'pill.ok_label':        'OK',
@@ -1744,6 +1787,15 @@ const FRIENDLY_METRICS = {
   'Inverter_DC_PV_power_MPPT3': 'PV string 3',
   'Inverter_DC_PV_power_MPPT4': 'PV string 4',
   'Inverter_Meter2_AC_power_total': 'Meter 2 power',
+  '33_Total_AC_Output_Power_(Active)': 'Solar output',
+  '35_Daily_Production_(Active)': 'Daily production',
+  '34_Cumulative_Production_(Active)': 'Total production',
+  '36_Total_Grid_Power': 'Grid power',
+  '50_Total_Gen_Power': 'Total gen power',
+  '37_Cumulative_Grid_Feed-in': 'Grid feed-in total',
+  '39_Daily_Grid_Feed-in': 'Daily grid feed-in',
+  '38_Cumulative_Energy_Purchased': 'Energy purchased total',
+  '43_Daily Consumption': 'Daily consumption',
 };
 const PICKER_METRICS = ['PM2_5','CAQI','Temperatura','Grid_power_total','Inverter_AC_power_total'];
 let activeTarget = null;
@@ -2125,57 +2177,148 @@ function renderHealthTile(predStatus, bcStatus, chainStatus, quality, sla){
   setHtml('healthMeta2', m2.join(''));
 }
 
-/* ── live energy data loading ─────────────────────────────── */
+/* ── live energy data loading (multi-plant) ───────────────── */
 let energyCharts = { sparkline: null, power: null };
+let plantSnapshots = []; // per-plant data for breakdown
+let meteoSnap = { temp: null, radiation: null, humidity: null, aqi: null, lastTs: null };
+
+function processStationRows(rows) {
+  const latest = {};
+  const series = {};
+  for (const r of rows) {
+    if (r.isMissing || r.value === null || r.value === undefined) continue;
+    const ts = r.timestamp;
+    const metric = r.metric;
+    const val = Number(r.value);
+    if (!Number.isFinite(val)) continue;
+    if (!series[metric]) series[metric] = [];
+    series[metric].push({ x: new Date(ts * 1000), y: val });
+    if (!latest[metric] || ts > latest[metric].ts) latest[metric] = { ts, v: val };
+  }
+  return { latest, series };
+}
+
+function computeDailyYield(series) {
+  const energySeries = series['Inverter_AC_energy_out_daily'] || series['35_Daily_Production_(Active)'] || series['34_Cumulative_Production_(Active)'] || [];
+  if (energySeries.length < 2) return null;
+  const now = new Date();
+  const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const todayPoints = energySeries.filter(p => p.x.getTime() >= todayMidnight);
+  if (todayPoints.length >= 2) return todayPoints[todayPoints.length - 1].y - todayPoints[0].y;
+  return energySeries[energySeries.length - 1].y - energySeries[0].y;
+}
+
+function isSolarData(metrics) {
+  return metrics.has('Inverter_AC_power_total') || metrics.has('33_Total_AC_Output_Power_(Active)');
+}
+
+function isMeteoData(metrics) {
+  return metrics.has('Temperatura') || metrics.has('PM2_5') || metrics.has('Suncevo_zracenje');
+}
 
 async function loadLiveEnergy(){
   try {
-    const res = await fetch('/prediction/measurements?source=SOLAXBIOS&hours=24&limit=5000&sort=timestamp&sortDir=asc');
-    if (!res.ok) return;
-    const payload = await res.json();
-    const rows = payload?.data || [];
-    if (!rows.length) return;
+    const metaRes = await fetch('/prediction/measurements/meta');
+    if (!metaRes.ok) return;
+    const meta = await metaRes.json();
+    const allStations = meta?.stations || [];
+    if (!allStations.length) return;
 
-    const latest = {};
-    const series = {};
-    for (const r of rows) {
-      if (r.isMissing || r.value === null || r.value === undefined) continue;
-      const ts = r.timestamp;
-      const metric = r.metric;
-      const val = Number(r.value);
-      if (!Number.isFinite(val)) continue;
-      if (!series[metric]) series[metric] = [];
-      series[metric].push({ x: new Date(ts * 1000), y: val });
-      if (!latest[metric] || ts > latest[metric].ts) latest[metric] = { ts, v: val };
+    const results = await Promise.allSettled(
+      allStations.map(src =>
+        fetch(`/prediction/measurements?source=${encodeURIComponent(src)}&hours=24&limit=5000&sort=timestamp&sortDir=asc`)
+          .then(r => r.json())
+          .then(p => ({ source: src, data: p.data || [] }))
+      )
+    );
+
+    const solarPlants = [];
+    const meteoStations = [];
+    for (const r of results) {
+      if (r.status !== 'fulfilled' || !r.value.data.length) continue;
+      const { source, data } = r.value;
+      const metrics = new Set(data.filter(row => row.value !== null).map(row => row.metric));
+      if (isSolarData(metrics)) solarPlants.push({ source, data, metrics });
+      if (isMeteoData(metrics)) meteoStations.push({ source, data, metrics });
     }
 
-    const get = (k) => latest[k]?.v ?? null;
-    energySnap.ac = get('Inverter_AC_power_total');
-    energySnap.grid = get('Grid_power_total');
-    energySnap.soc = get('BMS_energy_SOC');
-    energySnap.battPower = get('Inverter_DC_Battery_power_total');
-    energySnap.toGrid = get('Grid_energy_toGrid_total');
-    energySnap.fromGrid = get('Grid_energy_fromGrid_total');
-    energySnap.lastTs = Math.max(...Object.values(latest).map(l => l.ts).filter(Number.isFinite));
+    // Aggregate solar plants
+    let totalAc = 0, totalGrid = 0, totalToGrid = 0, totalFromGrid = 0;
+    let anySoc = null, anyBattPower = null, latestTs = 0;
+    const mergedPowerSeries = {};
+    plantSnapshots = [];
 
-    // Inverter_AC_energy_out_daily is a cumulative lifetime counter (kWh).
-    // Daily yield = today's last reading minus today's first reading (after midnight UTC+2).
-    const energySeries = series['Inverter_AC_energy_out_daily'] || [];
-    if (energySeries.length >= 2) {
-      const now = new Date();
-      const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-      const todayPoints = energySeries.filter(p => p.x.getTime() >= todayMidnight);
-      if (todayPoints.length >= 2) {
-        energySnap.daily = todayPoints[todayPoints.length - 1].y - todayPoints[0].y;
-      } else {
-        energySnap.daily = energySeries[energySeries.length - 1].y - energySeries[0].y;
+    for (const plant of solarPlants) {
+      const { latest, series } = processStationRows(plant.data);
+      const acKey = latest['Inverter_AC_power_total'] ? 'Inverter_AC_power_total' : '33_Total_AC_Output_Power_(Active)';
+      const gridKey = latest['Grid_power_total'] ? 'Grid_power_total' : '36_Total_Grid_Power';
+      const ac = latest[acKey]?.v ?? null;
+      const grid = latest[gridKey]?.v ?? null;
+      const soc = latest['BMS_energy_SOC']?.v ?? null;
+      const battPower = latest['Inverter_DC_Battery_power_total']?.v ?? null;
+      const toGrid = latest['Grid_energy_toGrid_total']?.v ?? latest['37_Cumulative_Grid_Feed-in']?.v ?? null;
+      const fromGrid = latest['Grid_energy_fromGrid_total']?.v ?? latest['38_Cumulative_Energy_Purchased']?.v ?? null;
+      const daily = computeDailyYield(series);
+      const plantTs = Math.max(...Object.values(latest).map(l => l.ts).filter(Number.isFinite));
+
+      if (ac !== null) totalAc += ac;
+      if (grid !== null) totalGrid += grid;
+      if (toGrid !== null) totalToGrid += toGrid;
+      if (fromGrid !== null) totalFromGrid += fromGrid;
+      if (soc !== null) anySoc = soc;
+      if (battPower !== null) anyBattPower = battPower;
+      if (plantTs > latestTs) latestTs = plantTs;
+
+      plantSnapshots.push({ source: plant.source, ac, grid, daily, soc, battPower, lastTs: plantTs });
+
+      // Merge power series for combined chart
+      const powerKey = series['Inverter_AC_power_total'] ? 'Inverter_AC_power_total' : '33_Total_AC_Output_Power_(Active)';
+      if (series[powerKey]) {
+        if (!mergedPowerSeries['Inverter_AC_power_total']) mergedPowerSeries['Inverter_AC_power_total'] = [];
+        mergedPowerSeries['Inverter_AC_power_total'].push(...series[powerKey]);
       }
-    } else {
-      energySnap.daily = null;
+      if (series[gridKey]) {
+        if (!mergedPowerSeries['Grid_power_total']) mergedPowerSeries['Grid_power_total'] = [];
+        mergedPowerSeries['Grid_power_total'].push(...series[gridKey]);
+      }
+    }
+
+    // Sort merged series by time
+    for (const key of Object.keys(mergedPowerSeries)) {
+      mergedPowerSeries[key].sort((a, b) => a.x - b.x);
+    }
+
+    // Compute combined daily yield
+    let totalDaily = null;
+    const dailies = plantSnapshots.map(p => p.daily).filter(d => d !== null);
+    if (dailies.length) totalDaily = dailies.reduce((a, b) => a + b, 0);
+
+    energySnap.ac = solarPlants.length ? totalAc : null;
+    energySnap.daily = totalDaily;
+    energySnap.grid = solarPlants.length ? totalGrid : null;
+    energySnap.soc = anySoc;
+    energySnap.battPower = anyBattPower;
+    energySnap.toGrid = totalToGrid || null;
+    energySnap.fromGrid = totalFromGrid || null;
+    energySnap.lastTs = latestTs || null;
+
+    // Process meteo stations
+    for (const station of meteoStations) {
+      const { latest } = processStationRows(station.data);
+      const get = (k) => latest[k]?.v ?? null;
+      if (get('Temperatura') !== null) meteoSnap.temp = get('Temperatura');
+      if (get('Suncevo_zracenje') !== null) meteoSnap.radiation = get('Suncevo_zracenje');
+      if (get('Relativna_vlaznost') !== null) meteoSnap.humidity = get('Relativna_vlaznost');
+      if (get('CAQI') !== null) meteoSnap.aqi = get('CAQI');
+      else if (get('PM2_5') !== null) meteoSnap.aqi = get('PM2_5');
+      const mTs = Math.max(...Object.values(latest).map(l => l.ts).filter(Number.isFinite));
+      if (mTs > (meteoSnap.lastTs || 0)) meteoSnap.lastTs = mTs;
     }
 
     renderEnergyHero();
-    renderPowerChart(series);
+    renderPowerChart(mergedPowerSeries);
+    renderEnvironment();
+    renderPlantBreakdown();
     rerenderTiles();
   } catch (e) { console.warn('loadLiveEnergy failed:', e); }
 }
@@ -2246,6 +2389,37 @@ function renderPowerChart(series){
       });
     }
   }
+}
+
+/* ── environment row (meteo data) ──────────────────────── */
+function renderEnvironment(){
+  const el = $('envStats');
+  if (!el) return;
+  const stats = [];
+  if (meteoSnap.temp !== null) stats.push({ value: `${Number(meteoSnap.temp).toFixed(1)}°C`, label: t('env.temperature') });
+  if (meteoSnap.radiation !== null) stats.push({ value: `${Number(meteoSnap.radiation).toFixed(0)} W/m²`, label: t('env.radiation') });
+  if (meteoSnap.humidity !== null) stats.push({ value: `${Number(meteoSnap.humidity).toFixed(0)}%`, label: t('env.humidity') });
+  if (meteoSnap.aqi !== null) stats.push({ value: `${Number(meteoSnap.aqi).toFixed(0)}`, label: t('env.aqi') });
+  if (!stats.length) {
+    $('cardEnvironment').hidden = true;
+    return;
+  }
+  $('cardEnvironment').hidden = false;
+  el.innerHTML = stats.map(s => `<div class="env-stat"><span class="env-value">${s.value}</span><span class="env-label">${s.label}</span></div>`).join('');
+}
+
+/* ── per-plant breakdown ───────────────────────────────── */
+function renderPlantBreakdown(){
+  const el = $('plantBreakdown');
+  if (!el) return;
+  if (plantSnapshots.length < 2) { el.innerHTML = ''; return; }
+  el.innerHTML = plantSnapshots.map(p => {
+    const name = stationLabel(p.source);
+    const acStr = p.ac !== null ? `${Number(p.ac).toFixed(1)} kW` : '--';
+    const dailyStr = p.daily !== null ? `${Number(p.daily).toFixed(1)} kWh` : '--';
+    const age = p.lastTs ? ageBrief(p.lastTs) : '--';
+    return `<div class="plant-row"><span class="plant-name">${escapeHtml(name)}</span><span class="plant-kw">${acStr}</span><span class="plant-daily">${dailyStr}</span><span class="plant-age muted">${age}</span></div>`;
+  }).join('');
 }
 
 /* ── compact forecast meta (side panel) ────────────────── */
@@ -2553,8 +2727,8 @@ let lastSoilingHint = null;
 
 // Friendly station label: "SOLAXBIOS" → "Solarna elektrana" (HR) / "Solar plant" (EN).
 const STATION_LABEL = {
-  hr: { SOLAXBIOS: 'Solarna elektrana', OS1BIOS: 'Meteo postaja 1', OS2BIOS: 'Meteo postaja 2' },
-  en: { SOLAXBIOS: 'Solar plant', OS1BIOS: 'Meteo station 1', OS2BIOS: 'Meteo station 2' },
+  hr: { SOLAXBIOS: 'Solarna elektrana (BIOS)', Solarman: 'Solarna elektrana (Dvorana)', OS1BIOS: 'Meteo postaja 1', OS2BIOS: 'Meteo postaja 2' },
+  en: { SOLAXBIOS: 'Solar plant (BIOS)', Solarman: 'Solar plant (Dvorana)', OS1BIOS: 'Meteo station 1', OS2BIOS: 'Meteo station 2' },
 };
 function stationLabel(code){
   return STATION_LABEL[currentLang]?.[code] || code;

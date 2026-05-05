@@ -2120,23 +2120,23 @@ let energyCharts = { sparkline: null, power: null };
 
 async function loadLiveEnergy(){
   try {
-    const res = await fetch('/prediction/measurements?source=SOLAXBIOS&hours=24');
+    const res = await fetch('/prediction/measurements?source=SOLAXBIOS&hours=24&limit=5000&sort=timestamp&sortDir=asc');
     if (!res.ok) return;
-    const data = await res.json();
-    const records = data?.records || data?.data || [];
-    if (!records.length) return;
+    const payload = await res.json();
+    const rows = payload?.data || [];
+    if (!rows.length) return;
 
     const latest = {};
     const series = {};
-    for (const r of records) {
-      const ts = r.timestamp || r.ts;
-      const entries = r.values || r;
-      for (const [key, val] of Object.entries(entries)) {
-        if (key === 'timestamp' || key === 'ts' || val === null || val === undefined || !Number.isFinite(Number(val))) continue;
-        if (!series[key]) series[key] = [];
-        series[key].push({ x: new Date(ts * 1000), y: Number(val) });
-        if (!latest[key] || ts > latest[key].ts) latest[key] = { ts, v: Number(val) };
-      }
+    for (const r of rows) {
+      if (r.isMissing || r.value === null || r.value === undefined) continue;
+      const ts = r.timestamp;
+      const metric = r.metric;
+      const val = Number(r.value);
+      if (!Number.isFinite(val)) continue;
+      if (!series[metric]) series[metric] = [];
+      series[metric].push({ x: new Date(ts * 1000), y: val });
+      if (!latest[metric] || ts > latest[metric].ts) latest[metric] = { ts, v: val };
     }
 
     const get = (k) => latest[k]?.v ?? null;

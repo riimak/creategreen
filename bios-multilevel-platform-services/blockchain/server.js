@@ -588,7 +588,12 @@ async function runCycle(reason = 'scheduled') {
         results.push({ source, status: 'failed', error: error.message });
       }
     }
-    state.lifecycle = results.some(r => r.status === 'ok') ? 'ready' : 'degraded';
+    const anyOk = results.some(r => r.status === 'ok');
+    if (anyOk) {
+      state.lifecycle = 'ready';
+    } else if (state.lifecycle !== 'ready') {
+      state.lifecycle = 'degraded';
+    }
     state.lastCycle = {
       id: `cycle-${Date.now()}`,
       reason,

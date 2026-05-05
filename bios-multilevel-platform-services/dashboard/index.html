@@ -1248,7 +1248,7 @@ const I18N = {
     'tile.storage.name':    'Baterija',
     'tile.storage.unavailable':'nema podataka o bateriji',
     'tile.storage.not_connected':'nije spojena',
-    'tile.storage.no_battery_msg':'Baterija nije spojena na ovoj elektrani',
+    'tile.storage.no_battery_msg':'Niti jedna elektrana nema spojenu bateriju',
     'tile.storage.charging':'punjenje',
     'tile.storage.discharging':'pražnjenje',
     'tile.grid.label':      'Mreža',
@@ -1627,7 +1627,7 @@ const I18N = {
     'tile.storage.name':    'Battery',
     'tile.storage.unavailable':'no battery data',
     'tile.storage.not_connected':'not connected',
-    'tile.storage.no_battery_msg':'Battery not connected at this plant',
+    'tile.storage.no_battery_msg':'No battery connected at any plant',
     'tile.storage.charging':'charging',
     'tile.storage.discharging':'discharging',
     'tile.grid.label':      'Grid',
@@ -2294,7 +2294,7 @@ function renderStealthTile(chainStatus, blocks, feeless){
 }
 
 /* ── energy tile renderers (production / storage / grid / health) ── */
-let energySnap = { ac: null, daily: null, monthly: null, grid: null, soc: null, battPower: null, toGrid: null, fromGrid: null, lastTs: null };
+let energySnap = { ac: null, daily: null, monthly: null, grid: null, soc: null, battPower: null, battPlantCount: 0, toGrid: null, fromGrid: null, lastTs: null };
 
 function renderProductionTile(){
   const ac = energySnap.ac;
@@ -2324,6 +2324,7 @@ function renderProductionTile(){
 function renderStorageTile(){
   const soc = energySnap.soc;
   const battPower = energySnap.battPower;
+  const battPlants = plantSnapshots.filter(p => p.soc !== null);
   if (soc === null) {
     setPill('storagePill', t('tile.storage.not_connected'), '');
     setHtml('storageMeta1', `<span class="muted">${t('tile.storage.no_battery_msg')}</span>`);
@@ -2339,7 +2340,11 @@ function renderStorageTile(){
   m1.push(`<span><b>${Number(soc).toFixed(0)}%</b> SOC</span>`);
   if (battPower !== null) m1.push(`<span>${Math.abs(battPower).toFixed(2)} kW ${charging ? t('tile.storage.charging') : discharging ? t('tile.storage.discharging') : ''}</span>`);
   setHtml('storageMeta1', m1.join(''));
-  setHtml('storageMeta2', '');
+  const m2 = [];
+  if (battPlants.length > 1) {
+    m2.push(`<span class="muted">${battPlants.map(p => `${stationLabel(p.source)} ${Number(p.soc).toFixed(0)}%`).join(' · ')}</span>`);
+  }
+  setHtml('storageMeta2', m2.join(''));
 }
 
 function renderGridTile(){
@@ -2369,8 +2374,10 @@ function renderHealthTile(predStatus, bcStatus, chainStatus, quality, sla){
   const ageMin = quality?.input?.dataAgeMinutes;
   const slaMin = slaWindowMinutes(sla);
   const dataOk = ageMin != null && ageMin <= slaMin;
-  const predOk = predStatus?.lifecycle === 'idle' || predStatus?.lifecycle === 'running' || predStatus?.lifecycle === 'ready';
-  const chainOk = (bcStatus?.lifecycle === 'idle' || bcStatus?.lifecycle === 'running' || bcStatus?.lifecycle === 'ready') && chainStatus?.ok !== false;
+  const predLc = predStatus?.lifecycle;
+  const predOk = predLc === 'idle' || predLc === 'running' || predLc === 'ready' || predLc === 'initializing';
+  const bcLc = bcStatus?.lifecycle;
+  const chainOk = (bcLc === 'idle' || bcLc === 'running' || bcLc === 'ready' || bcLc === 'initializing') && chainStatus?.ok !== false;
   const checks = [dataOk, predOk, chainOk];
   const failCount = checks.filter(c => !c).length;
   if (failCount === 0) setPill('healthPill', t('cpill.all_ok'), 'ok');
@@ -2451,7 +2458,7 @@ async function loadLiveEnergy(){
 
     // Aggregate solar plants
     let totalAc = 0, totalGrid = 0, totalToGrid = 0, totalFromGrid = 0;
-    let anySoc = null, anyBattPower = null, latestTs = 0;
+    let totalBattPower = 0, socSum = 0, socCount = 0, latestTs = 0;
     const mergedPowerSeries = {};
     plantSnapshots = [];
 
@@ -2472,8 +2479,8 @@ async function loadLiveEnergy(){
       if (grid !== null) totalGrid += grid;
       if (toGrid !== null) totalToGrid += toGrid;
       if (fromGrid !== null) totalFromGrid += fromGrid;
-      if (soc !== null) anySoc = soc;
-      if (battPower !== null) anyBattPower = battPower;
+      if (soc !== null) { socSum += soc; socCount += 1; }
+      if (battPower !== null) totalBattPower += battPower;
       if (plantTs > latestTs) latestTs = plantTs;
 
       plantSnapshots.push({ source: plant.source, ac, grid, daily, soc, battPower, lastTs: plantTs });
@@ -2503,8 +2510,9 @@ async function loadLiveEnergy(){
     energySnap.ac = solarPlants.length ? totalAc : null;
     energySnap.daily = totalDaily;
     energySnap.grid = solarPlants.length ? totalGrid : null;
-    energySnap.soc = anySoc;
-    energySnap.battPower = anyBattPower;
+    energySnap.soc = socCount > 0 ? socSum / socCount : null;
+    energySnap.battPower = socCount > 0 ? totalBattPower : null;
+    energySnap.battPlantCount = socCount;
     energySnap.toGrid = totalToGrid || null;
     energySnap.fromGrid = totalFromGrid || null;
     energySnap.lastTs = latestTs || null;
@@ -2692,11 +2700,14 @@ function renderLedgerSummary(txPayload, chainStatus, bcStatus){
   setText('ledgerAnchored24', String(c.total ?? 0));
   const height = chainStatus?.latestBlock?.height;
   setText('ledgerBlockHeight', height != null ? String(height) : '--');
-  const relayOk = bcStatus?.lifecycle === 'idle' || bcStatus?.lifecycle === 'running' || bcStatus?.lifecycle === 'ready';
+  const relayLc = bcStatus?.lifecycle;
+  const relayOk = relayLc === 'idle' || relayLc === 'running' || relayLc === 'ready';
+  const relayStarting = relayLc === 'initializing';
   const isMock = chainStatus?.relayMode === 'mock';
   const relayEl = $('ledgerRelayStatus');
   if (relayEl) {
     if (relayOk) relayEl.innerHTML = `<span class="pill ok" style="font-size:10px">${t('cpill.relay_active')}</span>`;
+    else if (relayStarting) relayEl.innerHTML = `<span class="pill warn" style="font-size:10px">${t('cpill.relay_starting')}</span>`;
     else if (isMock) relayEl.innerHTML = `<span class="pill warn" style="font-size:10px">${t('cpill.relay_demo')}</span>`;
     else relayEl.innerHTML = `<span class="pill err" style="font-size:10px">${t('cpill.relay_offline')}</span>`;
   }

@@ -2369,8 +2369,8 @@ function renderHealthTile(predStatus, bcStatus, chainStatus, quality, sla){
   const ageMin = quality?.input?.dataAgeMinutes;
   const slaMin = slaWindowMinutes(sla);
   const dataOk = ageMin != null && ageMin <= slaMin;
-  const predOk = predStatus?.lifecycle === 'idle' || predStatus?.lifecycle === 'running';
-  const chainOk = (bcStatus?.lifecycle === 'idle' || bcStatus?.lifecycle === 'running') && chainStatus?.ok !== false;
+  const predOk = predStatus?.lifecycle === 'idle' || predStatus?.lifecycle === 'running' || predStatus?.lifecycle === 'ready';
+  const chainOk = (bcStatus?.lifecycle === 'idle' || bcStatus?.lifecycle === 'running' || bcStatus?.lifecycle === 'ready') && chainStatus?.ok !== false;
   const checks = [dataOk, predOk, chainOk];
   const failCount = checks.filter(c => !c).length;
   if (failCount === 0) setPill('healthPill', t('cpill.all_ok'), 'ok');
@@ -2692,7 +2692,7 @@ function renderLedgerSummary(txPayload, chainStatus, bcStatus){
   setText('ledgerAnchored24', String(c.total ?? 0));
   const height = chainStatus?.latestBlock?.height;
   setText('ledgerBlockHeight', height != null ? String(height) : '--');
-  const relayOk = bcStatus?.lifecycle === 'idle' || bcStatus?.lifecycle === 'running';
+  const relayOk = bcStatus?.lifecycle === 'idle' || bcStatus?.lifecycle === 'running' || bcStatus?.lifecycle === 'ready';
   const isMock = chainStatus?.relayMode === 'mock';
   const relayEl = $('ledgerRelayStatus');
   if (relayEl) {
@@ -2701,7 +2701,7 @@ function renderLedgerSummary(txPayload, chainStatus, bcStatus){
     else relayEl.innerHTML = `<span class="pill err" style="font-size:10px">${t('cpill.relay_offline')}</span>`;
   }
   const lc = bcStatus?.lifecycle;
-  if (lc === 'idle' || lc === 'running') setPill('bcPill', t('cpill.relay_active'), 'ok');
+  if (lc === 'idle' || lc === 'running' || lc === 'ready') setPill('bcPill', t('cpill.relay_active'), 'ok');
   else if (lc === 'initializing') setPill('bcPill', t('cpill.relay_starting'), 'warn');
   else if (lc === 'failed' || lc === 'degraded') setPill('bcPill', t('cpill.relay_offline'), 'err');
   else setPill('bcPill', t('cpill.relay_demo'), 'warn');

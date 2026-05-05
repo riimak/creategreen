@@ -274,6 +274,7 @@ main{
   position:absolute;inset:8px 14px 14px;display:flex;align-items:center;justify-content:center;
   text-align:center;padding:12px;font-size:12.5px;line-height:1.45;color:var(--muted);background:var(--card);border-radius:8px;border:1px dashed var(--border);z-index:1
 }
+.power-card .chart-wrap .chart-empty[hidden]{display:none}
 
 /* ── side panel (stacked: compact forecast + ledger summary + alerts) */
 .side{
@@ -1118,6 +1119,8 @@ const I18N = {
     'tile.storage.label':   'Pohrana',
     'tile.storage.name':    'Baterija',
     'tile.storage.unavailable':'nema podataka o bateriji',
+    'tile.storage.not_connected':'nije spojena',
+    'tile.storage.no_battery_msg':'Baterija nije spojena na ovoj elektrani',
     'tile.storage.charging':'punjenje',
     'tile.storage.discharging':'pražnjenje',
     'tile.grid.label':      'Mreža',
@@ -1434,6 +1437,8 @@ const I18N = {
     'tile.storage.label':   'Storage',
     'tile.storage.name':    'Battery',
     'tile.storage.unavailable':'no battery data',
+    'tile.storage.not_connected':'not connected',
+    'tile.storage.no_battery_msg':'Battery not connected at this plant',
     'tile.storage.charging':'charging',
     'tile.storage.discharging':'discharging',
     'tile.grid.label':      'Grid',
@@ -2060,7 +2065,12 @@ function renderProductionTile(){
 function renderStorageTile(){
   const soc = energySnap.soc;
   const battPower = energySnap.battPower;
-  if (soc === null) { setHtml('storageMeta1', `<span class="muted">${t('tile.storage.unavailable')}</span>`); return; }
+  if (soc === null) {
+    setPill('storagePill', t('tile.storage.not_connected'), '');
+    setHtml('storageMeta1', `<span class="muted">${t('tile.storage.no_battery_msg')}</span>`);
+    setHtml('storageMeta2', '');
+    return;
+  }
   const charging = battPower !== null && battPower > 0.05;
   const discharging = battPower !== null && battPower < -0.05;
   const pillKind = soc > 20 ? 'ok' : soc > 5 ? 'warn' : 'err';
@@ -2141,13 +2151,28 @@ async function loadLiveEnergy(){
 
     const get = (k) => latest[k]?.v ?? null;
     energySnap.ac = get('Inverter_AC_power_total');
-    energySnap.daily = get('Inverter_AC_energy_out_daily');
     energySnap.grid = get('Grid_power_total');
     energySnap.soc = get('BMS_energy_SOC');
     energySnap.battPower = get('Inverter_DC_Battery_power_total');
     energySnap.toGrid = get('Grid_energy_toGrid_total');
     energySnap.fromGrid = get('Grid_energy_fromGrid_total');
     energySnap.lastTs = Math.max(...Object.values(latest).map(l => l.ts).filter(Number.isFinite));
+
+    // Inverter_AC_energy_out_daily is a cumulative lifetime counter (kWh).
+    // Daily yield = today's last reading minus today's first reading (after midnight UTC+2).
+    const energySeries = series['Inverter_AC_energy_out_daily'] || [];
+    if (energySeries.length >= 2) {
+      const now = new Date();
+      const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const todayPoints = energySeries.filter(p => p.x.getTime() >= todayMidnight);
+      if (todayPoints.length >= 2) {
+        energySnap.daily = todayPoints[todayPoints.length - 1].y - todayPoints[0].y;
+      } else {
+        energySnap.daily = energySeries[energySeries.length - 1].y - energySeries[0].y;
+      }
+    } else {
+      energySnap.daily = null;
+    }
 
     renderEnergyHero();
     renderPowerChart(series);

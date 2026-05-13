@@ -1,0 +1,78 @@
+# BIOS multi-level platform — defence-in-depth NetworkPolicies
+#
+# These policies tighten the cluster-internal blast radius of the prediction
+# and blockchain services so a compromised pod elsewhere in the namespace
+# cannot reach them. The chart-level `networkPolicy.enabled` flag in
+# auto-deploy-values.yaml is intentionally left `false` because the chart's
+# default policy template does not let us express "only allow the dashboard +
+# prediction pods in" reliably across chart versions. We apply these
+# hand-written policies directly instead.
+#
+# BEFORE APPLYING:
+#   1. Verify the label selectors below match your real pod labels.
+#      Run: kubectl -n <namespace> get pods --show-labels
+#      Adjust the matchLabels stanzas below if the labels differ from
+#      the GitLab Auto DevOps defaults (`app: <release-name>`).
+#   2. Confirm a CNI that enforces NetworkPolicy is installed
+#      (Calico, Cilium, etc.). Without one these resources are no-ops.
+#   3. Apply with:
+#        kubectl -n <namespace> apply -f network-policies.yaml
+#
+# These policies do NOT touch the existing dashboard ingress / Stealth
+# gateway egress — only east-west traffic between pods in this namespace.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bios-prediction-allow-from-dashboard-and-blockchain
+  labels:
+    app.kubernetes.io/part-of: bios-multilevel
+spec:
+  podSelector:
+    matchLabels:
+      app: bios-prediction-production-barrage-autodeploy
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: bios-dashboard-production-barrage-autodeploy
+        - podSelector:
+            matchLabels:
+              app: bios-blockchain-production-barrage-autodeploy
+      ports:
+        - protocol: TCP
+          port: 8091
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bios-blockchain-allow-from-dashboard-and-prediction
+  labels:
+    app.kubernetes.io/part-of: bios-multilevel
+spec:
+  podSelector:
+    matchLabels:
+      app: bios-blockchain-production-barrage-autodeploy
+  policyTypes:
+    - Ingress
+  ingress:
+    # Read endpoints proxied by the dashboard (read-only after the lockdown).
+    - from:
+        - podSelector:
+            matchLabels:
+              app: bios-dashboard-production-barrage-autodeploy
+      ports:
+        - protocol: TCP
+          port: 8092
+    # Prediction service itself — even though nothing currently calls
+    # blockchain from prediction, this leaves the door open for the future
+    # event-source pattern without re-opening it to the whole namespace.
+    - from:
+        - podSelector:
+            matchLabels:
+              app: bios-prediction-production-barrage-autodeploy
+      ports:
+        - protocol: TCP
+          port: 8092

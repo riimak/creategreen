@@ -137,6 +137,24 @@ production-blockchain:
     - |
       set -e
       VALUES_FILE="bios-multilevel-platform-services/blockchain/.gitlab/auto-deploy-values.yaml"
+      # STEALTH_WIF is still forwarded as `extraEnv` for backward compatibility:
+      # removing it here would leave the pod with no WIF until the operator has
+      # created the `bios-stealth-wif` Kubernetes Secret out of band, which would
+      # break real Stealth broadcasts in the meantime.
+      #
+      # MIGRATION (one-time, by an operator with kubectl access):
+      #   1. Provision the Secret (see deploy/secret-stealth-wif.example.yaml
+      #      and the steps in blockchain/README.md).
+      #   2. Verify the chart picks it up: the pod will have STEALTH_WIF_FILE
+      #      pointing at /etc/secrets/stealth/wif, and the wallet logs will
+      #      show `walletConfigured: true` even without STEALTH_WIF in env.
+      #   3. Remove STEALTH_WIF from the GitLab CI/CD variables (or unset it
+      #      via `Protected/Masked` toggle). On the next deploy this script
+      #      will skip it, no `extraEnv` row will be written, and the WIF
+      #      will exist only in the Kubernetes Secret.
+      #
+      # The wallet code prefers env over file, so during the migration window
+      # both paths produce the same result; afterwards only the Secret remains.
       BLOCKCHAIN_FORWARD_ENVS="\
         STEALTH_WIF STEALTH_RPC_USERNAME STEALTH_RPC_PASSWORD STEALTH_API_KEY \
         STEALTH_RELAY_MODE STEALTH_RPC_URL STEALTH_RPC_ID \
@@ -151,7 +169,7 @@ production-blockchain:
         BLOCKCHAIN_MAX_RETRIES BLOCKCHAIN_INIT_MODE BLOCKCHAIN_RETENTION_COUNT \
         BLOCKCHAIN_MAX_BROADCASTS_PER_CYCLE BLOCKCHAIN_ANCHOR_PREDICTIONS BLOCKCHAIN_ANCHOR_ANOMALIES \
         BLOCKCHAIN_DEMO_DEVICES BLOCKCHAIN_SHOW_VENDOR_WARNINGS \
-        BLOCKCHAIN_WALLET_SEED BLOCKCHAIN_AMQP_MODE"
+        BLOCKCHAIN_WALLET_SEED BLOCKCHAIN_WALLET_SEED_STRICT BLOCKCHAIN_AMQP_MODE"
       for name in $BLOCKCHAIN_FORWARD_ENVS; do
         value="${!name:-}"
         if [ -n "$value" ]; then
@@ -160,7 +178,12 @@ production-blockchain:
             echo "  - name: $name"
             echo "    value: \"$value\""
           } >> "$VALUES_FILE"
-          echo "Forwarded CI var $name -> $VALUES_FILE"
+          if [ "$name" = "STEALTH_WIF" ]; then
+            # Don't echo the WIF value — only that it was forwarded.
+            echo "Forwarded CI var STEALTH_WIF -> $VALUES_FILE (consider migrating to bios-stealth-wif Secret)"
+          else
+            echo "Forwarded CI var $name -> $VALUES_FILE"
+          fi
         else
           echo "Skip $name: not set as CI variable"
         fi
@@ -171,7 +194,7 @@ production-blockchain:
         echo "Patched hostAliases IP to ${STEALTH_GATEWAY_MAINNET_INTERNAL_IP} in ${VALUES_FILE}"
       fi
       if [ -z "${STEALTH_WIF:-}" ]; then
-        echo "WARN: STEALTH_WIF not set; blockchain will not broadcast real Stealth transactions."
+        echo "INFO: STEALTH_WIF not set as a CI variable; expecting the bios-stealth-wif Kubernetes Secret to provide it via STEALTH_WIF_FILE."
       fi
   rules:
     - !reference [.production, rules]

@@ -1,4 +1,7 @@
 .env
+.claude/
+/node_modules/
+**/node_modules/
 /secrets/
 /output/*
 !/output/.gitkeep

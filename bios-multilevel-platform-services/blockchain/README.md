@@ -154,3 +154,72 @@ chain status/tx/block data while mock mode remains the full local demo path.
 
 Wallet accounts are deterministically derived per device from
 `BLOCKCHAIN_WALLET_SEED` or `BLOCKCHAIN_WALLET_SEED_FILE`.
+
+## Production Hardening Notes
+
+The blockchain service is intentionally **not** exposed via Ingress
+(`ingress.enabled: false` in `.gitlab/auto-deploy-values.yaml`). It is reached
+only by the dashboard's read-only proxy and by the prediction service over
+ClusterIP. A few operator-facing rules for keeping it that way:
+
+### Move `STEALTH_WIF` out of plain `extraEnv` into a Kubernetes Secret
+
+The Helm chart now mounts the Stealth WIF (private key) from the
+`bios-stealth-wif` Kubernetes Secret at `/etc/secrets/stealth/wif`, and the
+container reads it via `STEALTH_WIF_FILE`. The chart marks the volume
+`optional: true` so deploys never break if the Secret hasn't been provisioned
+yet.
+
+The GitLab CI job intentionally does NOT manage this Secret (kubectl is not
+available in the deploy `before_script`). The operator provisions it once,
+out of band:
+
+```sh
+# One-time setup, then on rotation:
+kubectl -n <namespace> create secret generic bios-stealth-wif \
+  --from-literal=wif='<wif>' \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+A reusable template lives at
+`bios-multilevel-platform-services/deploy/secret-stealth-wif.example.yaml`.
+
+After the Secret exists, complete the migration:
+
+1. Trigger a deploy and confirm in pod logs that the wallet still resolves
+   the same address as before (the env-based WIF still wins until step 2,
+   so behaviour does not change).
+2. Remove `STEALTH_WIF` from the GitLab CI/CD variables.
+3. Trigger a deploy. The `extraEnv` block will no longer contain
+   `STEALTH_WIF`, the wallet falls through to the file at
+   `/etc/secrets/stealth/wif`, and `kubectl describe pod` no longer shows
+   the WIF in the pod's environment.
+
+To rotate after the migration, just re-run the `kubectl create secret` line
+above and `kubectl rollout restart deployment` the blockchain.
+
+### `BLOCKCHAIN_WALLET_SEED` must be unique in production
+
+The default seed (`development-seed-change-me`) is committed to source. Any
+device account derived from it is publicly recomputable. The service logs a
+loud `SECURITY WARNING` on startup if the default seed is in use with a non-mock
+relay. Once a unique seed is provisioned in CI, set
+`BLOCKCHAIN_WALLET_SEED_STRICT=true` to make the service refuse to start with
+the default seed instead of warning.
+
+### Defence-in-depth NetworkPolicies
+
+`bios-multilevel-platform-services/deploy/network-policies.yaml` contains
+`NetworkPolicy` resources that restrict ingress to the prediction and
+blockchain services to only the dashboard + prediction pods in the namespace.
+The policies are not enabled through the chart because the chart's policy
+template doesn't reliably express that selector across versions; apply them
+directly after eyeballing the label selectors against your cluster:
+
+```sh
+kubectl -n <namespace> get pods --show-labels   # confirm app= labels
+kubectl -n <namespace> apply -f bios-multilevel-platform-services/deploy/network-policies.yaml
+```
+
+Without these, a compromised pod elsewhere in the namespace could still POST
+events directly to `bios-blockchain-…:8092/events`.

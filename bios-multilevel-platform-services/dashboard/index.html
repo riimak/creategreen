@@ -2356,8 +2356,9 @@ function renderGridTile(){
     setHtml('gridMeta1', `<span class="muted">${t('tile.grid.unavailable')}</span>`);
     return;
   }
-  const exporting = grid < -0.05;
-  const importing = grid > 0.05;
+  // Partner feed semantics: positive grid power means export, negative means import.
+  const exporting = grid > 0.05;
+  const importing = grid < -0.05;
   if (exporting) setPill('gridPill', t('cpill.export_kw', { kW: Math.abs(grid).toFixed(1) }), 'ok');
   else if (importing) setPill('gridPill', t('cpill.import_kw', { kW: Math.abs(grid).toFixed(1) }), 'info');
   else setPill('gridPill', t('cpill.balanced'), '');
@@ -2412,18 +2413,53 @@ function processStationRows(rows) {
   return { latest, series };
 }
 
+const AC_POWER_KEYS = ['Inverter_AC_power_total', 'Inverter.AC.power.total', '33_Total_AC_Output_Power_(Active)'];
+const GRID_POWER_KEYS = ['Grid_power_total', 'Grid.power.total', '36_Total_Grid_Power'];
+const ENERGY_COUNTER_KEYS = ['Inverter_AC_energy_out_daily', 'Inverter.AC.energy.out.daily', '35_Daily_Production_(Active)', '34_Cumulative_Production_(Active)'];
+const TO_GRID_KEYS = ['Grid_energy_toGrid_total', 'Grid.energy.toGrid.total', '37_Cumulative_Grid_Feed-in', '39_Daily_Grid_Feed-in'];
+const FROM_GRID_KEYS = ['Grid_energy_fromGrid_total', 'Grid.energy.fromGrid.total', '38_Cumulative_Energy_Purchased'];
+
+function pickMetricKey(latest, series, candidates) {
+  for (const key of candidates) {
+    if (latest?.[key] || series?.[key]?.length) return key;
+  }
+  return null;
+}
+
+function pickLatestValue(latest, series, candidates) {
+  const key = pickMetricKey(latest, series, candidates);
+  if (!key) return null;
+  const val = latest?.[key]?.v;
+  return Number.isFinite(val) ? val : null;
+}
+
+function pickSeries(series, candidates) {
+  const key = candidates.find(candidate => Array.isArray(series?.[candidate]) && series[candidate].length);
+  return key ? series[key] : [];
+}
+
 function computeDailyYield(series) {
-  const energySeries = series['Inverter_AC_energy_out_daily'] || series['35_Daily_Production_(Active)'] || series['34_Cumulative_Production_(Active)'] || [];
-  if (energySeries.length < 2) return null;
+  const energySeries = pickSeries(series, ENERGY_COUNTER_KEYS);
+  if (!energySeries.length) return null;
   const now = new Date();
   const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const todayPoints = energySeries.filter(p => p.x.getTime() >= todayMidnight);
-  if (todayPoints.length >= 2) return todayPoints[todayPoints.length - 1].y - todayPoints[0].y;
-  return energySeries[energySeries.length - 1].y - energySeries[0].y;
+  if (todayPoints.length >= 2) {
+    const delta = todayPoints[todayPoints.length - 1].y - todayPoints[0].y;
+    if (Number.isFinite(delta) && delta >= 0) return delta;
+  }
+  if (todayPoints.length === 1) return 0;
+  if (energySeries.length >= 2) {
+    const delta = energySeries[energySeries.length - 1].y - energySeries[0].y;
+    if (Number.isFinite(delta) && delta >= 0) return delta;
+  }
+  return 0;
 }
 
 function isSolarData(metrics) {
-  return metrics.has('Inverter_AC_power_total') || metrics.has('33_Total_AC_Output_Power_(Active)');
+  return metrics.has('Inverter_AC_power_total')
+    || metrics.has('Inverter.AC.power.total')
+    || metrics.has('33_Total_AC_Output_Power_(Active)');
 }
 
 function isMeteoData(metrics) {
@@ -2464,14 +2500,14 @@ async function loadLiveEnergy(){
 
     for (const plant of solarPlants) {
       const { latest, series } = processStationRows(plant.data);
-      const acKey = latest['Inverter_AC_power_total'] ? 'Inverter_AC_power_total' : '33_Total_AC_Output_Power_(Active)';
-      const gridKey = latest['Grid_power_total'] ? 'Grid_power_total' : '36_Total_Grid_Power';
-      const ac = latest[acKey]?.v ?? null;
-      const grid = latest[gridKey]?.v ?? null;
+      const acKey = pickMetricKey(latest, series, AC_POWER_KEYS);
+      const gridKey = pickMetricKey(latest, series, GRID_POWER_KEYS);
+      const ac = acKey ? (latest[acKey]?.v ?? null) : null;
+      const grid = gridKey ? (latest[gridKey]?.v ?? null) : null;
       const soc = latest['BMS_energy_SOC']?.v ?? null;
       const battPower = latest['Inverter_DC_Battery_power_total']?.v ?? null;
-      const toGrid = latest['Grid_energy_toGrid_total']?.v ?? latest['37_Cumulative_Grid_Feed-in']?.v ?? null;
-      const fromGrid = latest['Grid_energy_fromGrid_total']?.v ?? latest['38_Cumulative_Energy_Purchased']?.v ?? null;
+      const toGrid = pickLatestValue(latest, series, TO_GRID_KEYS);
+      const fromGrid = pickLatestValue(latest, series, FROM_GRID_KEYS);
       const daily = computeDailyYield(series);
       const plantTs = Math.max(...Object.values(latest).map(l => l.ts).filter(Number.isFinite));
 
@@ -2486,12 +2522,12 @@ async function loadLiveEnergy(){
       plantSnapshots.push({ source: plant.source, ac, grid, daily, soc, battPower, lastTs: plantTs });
 
       // Merge power series for combined chart
-      const powerKey = series['Inverter_AC_power_total'] ? 'Inverter_AC_power_total' : '33_Total_AC_Output_Power_(Active)';
-      if (series[powerKey]) {
+      const powerKey = pickMetricKey(latest, series, AC_POWER_KEYS);
+      if (powerKey && series[powerKey]) {
         if (!mergedPowerSeries['Inverter_AC_power_total']) mergedPowerSeries['Inverter_AC_power_total'] = [];
         mergedPowerSeries['Inverter_AC_power_total'].push(...series[powerKey]);
       }
-      if (series[gridKey]) {
+      if (gridKey && series[gridKey]) {
         if (!mergedPowerSeries['Grid_power_total']) mergedPowerSeries['Grid_power_total'] = [];
         mergedPowerSeries['Grid_power_total'].push(...series[gridKey]);
       }
@@ -2517,25 +2553,31 @@ async function loadLiveEnergy(){
     energySnap.fromGrid = totalFromGrid || null;
     energySnap.lastTs = latestTs || null;
 
-    // Monthly yield: fetch 30d of cumulative energy counter (just first+last point per station)
+    // Monthly yield: fetch 30d of energy counter and compare first/last valid values.
     try {
       const monthResults = await Promise.allSettled(
-        solarPlants.map(p =>
-          fetch(`/prediction/measurements?source=${encodeURIComponent(p.source)}&hours=720&metric=Inverter_AC_energy_out_daily&limit=1&sort=timestamp&sortDir=asc`)
-            .then(r => r.json()).then(payload => {
-              const oldest = payload?.data?.[0];
-              if (!oldest || oldest.value === null) return null;
-              const { latest: lat } = processStationRows(p.data);
-              const latestVal = lat['Inverter_AC_energy_out_daily']?.v;
-              if (latestVal === null || latestVal === undefined) return null;
-              return latestVal - oldest.value;
-            })
-        )
+        solarPlants.map(async p => {
+          const { latest: lat, series: sr } = processStationRows(p.data);
+          const metricKey = pickMetricKey(lat, sr, ENERGY_COUNTER_KEYS);
+          if (!metricKey) return null;
+          const payload = await fetch(`/prediction/measurements?source=${encodeURIComponent(p.source)}&hours=720&metric=${encodeURIComponent(metricKey)}&limit=5000&sort=timestamp&sortDir=asc`)
+            .then(r => r.json());
+          const points = (payload?.data || [])
+            .filter(row => row && !row.isMissing && row.value !== null && row.value !== undefined)
+            .map(row => Number(row.value))
+            .filter(Number.isFinite);
+          if (points.length >= 2) {
+            const delta = points[points.length - 1] - points[0];
+            return Number.isFinite(delta) ? Math.max(0, delta) : null;
+          }
+          if (points.length === 1) return 0;
+          return null;
+        }),
       );
       let totalMonthly = 0;
       let hasAny = false;
       for (const r of monthResults) {
-        if (r.status === 'fulfilled' && r.value !== null && r.value > 0) { totalMonthly += r.value; hasAny = true; }
+        if (r.status === 'fulfilled' && r.value !== null) { totalMonthly += r.value; hasAny = true; }
       }
       energySnap.monthly = hasAny ? totalMonthly : null;
     } catch { energySnap.monthly = null; }

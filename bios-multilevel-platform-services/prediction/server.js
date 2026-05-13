@@ -724,8 +724,10 @@ async function handle(req, res) {
     }
     return json(res, 404, { error: 'not found' });
   } catch (error) {
+    // Log the full error server-side; never reflect raw error.message to the
+    // client (it leaks DB driver internals, upstream URLs, file paths, etc.).
     log('error', `${url.pathname}: ${error.message}`);
-    return json(res, 500, { error: error.message });
+    return json(res, 500, { error: 'internal error' });
   }
 }
 
@@ -775,7 +777,7 @@ if (require.main === module) {
     });
     handle(req, res).catch((err) => {
       log('error', `unhandled ${req.method} ${url.pathname}: ${err.message}`);
-      if (!res.headersSent) json(res, 500, { error: err.message });
+      if (!res.headersSent) json(res, 500, { error: 'internal error' });
     });
   }).listen(PORT, () => {
     const hasDb = Boolean(process.env.DATABASE_URL);

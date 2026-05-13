@@ -1,4 +1,5 @@
 const dashboardHtml = await Deno.readTextFile(new URL("./index.html", import.meta.url));
+const euVisibilityHtml = await safeReadHtml(new URL("./eu-visibility.html", import.meta.url));
 const encoder = new TextEncoder();
 const clients = new Set<ReadableStreamDefaultController<Uint8Array>>();
 const latest = new Map<string, unknown>();
@@ -14,28 +15,249 @@ function logLine(level: "info" | "warn" | "error", msg: string): void {
   else console.log(line);
 }
 
+async function safeReadHtml(url: URL): Promise<string | null> {
+  try {
+    return await Deno.readTextFile(url);
+  } catch {
+    return null;
+  }
+}
+
 function isFetchErrorPayload(value: unknown): value is { error: string } {
   return Boolean(
     value && typeof value === "object" && "error" in value && typeof (value as { error: string }).error === "string",
   );
 }
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+// ── Security headers ────────────────────────────────────────────────────────
+//
+// The dashboard, its API proxy and SSE endpoint are all served from one origin
+// (https://bios-multilevel.barrage.net), so cross-origin access is intentionally
+// not allowed. We do NOT emit Access-Control-Allow-Origin on API responses —
+// browser same-origin policy is sufficient. OPTIONS preflights for unknown
+// origins return 204 without permissive CORS headers, so a hostile page in a
+// different origin cannot script the proxy from a victim's browser.
+
+async function sha256Base64(data: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(data));
+  let binary = "";
+  const bytes = new Uint8Array(digest);
+  for (let i = 0; i < bytes.byteLength; i += 1) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+async function inlineScriptHashes(html: string): Promise<string[]> {
+  const hashes: string[] = [];
+  const re = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(html)) !== null) {
+    if (/\bsrc\s*=/.test(match[1])) continue;
+    const hash = await sha256Base64(match[2]);
+    hashes.push(`'sha256-${hash}'`);
+  }
+  return hashes;
+}
+
+const cspScriptHashes = [
+  ...(await inlineScriptHashes(dashboardHtml)),
+  ...(euVisibilityHtml ? await inlineScriptHashes(euVisibilityHtml) : []),
+];
+
+const csp = [
+  "default-src 'none'",
+  // chart.js + chart-adapter come from jsdelivr; inline scripts are pinned by SHA-256 hash.
+  `script-src 'self' https://cdn.jsdelivr.net ${cspScriptHashes.join(" ")}`,
+  // Inline <style> blocks and many inline style="" attributes throughout the HTML
+  // make 'unsafe-inline' for style-src practically required. Script-src remains strict.
+  "style-src 'self' https://fonts.googleapis.com 'unsafe-inline'",
+  "font-src 'self' https://fonts.gstatic.com",
+  "img-src 'self' data:",
+  // Same-origin only. /events, /prediction/*, /blockchain/* all live here.
+  "connect-src 'self'",
+  "frame-ancestors 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "object-src 'none'",
+].join("; ");
+
+const securityHeaders: Record<string, string> = {
+  "Content-Security-Policy": csp,
+  // The barrage-prod ClusterIssuer terminates TLS at the ingress. HSTS is safe.
+  "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "Referrer-Policy": "no-referrer",
+  "Permissions-Policy": "geolocation=(), microphone=(), camera=(), payment=(), usb=()",
 };
 
-function json(data: unknown, status = 200): Response {
+function withSecurity(extra: Record<string, string> = {}): Record<string, string> {
+  return { ...securityHeaders, ...extra };
+}
+
+function json(data: unknown, status = 200, extra: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(data, null, 2), {
     status,
-    headers: { "Content-Type": "application/json", ...corsHeaders },
+    headers: withSecurity({ "Content-Type": "application/json", ...extra }),
   });
 }
 
 function serviceUrl(kind: "prediction" | "blockchain"): string | undefined {
   const key = kind === "prediction" ? "PREDICTION_SERVICE_URL" : "BLOCKCHAIN_SERVICE_URL";
   return Deno.env.get(key);
+}
+
+// ── Per-IP rate limiting (token bucket) ────────────────────────────────────
+//
+// Defaults: 240 req/min sustained with a 240-token burst per client IP. /health
+// is exempt (kubelet liveness/readiness probes vary in source IP). SSE
+// connection caps below limit long-lived /events sockets separately.
+const RATE_LIMIT_BURST = Number(Deno.env.get("DASHBOARD_RATE_LIMIT_BURST") || 240);
+const RATE_LIMIT_PER_MIN = Number(Deno.env.get("DASHBOARD_RATE_LIMIT_PER_MIN") || 240);
+const RATE_LIMIT_REFILL_PER_MS = RATE_LIMIT_PER_MIN / 60_000;
+
+interface Bucket {
+  tokens: number;
+  lastRefill: number;
+}
+const rateBuckets = new Map<string, Bucket>();
+
+interface ConnInfoLike {
+  remoteAddr?: { transport?: string; hostname?: string; port?: number };
+}
+
+function clientIp(req: Request, info?: ConnInfoLike): string {
+  const xri = req.headers.get("x-real-ip");
+  if (xri) return xri.trim();
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) return xff.split(",")[0].trim();
+  return info?.remoteAddr?.hostname || "unknown";
+}
+
+function consumeRateLimit(ip: string): { ok: true } | { ok: false; retryAfterSec: number } {
+  const now = Date.now();
+  let bucket = rateBuckets.get(ip);
+  if (!bucket) {
+    bucket = { tokens: RATE_LIMIT_BURST, lastRefill: now };
+    rateBuckets.set(ip, bucket);
+  }
+  const elapsed = now - bucket.lastRefill;
+  bucket.tokens = Math.min(RATE_LIMIT_BURST, bucket.tokens + elapsed * RATE_LIMIT_REFILL_PER_MS);
+  bucket.lastRefill = now;
+  if (bucket.tokens < 1) {
+    const deficit = 1 - bucket.tokens;
+    const retryAfterSec = Math.max(1, Math.ceil(deficit / RATE_LIMIT_REFILL_PER_MS / 1000));
+    return { ok: false, retryAfterSec };
+  }
+  bucket.tokens -= 1;
+  return { ok: true };
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, bucket] of rateBuckets) {
+    if (now - bucket.lastRefill > 5 * 60_000) rateBuckets.delete(ip);
+  }
+}, 60_000);
+
+// ── SSE concurrent-connection caps ─────────────────────────────────────────
+const SSE_MAX_PER_IP = Number(Deno.env.get("DASHBOARD_SSE_MAX_PER_IP") || 5);
+const SSE_MAX_GLOBAL = Number(Deno.env.get("DASHBOARD_SSE_MAX_GLOBAL") || 500);
+const sseConnectionsByIp = new Map<string, number>();
+
+function sseAcquire(ip: string): boolean {
+  if (clients.size >= SSE_MAX_GLOBAL) return false;
+  const cur = sseConnectionsByIp.get(ip) || 0;
+  if (cur >= SSE_MAX_PER_IP) return false;
+  sseConnectionsByIp.set(ip, cur + 1);
+  return true;
+}
+
+function sseRelease(ip: string): void {
+  const cur = sseConnectionsByIp.get(ip) || 0;
+  if (cur <= 1) sseConnectionsByIp.delete(ip);
+  else sseConnectionsByIp.set(ip, cur - 1);
+}
+
+// ── Proxy allowlists ───────────────────────────────────────────────────────
+//
+// The dashboard fronts internal-only services (prediction + blockchain) that
+// have no ingress of their own. We expose ONLY the read endpoints the UI
+// actually calls. POST /events on blockchain in particular is intentionally
+// not reachable through the public proxy: the dashboard never writes to it,
+// the blockchain worker pulls events from prediction internally, and a public
+// write path here would let any caller broadcast Stealth transactions.
+const PREDICTION_ALLOW_EXACT = new Set<string>([
+  "/prediction",
+  "/prediction/health",
+  "/prediction/stats",
+  "/prediction/status",
+  "/prediction/models",
+  "/prediction/forecast",
+  "/prediction/forecasts",
+  "/prediction/forecasts/latest",
+  "/prediction/forecasts/page",
+  "/prediction/anomalies",
+  "/prediction/anomalies/page",
+  "/prediction/data-quality",
+  "/prediction/data-quality/latest",
+  "/prediction/data-quality/page",
+  "/prediction/sla",
+  "/prediction/measurements",
+  "/prediction/measurements/meta",
+]);
+
+const BLOCKCHAIN_ALLOW_EXACT = new Set<string>([
+  "/blockchain",
+  "/blockchain/health",
+  "/blockchain/stats",
+  "/blockchain/status",
+  "/blockchain/events",
+  "/blockchain/events/page",
+  "/blockchain/events/latest",
+  "/blockchain/decode",
+  "/blockchain/chain/status",
+  "/blockchain/chain/transactions",
+  "/blockchain/chain/blocks",
+  "/blockchain/feeless/status",
+]);
+
+function isProxyPathAllowed(kind: "prediction" | "blockchain", pathname: string): boolean {
+  if (kind === "prediction") return PREDICTION_ALLOW_EXACT.has(pathname);
+  if (BLOCKCHAIN_ALLOW_EXACT.has(pathname)) return true;
+  // /blockchain/events/<id> and /blockchain/verify/<id> — exactly one path segment, no slashes.
+  if (/^\/blockchain\/events\/[A-Za-z0-9_.:-]+$/.test(pathname)) return true;
+  if (/^\/blockchain\/verify\/[A-Za-z0-9_.:-]+$/.test(pathname)) return true;
+  return false;
+}
+
+// Headers we will NOT forward upstream. Hop-by-hop per RFC 7230 plus client
+// auth, cookies and forwarded-for chains we don't want the upstream to trust.
+const FORWARD_HEADER_BLOCKLIST = new Set<string>([
+  "host",
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+  "authorization",
+  "cookie",
+  "x-forwarded-for",
+  "x-forwarded-host",
+  "x-forwarded-proto",
+  "x-real-ip",
+  "forwarded",
+]);
+
+function filteredUpstreamHeaders(req: Request): Headers {
+  const out = new Headers();
+  for (const [key, value] of req.headers) {
+    if (FORWARD_HEADER_BLOCKLIST.has(key.toLowerCase())) continue;
+    out.set(key, value);
+  }
+  return out;
 }
 
 function sseMessage(type: string, data: unknown): Uint8Array {
@@ -363,7 +585,12 @@ async function forwardBlockchainStream(): Promise<void> {
   }
 }
 
-function sseResponse(): Response {
+function sseResponse(ip: string): Response {
+  if (!sseAcquire(ip)) {
+    return json({ error: "too many concurrent stream connections" }, 429, {
+      "Retry-After": "30",
+    });
+  }
   let currentController: ReadableStreamDefaultController<Uint8Array> | null = null;
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -377,71 +604,99 @@ function sseResponse(): Response {
     },
     cancel() {
       if (currentController) clients.delete(currentController);
+      sseRelease(ip);
     },
   });
 
   return new Response(stream, {
-    headers: {
+    headers: withSecurity({
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
-      ...corsHeaders,
-    },
+    }),
   });
 }
 
 async function proxy(req: Request, kind: "prediction" | "blockchain", prefix: string): Promise<Response> {
+  // Read-only proxy. Anything else is rejected before it reaches the upstream
+  // so a public caller can never write to the cluster-internal services.
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    return json({ error: "method not allowed" }, 405, { Allow: "GET, HEAD" });
+  }
+
   const base = serviceUrl(kind);
   if (!base) {
-    return json({
-      error: `${kind} service is not configured`,
-      expectedEnv: kind === "prediction" ? "PREDICTION_SERVICE_URL" : "BLOCKCHAIN_SERVICE_URL",
-    }, 502);
+    return json({ error: `${kind} service is not configured` }, 502);
   }
 
   const url = new URL(req.url);
+  if (!isProxyPathAllowed(kind, url.pathname)) {
+    return json({ error: "endpoint not available" }, 404);
+  }
+
   const upstream = new URL(url.pathname.slice(prefix.length) || "/", base);
   upstream.search = url.search;
 
-  const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
   try {
     const res = await fetch(upstream, {
       method: req.method,
-      headers: req.headers,
-      body,
+      headers: filteredUpstreamHeaders(req),
     });
 
-    const headers = new Headers(res.headers);
-    Object.entries(corsHeaders).forEach(([key, value]) => headers.set(key, value));
+    // Copy upstream response headers but drop any CORS leakage from the
+    // upstream and replace with our locked-down security headers. The
+    // upstream's hostname/port must never be reflected to the client.
+    const headers = new Headers();
+    for (const [key, value] of res.headers) {
+      const lower = key.toLowerCase();
+      if (lower.startsWith("access-control-")) continue;
+      if (lower === "server" || lower === "x-powered-by") continue;
+      headers.set(key, value);
+    }
+    for (const [key, value] of Object.entries(securityHeaders)) headers.set(key, value);
     return new Response(res.body, { status: res.status, headers });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logLine("error", `proxy ${kind} ${upstream.origin}${upstream.pathname}${upstream.search}: ${msg}`);
-    return json({ error: "upstream unreachable", upstream: `${upstream.origin}${upstream.pathname}`, detail: msg }, 502);
+    // Intentionally do NOT echo the internal upstream URL or raw error in the
+    // response body — that leaked the cluster service hostname before.
+    return json({ error: "upstream unreachable" }, 502);
   }
 }
 
-async function handleRequest(req: Request): Promise<Response> {
+async function handleRequest(req: Request, ip: string): Promise<Response> {
   const url = new URL(req.url);
-  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
+
+  // No permissive CORS. Same-origin requests don't need preflight; cross-origin
+  // requests get a clean 204 with no Allow-* headers and the browser blocks them.
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: withSecurity({ Allow: "GET, HEAD, OPTIONS" }) });
+  }
 
   if (url.pathname === "/" || url.pathname === "/index.html") {
     return new Response(dashboardHtml, {
-      headers: { "Content-Type": "text/html; charset=utf-8" },
+      headers: withSecurity({ "Content-Type": "text/html; charset=utf-8" }),
     });
   }
 
   if (url.pathname === "/eu-visibility.html") {
-    try {
-      const euHtml = await Deno.readTextFile(new URL("./eu-visibility.html", import.meta.url));
-      return new Response(euHtml, { headers: { "Content-Type": "text/html; charset=utf-8" } });
-    } catch {
-      return new Response("EU visibility page not found", { status: 404 });
-    }
+    if (!euVisibilityHtml) return new Response("EU visibility page not found", { status: 404 });
+    return new Response(euVisibilityHtml, {
+      headers: withSecurity({ "Content-Type": "text/html; charset=utf-8" }),
+    });
+  }
+
+  if (url.pathname === "/robots.txt") {
+    return new Response("User-agent: *\nDisallow: /\n", {
+      headers: withSecurity({ "Content-Type": "text/plain; charset=utf-8" }),
+    });
   }
 
   if (url.pathname === "/events") {
-    return sseResponse();
+    if (req.method !== "GET") {
+      return json({ error: "method not allowed" }, 405, { Allow: "GET" });
+    }
+    return sseResponse(ip);
   }
 
   if (url.pathname.startsWith("/prediction")) {
@@ -464,11 +719,30 @@ async function handleRequest(req: Request): Promise<Response> {
   return json({ error: "not found" }, 404);
 }
 
-Deno.serve(async (req: Request) => {
+function shouldRateLimit(pathname: string): boolean {
+  // /health is hit by kubelet probes from a varying source IP; never throttle it.
+  if (pathname === "/health") return false;
+  return true;
+}
+
+Deno.serve(async (req: Request, info: ConnInfoLike) => {
   const start = performance.now();
   const path = new URL(req.url).pathname;
+  const ip = clientIp(req, info);
   try {
-    const res = await handleRequest(req);
+    if (shouldRateLimit(path)) {
+      const limit = consumeRateLimit(ip);
+      if (!limit.ok) {
+        if (accessLogEnabled) {
+          logLine("warn", `rate-limit ${ip} ${req.method} ${path} -> 429 retry=${limit.retryAfterSec}s`);
+        }
+        return json({ error: "rate limit exceeded" }, 429, {
+          "Retry-After": String(limit.retryAfterSec),
+        });
+      }
+    }
+
+    const res = await handleRequest(req, ip);
     if (accessLogEnabled) {
       logLine("info", `${req.method} ${path} -> ${res.status} ${Math.round(performance.now() - start)}ms`);
     }
@@ -487,7 +761,7 @@ Deno.serve(async (req: Request) => {
   const tBc = upstreamTimeoutMs("blockchain", "/chain/status");
   logLine(
     "info",
-    `ready: prediction=${pred ? "set" : "missing"} blockchain=${bc ? "set" : "missing"} accessLog=${accessLogEnabled} fetchTimeout=${tGeneral}ms blockchainRpc=${tBc}ms upstreamSse=enabled`,
+    `ready: prediction=${pred ? "set" : "missing"} blockchain=${bc ? "set" : "missing"} accessLog=${accessLogEnabled} fetchTimeout=${tGeneral}ms blockchainRpc=${tBc}ms upstreamSse=enabled rateLimit=${RATE_LIMIT_PER_MIN}/min sseMaxPerIp=${SSE_MAX_PER_IP} sseMaxGlobal=${SSE_MAX_GLOBAL} cspScriptHashes=${cspScriptHashes.length}`,
   );
 }
 startDashboardTick();

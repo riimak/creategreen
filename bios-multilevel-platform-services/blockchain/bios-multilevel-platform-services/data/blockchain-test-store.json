@@ -1,0 +1,46 @@
+{
+  "events": [
+    {
+      "id": "evt-1778054161466-5c1ba5",
+      "schema": "stealth-event-v2",
+      "sourceId": 2588,
+      "eventCode": 1,
+      "metricCode": 255,
+      "statusCode": 255,
+      "timestamp": 1717699200,
+      "value": 250,
+      "payloadHex": "020A1C6662028001FFFF00FAD444B893",
+      "payloadHash": "ed7a9224f489b641fd0ddfd4813b3180ee1f6fbda04358163f0a2704a4f705a1",
+      "bytes": 16,
+      "account": {
+        "deviceId": "2588",
+        "derivationPath": "m/44'/10205'/0'/0/66662",
+        "accountId": "xst-1cd5b186074fe53cc79f8b7cd29939d6"
+      },
+      "status": "confirmed",
+      "retryCounter": 0,
+      "createdAt": "2026-05-06T07:56:01.466Z",
+      "encodedAt": "2026-05-06T07:56:01.466Z",
+      "sourceKind": "manual",
+      "sourceRef": null,
+      "dedupeKey": "ok:0x0A1C:1717699200:250",
+      "submittedAt": "2026-05-06T07:56:01.473Z",
+      "txId": "40da2407c11adba6f1e47ddb8b0f44a3f99a5a244e2758c05f299ef575ef9786",
+      "relayMode": "mock",
+      "relayStatus": "confirmed",
+      "relayReason": null,
+      "updatedAt": "2026-05-06T07:56:01.483Z",
+      "confirmedAt": "2026-05-06T07:56:01.483Z"
+    }
+  ],
+  "meta": {},
+  "checkpoints": {},
+  "seen": {
+    "ok:0x0A1C:1717699200:250": {
+      "id": "evt-1778054161466-5c1ba5",
+      "txId": "40da2407c11adba6f1e47ddb8b0f44a3f99a5a244e2758c05f299ef575ef9786",
+      "status": "confirmed",
+      "seenAt": "2026-05-06T07:56:01.483Z"
+    }
+  }
+}

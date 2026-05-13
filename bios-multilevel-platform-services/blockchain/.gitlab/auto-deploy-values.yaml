@@ -73,9 +73,26 @@ extraVolumes:
     secret:
       secretName: bios-pg-ca
       optional: true
+  # The Stealth WIF (private key) is mounted from a Kubernetes Secret instead
+  # of being shipped as a plain Helm `extraEnv` value. The secret is upserted
+  # by the GitLab production-blockchain job from the STEALTH_WIF CI variable.
+  # `optional: true` lets the deploy proceed during the migration window
+  # before the Secret exists; the wallet code logs and goes into "WIF not
+  # configured" mode in that case (no real broadcast can happen anyway).
+  - name: stealth-wif
+    secret:
+      secretName: bios-stealth-wif
+      optional: true
+      defaultMode: 0400
+      items:
+        - key: wif
+          path: wif
 extraVolumeMounts:
   - name: pg-ca
     mountPath: /etc/ssl/pg
+    readOnly: true
+  - name: stealth-wif
+    mountPath: /etc/secrets/stealth
     readOnly: true
 
 serviceAccount:
@@ -131,3 +148,9 @@ extraEnv:
     value: "30"
   - name: DATABASE_CA_FILE
     value: "/etc/ssl/pg/ca.crt"
+  # WIF is read from this file (mounted from the bios-stealth-wif Secret),
+  # NOT from a plain STEALTH_WIF env value. The CI job stops forwarding
+  # STEALTH_WIF as env so the private key never lives in the rendered Helm
+  # release / pod env block.
+  - name: STEALTH_WIF_FILE
+    value: "/etc/secrets/stealth/wif"

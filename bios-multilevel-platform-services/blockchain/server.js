@@ -128,15 +128,39 @@ function json(res, status, body) {
   res.end(JSON.stringify(body, null, 2));
 }
 
+// Hard cap on POST body size. Without this, a single attacker request can OOM
+// the pod by streaming a huge payload that we keep concatenating in memory.
+// The blockchain /events payload is a small JSON object (event metadata), so
+// 256 KiB is comfortably above the legitimate ceiling.
+const MAX_BODY_BYTES = Number(process.env.BLOCKCHAIN_MAX_BODY_BYTES || 256 * 1024);
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
-    let data = '';
-    req.on('data', chunk => { data += chunk; });
+    const chunks = [];
+    let length = 0;
+    let aborted = false;
+    req.on('data', chunk => {
+      if (aborted) return;
+      length += chunk.length;
+      if (length > MAX_BODY_BYTES) {
+        aborted = true;
+        const err = new Error('request body too large');
+        err.statusCode = 413;
+        req.destroy(err);
+        reject(err);
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on('end', () => {
+      if (aborted) return;
+      const data = Buffer.concat(chunks).toString('utf8');
       try {
         resolve(data ? JSON.parse(data) : {});
-      } catch (error) {
-        reject(new Error('invalid JSON body'));
+      } catch (_error) {
+        const err = new Error('invalid JSON body');
+        err.statusCode = 400;
+        reject(err);
       }
     });
     req.on('error', reject);
@@ -785,8 +809,15 @@ async function handle(req, res) {
     }
     return json(res, 404, { error: 'not found' });
   } catch (error) {
+    // Log the full error server-side; do not echo internal details (DB driver
+    // messages, upstream URLs, etc.) to the client. Honor explicit statusCode
+    // for known cases like body too large / invalid JSON.
     log('error', `${url.pathname}: ${error.message}`);
-    return json(res, 500, { error: error.message });
+    const status = Number(error.statusCode) || 500;
+    const safeMessage = status === 413 ? 'request body too large'
+      : status === 400 ? 'bad request'
+      : 'internal error';
+    return json(res, status, { error: safeMessage });
   }
 }
 
@@ -800,7 +831,7 @@ if (require.main === module) {
     });
     handle(req, res).catch((err) => {
       log('error', `unhandled ${req.method} ${url.pathname}: ${err.message}`);
-      if (!res.headersSent) json(res, 500, { error: err.message });
+      if (!res.headersSent) json(res, 500, { error: 'internal error' });
     });
   }).listen(PORT, () => {
     log('info', `listening on http://0.0.0.0:${PORT} relay=${relay.mode} DATABASE_URL=${process.env.DATABASE_URL ? 'set' : 'unset'} ACCESS_LOG=${accessLogEnabled}`);

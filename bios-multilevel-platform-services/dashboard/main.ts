@@ -63,6 +63,17 @@ const cspScriptHashes = [
   ...(euVisibilityHtml ? await inlineScriptHashes(euVisibilityHtml) : []),
 ];
 
+const cspImgSources = [
+  "'self'",
+  "data:",
+  "blob:",
+  // Partner logos in the header are hosted off-origin.
+  "https://inkubator.hr",
+  "https://*.inkubator.hr",
+  "https://www.osijek.hr",
+  "https://*.osijek.hr",
+].join(" ");
+
 const csp = [
   "default-src 'none'",
   // chart.js + chart-adapter come from jsdelivr; inline scripts are pinned by SHA-256 hash.
@@ -71,7 +82,7 @@ const csp = [
   // make 'unsafe-inline' for style-src practically required. Script-src remains strict.
   "style-src 'self' https://fonts.googleapis.com 'unsafe-inline'",
   "font-src 'self' https://fonts.gstatic.com",
-  "img-src 'self' data:",
+  `img-src ${cspImgSources}`,
   // Same-origin only. /events, /prediction/*, /blockchain/* all live here.
   "connect-src 'self'",
   "frame-ancestors 'none'",

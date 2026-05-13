@@ -2780,19 +2780,20 @@ function renderLedgerSummary(txPayload, chainStatus, bcStatus){
   const relayLc = bcStatus?.lifecycle;
   const relayOk = relayLc === 'idle' || relayLc === 'running' || relayLc === 'ready';
   const relayStarting = relayLc === 'initializing';
+  const chainOk = chainStatus?.ok !== false;
   const isMock = chainStatus?.relayMode === 'mock';
   const relayEl = $('ledgerRelayStatus');
   if (relayEl) {
-    if (relayOk) relayEl.innerHTML = `<span class="pill ok" style="font-size:10px">${t('cpill.relay_active')}</span>`;
+    if (isMock) relayEl.innerHTML = `<span class="pill warn" style="font-size:10px">${t('cpill.relay_demo')}</span>`;
+    else if (chainOk || relayOk) relayEl.innerHTML = `<span class="pill ok" style="font-size:10px">${t('cpill.relay_active')}</span>`;
     else if (relayStarting) relayEl.innerHTML = `<span class="pill warn" style="font-size:10px">${t('cpill.relay_starting')}</span>`;
-    else if (isMock) relayEl.innerHTML = `<span class="pill warn" style="font-size:10px">${t('cpill.relay_demo')}</span>`;
     else relayEl.innerHTML = `<span class="pill err" style="font-size:10px">${t('cpill.relay_offline')}</span>`;
   }
-  const lc = bcStatus?.lifecycle;
-  if (lc === 'idle' || lc === 'running' || lc === 'ready') setPill('bcPill', t('cpill.relay_active'), 'ok');
-  else if (lc === 'initializing') setPill('bcPill', t('cpill.relay_starting'), 'warn');
-  else if (lc === 'failed' || lc === 'degraded') setPill('bcPill', t('cpill.relay_offline'), 'err');
-  else setPill('bcPill', t('cpill.relay_demo'), 'warn');
+  if (isMock) setPill('bcPill', t('cpill.relay_demo'), 'warn');
+  else if (chainOk || relayOk) setPill('bcPill', t('cpill.relay_active'), 'ok');
+  else if (relayStarting) setPill('bcPill', t('cpill.relay_starting'), 'warn');
+  else if (relayLc === 'failed' || relayLc === 'degraded') setPill('bcPill', t('cpill.relay_offline'), 'err');
+  else setPill('bcPill', t('cpill.relay_offline'), 'err');
 }
 
 /* ── status legend card ─────────────────────────────────── */
@@ -3509,20 +3510,20 @@ function ingest(type, raw){
     case 'blockchain.status':
       snap.blockchainStatus = payload;
       if (fresh) flashCard('cardLedgerSummary');
-      rerenderTiles(); break;
+      rerenderTiles(); rerenderLedger(); break;
     case 'blockchain.tx':
       snap.tx = payload;
       if (fresh) flashCard('cardLedgerSummary');
       rerenderTiles(); rerenderLedger(); break;
     case 'blockchain.block':
       snap.blocks = payload;
-      rerenderTiles(); break;
+      rerenderTiles(); rerenderLedger(); break;
     case 'blockchain.chain_status':
       snap.chainStatus = payload;
-      rerenderTiles(); break;
+      rerenderTiles(); rerenderLedger(); break;
     case 'blockchain.feeless':
       snap.feeless = raw;
-      rerenderTiles(); break;
+      rerenderTiles(); rerenderLedger(); break;
     case 'blockchain.decode':
       snap.decode = payload;
       if (fresh) flashCard('cardLedgerSummary');

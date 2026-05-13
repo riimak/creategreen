@@ -83,8 +83,8 @@ const csp = [
   "style-src 'self' https://fonts.googleapis.com 'unsafe-inline'",
   "font-src 'self' https://fonts.gstatic.com",
   `img-src ${cspImgSources}`,
-  // Same-origin only. /events, /prediction/*, /blockchain/* all live here.
-  "connect-src 'self'",
+  // Same-origin APIs + jsdelivr source maps (devtools/debug convenience).
+  "connect-src 'self' https://cdn.jsdelivr.net",
   "frame-ancestors 'none'",
   "base-uri 'none'",
   "form-action 'none'",

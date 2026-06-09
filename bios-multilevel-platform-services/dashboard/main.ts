@@ -112,6 +112,40 @@ function json(data: unknown, status = 200, extra: Record<string, string> = {}): 
   });
 }
 
+function contentTypeForAsset(pathname: string): string {
+  const lower = pathname.toLowerCase();
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".gif")) return "image/gif";
+  if (lower.endsWith(".svg")) return "image/svg+xml";
+  if (lower.endsWith(".ico")) return "image/x-icon";
+  return "application/octet-stream";
+}
+
+async function serveDashboardAsset(req: Request, pathname: string): Promise<Response> {
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    return json({ error: "method not allowed" }, 405, { Allow: "GET, HEAD" });
+  }
+
+  const rel = pathname.slice("/assets/".length);
+  if (!rel || rel.includes("..") || rel.includes("\\") || rel.startsWith("/")) {
+    return json({ error: "not found" }, 404);
+  }
+
+  try {
+    const file = await Deno.readFile(new URL(`./assets/${rel}`, import.meta.url));
+    return new Response(req.method === "HEAD" ? null : file, {
+      headers: withSecurity({
+        "Content-Type": contentTypeForAsset(pathname),
+        "Cache-Control": "public, max-age=86400",
+      }),
+    });
+  } catch {
+    return json({ error: "not found" }, 404);
+  }
+}
+
 function serviceUrl(kind: "prediction" | "blockchain"): string | undefined {
   const key = kind === "prediction" ? "PREDICTION_SERVICE_URL" : "BLOCKCHAIN_SERVICE_URL";
   return Deno.env.get(key);
@@ -695,6 +729,15 @@ async function handleRequest(req: Request, ip: string): Promise<Response> {
     return new Response(euVisibilityHtml, {
       headers: withSecurity({ "Content-Type": "text/html; charset=utf-8" }),
     });
+  }
+
+  if (url.pathname === "/eu-creategreen-sticker.png") {
+    // Backward-compatible alias in case older HTML points to root-level file.
+    return serveDashboardAsset(req, "/assets/eu-creategreen-sticker.png");
+  }
+
+  if (url.pathname.startsWith("/assets/")) {
+    return serveDashboardAsset(req, url.pathname);
   }
 
   if (url.pathname === "/robots.txt") {

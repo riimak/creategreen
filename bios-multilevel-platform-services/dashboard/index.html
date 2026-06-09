@@ -273,6 +273,19 @@ main{
 .power-card .head .meta{margin-left:auto;font-size:12px;color:var(--muted)}
 .power-card .chart-wrap{flex:1;padding:8px 14px 14px;min-height:0;display:flex;position:relative}
 .power-card .chart-wrap canvas{width:100%!important;height:100%!important;min-height:0;flex:1}
+.power-card .chart-wrap .mini-legend{
+  position:absolute;left:18px;top:10px;z-index:2;
+  display:inline-flex;gap:10px;align-items:center;
+  padding:4px 8px;border:1px solid var(--border);border-radius:999px;
+  background:color-mix(in oklch, var(--card) 92%, var(--inset) 8%);
+  font-size:10.5px;color:var(--muted);font-weight:600;line-height:1;
+}
+.power-card .chart-wrap .mini-legend[hidden]{display:none}
+.power-card .chart-wrap .mini-legend .item{display:inline-flex;align-items:center;gap:5px}
+.power-card .chart-wrap .mini-legend .dot{width:7px;height:7px;border-radius:999px;display:inline-block}
+.power-card .chart-wrap .mini-legend .item.ac .dot{background:var(--amber)}
+.power-card .chart-wrap .mini-legend .item.grid .dot{background:var(--green)}
+.power-card .chart-wrap .mini-legend .item[hidden]{display:none}
 .power-card .chart-wrap .chart-empty{
   position:absolute;inset:8px 14px 14px;display:flex;align-items:center;justify-content:center;
   text-align:center;padding:12px;font-size:12.5px;line-height:1.45;color:var(--muted);background:var(--card);border-radius:8px;border:1px dashed var(--border);z-index:1
@@ -858,10 +871,14 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
   <!-- ── Power chart card ────────────────────────────────── -->
   <section class="card power-card" id="cardPower" aria-label="Power chart">
     <div class="head">
-      <h2 data-i18n="card.power.title">Power &amp; Energy</h2>
+      <h2 data-i18n="card.power.title">Power (24h)</h2>
       <div class="meta" id="powerMeta"></div>
     </div>
     <div class="chart-wrap">
+      <div class="mini-legend" id="powerMiniLegend" aria-hidden="true">
+        <span class="item ac" id="powerLegendAc"><span class="dot"></span><span data-i18n="card.power.legend.solar">Solar</span></span>
+        <span class="item grid" id="powerLegendGrid"><span class="dot"></span><span data-i18n="card.power.legend.grid">Mreža</span></span>
+      </div>
       <div id="powerEmptyState" class="chart-empty" hidden data-i18n="card.power.empty">awaiting measurements</div>
       <canvas id="powerChart" role="img" aria-label="Production power chart"></canvas>
     </div>
@@ -1282,10 +1299,15 @@ const I18N = {
     'card.energy.month':    'Mjesec kWh',
     'card.energy.grid':     'Mreža kW',
     'card.energy.soc':      'Baterija %',
-    'card.power.title':     'Snaga i energija',
-    'card.power.empty':     'čekam mjerenja',
+    'card.power.title':     'Snaga (24h)',
+    'card.power.empty':     'nema mjerenja snage u zadnja 24h',
     'card.power.ac_output': 'AC izlaz (kW)',
     'card.power.grid_flow': 'Mreža (kW)',
+    'card.power.legend.solar':'Solar',
+    'card.power.legend.grid': 'Mreža',
+    'card.power.meta':      'AC izlaz i razmjena s mrežom (kW)',
+    'card.power.meta_stale':'AC izlaz i razmjena s mrežom (kW) · zadnje očitanje prije {age}',
+    'card.power.meta_no_data':'nema dostupnih očitanja snage',
     'card.method.model':    'Model',
     'card.ledger_summary.title':'Lanac',
     'card.alerts.title':    'Upozorenja',
@@ -1650,10 +1672,15 @@ const I18N = {
     'card.energy.month':    'Month kWh',
     'card.energy.grid':     'Grid kW',
     'card.energy.soc':      'Battery %',
-    'card.power.title':     'Power & Energy',
-    'card.power.empty':     'awaiting measurements',
+    'card.power.title':     'Power (24h)',
+    'card.power.empty':     'no power measurements in the last 24h',
     'card.power.ac_output': 'AC output (kW)',
     'card.power.grid_flow': 'Grid (kW)',
+    'card.power.legend.solar':'Solar',
+    'card.power.legend.grid': 'Grid',
+    'card.power.meta':      'AC output and grid exchange (kW)',
+    'card.power.meta_stale':'AC output and grid exchange (kW) · last reading {age} ago',
+    'card.power.meta_no_data':'no power readings available',
     'card.method.model':    'Model',
     'card.ledger_summary.title':'Chain',
     'card.alerts.title':    'Alerts',
@@ -2662,6 +2689,26 @@ function renderPowerChart(series){
   const gridSeries = series?.['Grid_power_total'] || [];
 
   const emptyEl = $('powerEmptyState');
+  const legendEl = $('powerMiniLegend');
+  const acLegendEl = $('powerLegendAc');
+  const gridLegendEl = $('powerLegendGrid');
+  if (acLegendEl) acLegendEl.hidden = !acSeries.length;
+  if (gridLegendEl) gridLegendEl.hidden = !gridSeries.length;
+  if (legendEl) legendEl.hidden = !acSeries.length && !gridSeries.length;
+  const latestAcTs = acSeries.length ? acSeries[acSeries.length - 1]?.x?.getTime?.() : null;
+  const latestGridTs = gridSeries.length ? gridSeries[gridSeries.length - 1]?.x?.getTime?.() : null;
+  const latestMs = Math.max(
+    Number.isFinite(latestAcTs) ? latestAcTs : 0,
+    Number.isFinite(latestGridTs) ? latestGridTs : 0,
+  );
+  if (!latestMs) {
+    setText('powerMeta', t('card.power.meta_no_data'));
+  } else {
+    const ageSec = Math.max(0, Math.round((Date.now() - latestMs) / 1000));
+    if (ageSec > 15 * 60) setText('powerMeta', t('card.power.meta_stale', { age: ageBrief(Math.floor(latestMs / 1000)) }));
+    else setText('powerMeta', t('card.power.meta'));
+  }
+
   if (!acSeries.length && !gridSeries.length) {
     if (emptyEl) emptyEl.hidden = false;
     return;

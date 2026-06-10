@@ -128,7 +128,7 @@ header.app .lang-switch button:focus-visible{outline:2px solid oklch(54% .17 245
 main{
   display:grid;
   grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);
-  grid-template-rows:auto auto auto minmax(0,1fr);
+  grid-template-rows:auto auto auto minmax(220px,1fr);
   grid-template-areas:
     "strip   strip"
     "energy  side"
@@ -136,7 +136,7 @@ main{
     "power   side";
   gap:12px;
   padding:12px 22px 14px;
-  min-height:0;overflow:hidden;
+  min-height:0;overflow:hidden auto;
 }
 
 /* ── status strip ────────────────────────────────────────── */

@@ -9,6 +9,8 @@ visibility sticker. The mark is monochrome lime green.
 | `creategreen-wordmark.png` | Wordmark, transparent, 1166×160 | Quick raster use |
 | `creategreen-icon.png` | Circular badge (wind turbines + plant), transparent, 512×512 | Avatar / favicon / small mark |
 | `creategreen-lockup.png` | Icon + wordmark horizontal lockup, transparent, 1199×206 | Combined branding |
+| `creategreen-eu-banner.png` | Full official Interreg/EU visibility sticker (Interreg + EU flag + IPA HR–RS + CREATEGREEN + funding statement) | EU visibility / funding compliance |
+| `creategreen-eu-banner-trimmed.png` | Same banner with outer whitespace cropped, 838×470 | The version embedded on the EU visibility page |
 
 ## Color
 

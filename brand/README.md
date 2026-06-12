@@ -1,28 +1,25 @@
 # CREATEGREEN brand assets
 
-Logo extracted from the official Interreg IPA Croatia–Serbia CREATEGREEN
-visibility sticker. The mark is monochrome lime green.
+Official vector logos sliced from the original `.ai` source files.
+All assets are SVG and scale cleanly at any size.
 
 | File | What it is | Use |
 | --- | --- | --- |
-| `creategreen-wordmark.svg` | Vector wordmark (traced, scalable) | **Primary asset** — headers, print, anywhere |
-| `creategreen-wordmark.png` | Wordmark, transparent, 1166×160 | Quick raster use |
-| `creategreen-icon.png` | Circular badge (wind turbines + plant), transparent, 512×512 | Avatar / favicon / small mark |
-| `creategreen-lockup.png` | Icon + wordmark horizontal lockup, transparent, 1199×206 | Combined branding |
-| `creategreen-eu-banner.png` | Full official Interreg/EU visibility sticker (Interreg + EU flag + IPA HR–RS + CREATEGREEN + funding statement) | EU visibility / funding compliance |
-| `creategreen-eu-banner-trimmed.png` | Same banner with outer whitespace cropped, 838×470 | The version embedded on the EU visibility page |
+| `creategreen-logo.svg` | Badge (wind turbines + plant) left of the CREATEGREEN wordmark, 485×71 | **Primary lockup** — headers, print, anywhere |
+| `creategreen.svg` | Wordmark left, badge right, 485×71 | Alternate lockup |
+| `creategreen-logo-with-large-padding.svg` | Wordmark left, badge far right with a wide gap, 800×71 | Wide layouts (e.g. full-width banners) |
+| `creategreen-icon.svg` | Badge only, 71×71 (extracted from the lockup) | Avatar / favicon / small mark |
+| `interreg-logo.svg` | Official Interreg IPA Croatia–Serbia logo with the EU flag ("co-funded by the European Union"), 802×182 | EU visibility / funding compliance |
 
 ## Color
 
-- Lime green: `#A5C14E` (sampled from the source artwork)
+- Brand green: `#91C852` (from the source artwork)
+- Interreg blue: `#0B50A1` / `#074EA2`
 
-## Notes
+## Where they are used
 
-- The wordmark is vectorized, so it stays crisp at any size. Prefer the SVG.
-- The icon is a raster: the source badge is only ~48 px, so it is soft when
-  enlarged — best used small. (It cannot be sharpened beyond the source.)
-- The platform dashboard (`bios-multilevel-platform-services/dashboard`) is
-  served by a Deno handler that only serves fixed routes and has a strict CSP.
-  It does not serve arbitrary static files, but its `img-src` allows `data:`
-  and inline `<svg>`. To use the logo there, inline the SVG markup (or embed a
-  `data:` URI) rather than linking to a file path.
+- The platform dashboard (`bios-multilevel-platform-services/dashboard`)
+  inlines the primary lockup in the header of `index.html` (the Deno handler
+  has a strict CSP, but `img-src 'self'` plus inline `<svg>` are fine).
+- `creategreen-icon.svg` and `interreg-logo.svg` are served from
+  `dashboard/assets/` (favicon and the EU visibility page respectively).

@@ -731,9 +731,8 @@ async function handleRequest(req: Request, ip: string): Promise<Response> {
     });
   }
 
-  if (url.pathname === "/eu-creategreen-sticker.png") {
-    // Backward-compatible alias in case older HTML points to root-level file.
-    return serveDashboardAsset(req, "/assets/eu-creategreen-sticker.png");
+  if (url.pathname === "/favicon.ico" || url.pathname === "/favicon.svg") {
+    return serveDashboardAsset(req, "/assets/creategreen-icon.svg");
   }
 
   if (url.pathname.startsWith("/assets/")) {

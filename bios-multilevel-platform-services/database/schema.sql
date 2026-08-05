@@ -126,6 +126,11 @@ CREATE TABLE IF NOT EXISTS fusionsolar_oauth_nonces (
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS fusionsolar_setup_tokens (
+  token_hash       TEXT PRIMARY KEY,
+  consumed_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS fusionsolar_plants (
   plant_code       TEXT PRIMARY KEY,
   source_key       TEXT NOT NULL UNIQUE,

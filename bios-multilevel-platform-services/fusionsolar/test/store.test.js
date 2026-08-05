@@ -60,6 +60,33 @@ test('nonce consumption uses one atomic, parameterized update', async () => {
   assert.deepEqual(updates[0].values, ['hash', now]);
 });
 
+test('setup-token consumption is persisted by digest and remains single-use', async () => {
+  const consumed = new Set();
+  const pool = createFakePool(async (sql, values) => {
+    if (/SELECT EXISTS/.test(sql) && /fusionsolar_setup_tokens/.test(sql)) {
+      return { rows: [{ consumed: consumed.has(values[0]) }], rowCount: 1 };
+    }
+    if (/INSERT INTO fusionsolar_setup_tokens/.test(sql)) {
+      if (consumed.has(values[0])) return { rows: [], rowCount: 0 };
+      consumed.add(values[0]);
+      return { rows: [{ token_hash: values[0] }], rowCount: 1 };
+    }
+    return { rows: [], rowCount: 0 };
+  });
+  const store = createFusionSolarStore({ pool, cipher: fakeCipher() });
+
+  assert.equal(await store.isSetupTokenConsumed('digest-a'), false);
+  assert.equal(await store.consumeSetupToken('digest-a'), true);
+  assert.equal(await store.isSetupTokenConsumed('digest-a'), true);
+  assert.equal(await store.consumeSetupToken('digest-a'), false);
+  assert.equal(await store.isSetupTokenConsumed('digest-b'), false);
+
+  const insert = pool.queries.find(({ sql }) => /INSERT INTO fusionsolar_setup_tokens/.test(sql));
+  assert.deepEqual(insert.values, ['digest-a']);
+  assert.match(insert.sql, /ON CONFLICT \(token_hash\) DO NOTHING/);
+  assert.match(insert.sql, /RETURNING token_hash/);
+});
+
 test('credentials are encrypted before reaching parameterized SQL and decrypted on load', async () => {
   const pool = createFakePool(async (sql) => {
     if (/SELECT encrypted_access_token/.test(sql)) {
@@ -88,12 +115,15 @@ test('credentials are encrypted before reaching parameterized SQL and decrypted 
     accessExpiresAt: new Date('2026-08-05T11:00:00Z'),
     scopes: ['pvms.openapi.basic'],
     tokenType: 'Bearer',
+    setupTokenHash: 'setup-digest',
   });
 
   const insert = pool.queries[0];
   assert.doesNotMatch(insert.sql, /access-secret|refresh-secret/);
+  assert.match(insert.sql, /INSERT INTO fusionsolar_setup_tokens/);
   assert.deepEqual(insert.values[0], { version: 1, ciphertext: 'encrypted:access-secret' });
   assert.deepEqual(insert.values[1], { version: 1, ciphertext: 'encrypted:refresh-secret' });
+  assert.equal(insert.values[5], 'setup-digest');
   assert.equal(insert.values.includes('access-secret'), false);
   assert.equal(insert.values.includes('refresh-secret'), false);
 
@@ -333,6 +363,9 @@ test('checkpoints, status, schema initialization, and close use the injected poo
           plant_count: '2',
           device_count: '4',
           last_success_at: null,
+          backfill_completed: '1',
+          backfill_total: '3',
+          backfill_last_success_at: new Date('2026-08-05T09:00:00Z'),
         }],
         rowCount: 1,
       };
@@ -355,6 +388,11 @@ test('checkpoints, status, schema initialization, and close use the injected poo
     plantCount: 2,
     deviceCount: 4,
     lastSuccessAt: null,
+    backfill: {
+      completed: 1,
+      total: 3,
+      lastSuccessAt: new Date('2026-08-05T09:00:00Z'),
+    },
   });
   await store.close();
 
@@ -525,6 +563,8 @@ test('PostgreSQL integration preserves nonce and measurement idempotency', {
   });
   const suffix = `${process.pid}-${Date.now()}`;
   const nonceHash = `nonce-${suffix}`;
+  const setupTokenHash = `setup-${suffix}`;
+  const authorizedSetupHash = `authorized-setup-${suffix}`;
   const plantCode = `plant-${suffix}`;
   const deviceId = `device-${suffix}`;
   const source = `HUAWEI:${plantCode}`;
@@ -538,6 +578,20 @@ test('PostgreSQL integration preserves nonce and measurement idempotency', {
     assert.equal(await store.consumeNonce(nonceHash, new Date()), false);
     await store.createNonce(nonceHash, new Date(Date.now() + 60_000));
     assert.equal(await store.consumeNonce(nonceHash, new Date()), false);
+    assert.equal(await store.isSetupTokenConsumed(setupTokenHash), false);
+    assert.equal(await store.consumeSetupToken(setupTokenHash), true);
+    assert.equal(await store.isSetupTokenConsumed(setupTokenHash), true);
+    assert.equal(await store.consumeSetupToken(setupTokenHash), false);
+    await store.saveCredentials({
+      accessToken: 'integration-access',
+      refreshToken: 'integration-refresh',
+      accessExpiresAt: new Date('2026-08-05T11:00:00Z'),
+      scopes: ['pvms.openapi.basic'],
+      tokenType: 'Bearer',
+      setupTokenHash: authorizedSetupHash,
+    });
+    assert.equal(await store.isSetupTokenConsumed(authorizedSetupHash), true);
+    assert.equal((await store.loadCredentials()).state, 'authorized');
 
     assert.deepEqual(await store.upsertPlants([{
       plantCode,
@@ -618,6 +672,11 @@ test('PostgreSQL integration preserves nonce and measurement idempotency', {
     );
   } finally {
     await pool.query('DELETE FROM fusionsolar_oauth_nonces WHERE nonce_hash = $1', [nonceHash]);
+    await pool.query(
+      'DELETE FROM fusionsolar_setup_tokens WHERE token_hash = ANY($1)',
+      [[setupTokenHash, authorizedSetupHash]],
+    );
+    await pool.query("DELETE FROM fusionsolar_oauth_credentials WHERE id = 'active'");
     await pool.query('DELETE FROM fusionsolar_sync_state WHERE sync_key = $1', [syncKey]);
     await pool.query('DELETE FROM raw_measurements WHERE source = $1', [source]);
     await pool.query('DELETE FROM fusionsolar_plants WHERE plant_code = $1', [plantCode]);

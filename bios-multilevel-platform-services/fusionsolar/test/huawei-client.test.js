@@ -99,7 +99,10 @@ test('code exchange uses the exact token path and form body, then persists norma
     now: () => NOW,
   });
 
-  const credentials = await client.exchangeCode('fixture-authorization-code');
+  const credentials = await client.exchangeCode(
+    'fixture-authorization-code',
+    { setupTokenHash: 'fixture-setup-digest' },
+  );
 
   assert.equal(new URL(requests[0].url).pathname, '/rest/dp/uidm/oauth2/v1/token');
   assert.equal(requests[0].options.method, 'POST');
@@ -119,7 +122,10 @@ test('code exchange uses the exact token path and form body, then persists norma
     scopes: [REQUIRED_SCOPE],
     tokenType: 'Bearer',
   });
-  assert.deepEqual(store.saved, [credentials]);
+  assert.deepEqual(store.saved, [{
+    ...credentials,
+    setupTokenHash: 'fixture-setup-digest',
+  }]);
 });
 
 test('token exchange requires Bearer type and the granted basic scope', async () => {

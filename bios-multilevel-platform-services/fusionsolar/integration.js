@@ -1,0 +1,252 @@
+const crypto = require('node:crypto');
+const { configurationState } = require('./config');
+
+class OAuthRouteNotFoundError extends Error {
+  constructor() {
+    super('OAuth route not found');
+    this.name = 'OAuthRouteNotFoundError';
+  }
+}
+
+function createIntegration({
+  config,
+  store,
+  client,
+  stateManager,
+  synchronizer,
+  clock = {},
+} = {}) {
+  const configured = configurationState(config || {}) === 'configured';
+  const timer = {
+    now: typeof clock.now === 'function' ? clock.now : () => new Date(),
+    setTimeout: typeof clock.setTimeout === 'function' ? clock.setTimeout : setTimeout,
+    clearTimeout: typeof clock.clearTimeout === 'function' ? clock.clearTimeout : clearTimeout,
+  };
+  const setupDigest = digest(config?.setupToken || '');
+  let schedulerStarted = false;
+  let scheduledTimer = null;
+  let activeCycle = null;
+  let schedulerError = null;
+
+  async function startUrl(suppliedToken) {
+    if (
+      !configured
+      || !constantTimeTokenMatch(config.setupToken, suppliedToken)
+      || await store.isSetupTokenConsumed(setupDigest)
+    ) {
+      throw new OAuthRouteNotFoundError();
+    }
+    const state = await stateManager.issue();
+    return client.authorizationUrl(state);
+  }
+
+  async function completeCallback(params) {
+    try {
+      await stateManager.verifyAndConsume(params?.get?.('state'));
+      if (params.get('error')) return { ok: false };
+      const code = params.get('code');
+      if (typeof code !== 'string' || code === '') return { ok: false };
+      await client.exchangeCode(code, { setupTokenHash: setupDigest });
+      await store.consumeSetupToken(setupDigest);
+      requestImmediateCycle();
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  }
+
+  function startScheduler() {
+    if (!configured) return Promise.resolve();
+    if (schedulerStarted) return activeCycle || Promise.resolve();
+    schedulerStarted = true;
+    return runScheduledCycle();
+  }
+
+  function stopScheduler() {
+    schedulerStarted = false;
+    if (scheduledTimer !== null) {
+      timer.clearTimeout(scheduledTimer);
+      scheduledTimer = null;
+    }
+  }
+
+  function requestImmediateCycle() {
+    if (!schedulerStarted) return;
+    if (scheduledTimer !== null) {
+      timer.clearTimeout(scheduledTimer);
+      scheduledTimer = null;
+    }
+    return runScheduledCycle();
+  }
+
+  function runScheduledCycle() {
+    if (!schedulerStarted) return Promise.resolve();
+    if (activeCycle) return activeCycle;
+    activeCycle = performScheduledCycle()
+      .catch((error) => {
+        schedulerError = sanitizeError(error);
+      })
+      .finally(() => {
+        activeCycle = null;
+        if (schedulerStarted && scheduledTimer === null) {
+          scheduledTimer = timer.setTimeout(() => {
+            scheduledTimer = null;
+            return runScheduledCycle();
+          }, config.liveIntervalMs);
+        }
+      });
+    return activeCycle;
+  }
+
+  async function performScheduledCycle() {
+    const stored = await store.status();
+    if (stored.state !== 'authorized') return;
+    await synchronizer.runLiveCycle();
+    schedulerError = null;
+    if (config.backfillEnabled) await synchronizer.runBackfillStep();
+  }
+
+  async function status() {
+    if (!configured) {
+      return {
+        state: 'not_configured',
+        configured: false,
+        authorized: false,
+        grantedScopes: [],
+        lastSyncAt: null,
+        backfill: null,
+        lastError: null,
+      };
+    }
+    const stored = await store.status();
+    const state = safeAuthorizationState(stored.state);
+    return {
+      state,
+      configured: true,
+      authorized: state === 'authorized',
+      grantedScopes: Array.isArray(stored.scopes)
+        ? stored.scopes.filter((scope) => typeof scope === 'string')
+        : [],
+      lastSyncAt: stored.lastSuccessAt || null,
+      backfill: sanitizeBackfill(stored.backfill),
+      lastError: sanitizeError(stored.lastError) || schedulerError,
+    };
+  }
+
+  async function close() {
+    stopScheduler();
+    if (activeCycle) await activeCycle;
+    if (typeof store?.close === 'function') await store.close();
+  }
+
+  return {
+    startUrl,
+    completeCallback,
+    startScheduler,
+    stopScheduler,
+    status,
+    close,
+  };
+}
+
+async function buildIntegration(config, dependencies = {}) {
+  if (configurationState(config) !== 'configured') {
+    return createIntegration({ config, clock: dependencies.clock });
+  }
+
+  const { createTokenCipher } = require('./crypto');
+  const { createFusionSolarStore } = require('./store');
+  const { createStateManager } = require('./oauth-state');
+  const { createHuaweiClient } = require('./huawei-client');
+  const { createSynchronizer } = require('./sync');
+  const now = dependencies.clock?.now || (() => new Date());
+  const cipher = createTokenCipher(config.tokenEncryptionKey);
+  const store = createFusionSolarStore({
+    databaseUrl: config.databaseUrl,
+    cipher,
+    pool: dependencies.pool,
+  });
+  await store.init();
+  const client = createHuaweiClient({
+    config,
+    store,
+    fetchImpl: dependencies.fetchImpl,
+    now,
+    sleep: dependencies.sleep,
+  });
+  const stateSecret = crypto.createHash('sha256')
+    .update('fusionsolar-oauth-state\0')
+    .update(config.tokenEncryptionKey)
+    .digest();
+  const stateManager = createStateManager({ secret: stateSecret, store, now });
+  const synchronizer = createSynchronizer({
+    client,
+    store,
+    config,
+    now,
+    sleep: dependencies.sleep,
+  });
+  return createIntegration({
+    config,
+    store,
+    client,
+    stateManager,
+    synchronizer,
+    clock: dependencies.clock,
+  });
+}
+
+function constantTimeTokenMatch(expected, supplied) {
+  const expectedDigest = digest(typeof expected === 'string' ? expected : '');
+  const suppliedDigest = digest(typeof supplied === 'string' ? supplied : '');
+  return crypto.timingSafeEqual(
+    Buffer.from(expectedDigest, 'hex'),
+    Buffer.from(suppliedDigest, 'hex'),
+  );
+}
+
+function digest(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function safeAuthorizationState(value) {
+  return ['authorized', 'not_authorized', 'reauthorization_required'].includes(value)
+    ? value
+    : 'not_authorized';
+}
+
+function sanitizeBackfill(value) {
+  if (!value || typeof value !== 'object') return null;
+  return {
+    completed: nonNegativeNumber(value.completed),
+    total: nonNegativeNumber(value.total),
+    lastSuccessAt: value.lastSuccessAt || null,
+  };
+}
+
+function nonNegativeNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : 0;
+}
+
+function sanitizeError(error) {
+  if (!error) return null;
+  const message = String(error.message || error).toLowerCase();
+  if (message.includes('authorization') || message.includes('oauth')) {
+    return 'authorization failed';
+  }
+  if (message.includes('timeout') || message.includes('timed out')) {
+    return 'upstream request timed out';
+  }
+  if (message.includes('backfill')) return 'backfill failed';
+  if (message.includes('live') || message.includes('sync') || message.includes('inventory')) {
+    return 'synchronization failed';
+  }
+  return 'integration error';
+}
+
+module.exports = {
+  OAuthRouteNotFoundError,
+  buildIntegration,
+  createIntegration,
+};

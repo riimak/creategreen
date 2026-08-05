@@ -38,6 +38,27 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
     return result.rowCount === 1;
   }
 
+  async function isSetupTokenConsumed(tokenHash) {
+    const { rows } = await pool.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM fusionsolar_setup_tokens WHERE token_hash = $1
+       ) AS consumed`,
+      [tokenHash],
+    );
+    return rows[0]?.consumed === true;
+  }
+
+  async function consumeSetupToken(tokenHash) {
+    const result = await pool.query(
+      `INSERT INTO fusionsolar_setup_tokens (token_hash)
+       VALUES ($1)
+       ON CONFLICT (token_hash) DO NOTHING
+       RETURNING token_hash`,
+      [tokenHash],
+    );
+    return result.rowCount === 1;
+  }
+
   async function saveCredentials(tokens) {
     if (typeof tokens?.accessToken !== 'string' || tokens.accessToken.trim() === '') {
       throw new Error('accessToken is required');
@@ -47,7 +68,13 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
     }
 
     await pool.query(
-      `INSERT INTO fusionsolar_oauth_credentials
+      `WITH consumed_setup AS (
+         INSERT INTO fusionsolar_setup_tokens (token_hash)
+         SELECT $6::text WHERE $6::text IS NOT NULL
+         ON CONFLICT (token_hash) DO NOTHING
+         RETURNING token_hash
+       )
+       INSERT INTO fusionsolar_oauth_credentials
          (id, encrypted_access_token, encrypted_refresh_token, access_expires_at,
           granted_scopes, token_type, state, authorized_at, updated_at)
        VALUES ('active', $1, $2, $3, $4, $5, 'authorized', now(), now())
@@ -66,6 +93,7 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
         tokens.accessExpiresAt,
         tokens.scopes || [],
         tokens.tokenType,
+        tokens.setupTokenHash || null,
       ],
     );
   }
@@ -347,7 +375,15 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
          credentials.updated_at,
          (SELECT count(*) FROM fusionsolar_plants WHERE visible = TRUE) AS plant_count,
          (SELECT count(*) FROM fusionsolar_devices) AS device_count,
-         (SELECT max(last_success_at) FROM fusionsolar_sync_state) AS last_success_at
+         (SELECT max(last_success_at) FROM fusionsolar_sync_state WHERE sync_key = 'live')
+           AS last_success_at,
+         (SELECT count(*) FROM fusionsolar_sync_state
+          WHERE sync_key LIKE 'backfill:%' AND checkpoint->>'reachedBoundary' = 'true')
+           AS backfill_completed,
+         (SELECT count(*) FROM fusionsolar_sync_state WHERE sync_key LIKE 'backfill:%')
+           AS backfill_total,
+         (SELECT max(last_success_at) FROM fusionsolar_sync_state
+          WHERE sync_key LIKE 'backfill:%') AS backfill_last_success_at
        FROM (SELECT 1) AS singleton
        LEFT JOIN fusionsolar_oauth_credentials AS credentials ON credentials.id = 'active'`,
     );
@@ -361,6 +397,13 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
       plantCount: Number(row.plant_count || 0),
       deviceCount: Number(row.device_count || 0),
       lastSuccessAt: row.last_success_at || null,
+      backfill: Number(row.backfill_total || 0) > 0
+        ? {
+          completed: Number(row.backfill_completed || 0),
+          total: Number(row.backfill_total),
+          lastSuccessAt: row.backfill_last_success_at || null,
+        }
+        : null,
     };
   }
 
@@ -383,6 +426,8 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
     init,
     createNonce,
     consumeNonce,
+    isSetupTokenConsumed,
+    consumeSetupToken,
     saveCredentials,
     loadCredentials,
     setAuthorizationState,

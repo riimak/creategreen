@@ -1,0 +1,20 @@
+---
+description: Run all development toolchains in Docker through WSL
+alwaysApply: true
+---
+
+# WSL Docker Development
+
+- Run builds, tests, package managers, scripts, servers, and database tools through Docker from WSL.
+- Invoke commands with `wsl.exe -- bash -lc '<command>'` and work from the repository's `/mnt/c/...` path.
+- Use Docker Engine and Docker Compose available inside WSL. Verify them there before reporting that Docker is unavailable.
+- Do not use or install Windows-host Node.js, npm, Deno, Python, database clients, or equivalent development runtimes as a workaround.
+- Prefer the repository's existing Dockerfiles and Compose services. For one-off tooling, use an appropriate pinned container image with the repository mounted read-only or read-write as required.
+- Keep secrets out of command lines, images, logs, and tracked files. Pass them through environment files, Docker secrets, or protected environment variables.
+- Windows-side shell commands are allowed only for IDE/workspace integration or filesystem paths that cannot be handled through WSL; they must not execute the development toolchain.
+
+Example:
+
+```powershell
+wsl.exe -- bash -lc 'cd /mnt/c/Users/ivan/Workspace/worktrees/bios-creategreen-fusionsolar && docker compose -f bios-multilevel-platform-services/docker-compose.yml config'
+```

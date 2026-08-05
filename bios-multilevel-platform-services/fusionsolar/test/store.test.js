@@ -104,6 +104,29 @@ test('credentials are encrypted before reaching parameterized SQL and decrypted 
   assert.equal(loaded.state, 'authorized');
 });
 
+test('credentials require non-empty access and refresh tokens', async () => {
+  const pool = createFakePool(async () => ({ rows: [], rowCount: 1 }));
+  const store = createFusionSolarStore({ pool, cipher: fakeCipher() });
+
+  await assert.rejects(
+    store.saveCredentials({ refreshToken: 'refresh-secret' }),
+    /accessToken is required/,
+  );
+  await assert.rejects(
+    store.saveCredentials({ accessToken: '', refreshToken: 'refresh-secret' }),
+    /accessToken is required/,
+  );
+  await assert.rejects(
+    store.saveCredentials({ accessToken: 'access-secret' }),
+    /refreshToken is required/,
+  );
+  await assert.rejects(
+    store.saveCredentials({ accessToken: 'access-secret', refreshToken: '   ' }),
+    /refreshToken is required/,
+  );
+  assert.equal(pool.queries.length, 0);
+});
+
 test('authorization state and inventory upserts are parameterized', async () => {
   const pool = createFakePool(async () => ({ rows: [], rowCount: 1 }));
   const store = createFusionSolarStore({ pool, cipher: fakeCipher() });
@@ -153,10 +176,90 @@ test('measurement writes preserve the raw_measurements natural key', async () =>
   assert.deepEqual(pool.queries[0].values, [
     'HUAWEI:plant-1',
     'huawei.plant.active_power_kw',
-    '2026-08-05T10:00:00Z',
+    '2026-08-05T10:00:00.000Z',
     12.5,
     false,
   ]);
+});
+
+test('measurement writes canonicalize equivalent instants before deduplication', async () => {
+  const pool = createFakePool(async (_sql, values) => ({
+    rows: [],
+    rowCount: values.length / 5,
+  }));
+  const store = createFusionSolarStore({ pool, cipher: fakeCipher() });
+
+  const result = await store.saveMeasurements([
+    {
+      source: 'HUAWEI:plant-1',
+      metric: 'huawei.plant.active_power_kw',
+      ts: '2026-08-05T10:00:00Z',
+      value: 12.5,
+      isMissing: false,
+    },
+    {
+      source: 'HUAWEI:plant-1',
+      metric: 'huawei.plant.active_power_kw',
+      ts: '2026-08-05T12:00:00+02:00',
+      value: 13.5,
+      isMissing: false,
+    },
+  ]);
+
+  assert.deepEqual(result, { upserted: 1 });
+  assert.deepEqual(pool.queries[0].values, [
+    'HUAWEI:plant-1',
+    'huawei.plant.active_power_kw',
+    '2026-08-05T10:00:00.000Z',
+    13.5,
+    false,
+  ]);
+});
+
+test('measurement deduplication keys cannot collide on field delimiters', async () => {
+  const pool = createFakePool(async (_sql, values) => ({
+    rows: [],
+    rowCount: values.length / 5,
+  }));
+  const store = createFusionSolarStore({ pool, cipher: fakeCipher() });
+  const ts = '2026-08-05T10:00:00Z';
+
+  const result = await store.saveMeasurements([
+    {
+      source: 'alpha\u001fbeta',
+      metric: 'gamma',
+      ts,
+      value: 1,
+      isMissing: false,
+    },
+    {
+      source: 'alpha',
+      metric: 'beta\u001fgamma',
+      ts,
+      value: 2,
+      isMissing: false,
+    },
+  ]);
+
+  assert.deepEqual(result, { upserted: 2 });
+  assert.equal(pool.queries[0].values.length, 10);
+});
+
+test('measurement writes reject invalid timestamps before querying PostgreSQL', async () => {
+  const pool = createFakePool(async () => ({ rows: [], rowCount: 1 }));
+  const store = createFusionSolarStore({ pool, cipher: fakeCipher() });
+
+  await assert.rejects(
+    store.saveMeasurements([{
+      source: 'HUAWEI:plant-1',
+      metric: 'huawei.plant.active_power_kw',
+      ts: 'not-a-timestamp',
+      value: 12.5,
+      isMissing: false,
+    }]),
+    /invalid measurement timestamp/,
+  );
+  assert.equal(pool.queries.length, 0);
 });
 
 test('checkpoints, status, schema initialization, and close use the injected pool', async () => {
@@ -248,16 +351,24 @@ test('PostgreSQL integration preserves nonce and measurement idempotency', {
       value: 12.5,
       isMissing: false,
     };
-    assert.deepEqual(await store.saveMeasurements([measurement]), { upserted: 1 });
-    assert.deepEqual(await store.saveMeasurements([{ ...measurement, value: 13.5 }]), { upserted: 1 });
+    assert.deepEqual(await store.saveMeasurements([
+      measurement,
+      {
+        ...measurement,
+        ts: '2026-08-05T12:00:00+02:00',
+        value: 13.5,
+      },
+    ]), { upserted: 1 });
 
     await store.setCheckpoint(syncKey, { cursor: 'complete' });
     assert.deepEqual(await store.getCheckpoint(syncKey), { cursor: 'complete' });
 
     const { rows } = await pool.query(
-      'SELECT value FROM raw_measurements WHERE source = $1 AND metric = $2 AND ts = $3',
+      `SELECT count(*)::integer AS count, max(value) AS value
+       FROM raw_measurements WHERE source = $1 AND metric = $2 AND ts = $3`,
       [source, measurement.metric, measurement.ts],
     );
+    assert.equal(rows[0].count, 1);
     assert.equal(rows[0].value, 13.5);
   } finally {
     await pool.query('DELETE FROM fusionsolar_oauth_nonces WHERE nonce_hash = $1', [nonceHash]);

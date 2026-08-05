@@ -39,6 +39,13 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
   }
 
   async function saveCredentials(tokens) {
+    if (typeof tokens?.accessToken !== 'string' || tokens.accessToken.trim() === '') {
+      throw new Error('accessToken is required');
+    }
+    if (typeof tokens.refreshToken !== 'string' || tokens.refreshToken.trim() === '') {
+      throw new Error('refreshToken is required');
+    }
+
     await pool.query(
       `INSERT INTO fusionsolar_oauth_credentials
          (id, encrypted_access_token, encrypted_refresh_token, access_expires_at,
@@ -173,9 +180,17 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
   }
 
   async function saveMeasurements(measurements) {
+    const normalized = (measurements || []).map((measurement) => ({
+      ...measurement,
+      ts: canonicalTimestamp(measurement.ts),
+    }));
     const rows = deduplicate(
-      measurements || [],
-      (measurement) => `${measurement.source}\u001f${measurement.metric}\u001f${measurement.ts}`,
+      normalized,
+      (measurement) => JSON.stringify([
+        measurement.source,
+        measurement.metric,
+        measurement.ts,
+      ]),
     );
     if (rows.length === 0) return { upserted: 0 };
 
@@ -297,6 +312,21 @@ function deduplicate(rows, keyFor) {
   const unique = new Map();
   for (const row of rows) unique.set(keyFor(row), row);
   return [...unique.values()];
+}
+
+function canonicalTimestamp(value) {
+  if (
+    value === null
+    || value === undefined
+    || (!['string', 'number'].includes(typeof value) && !(value instanceof Date))
+  ) {
+    throw new Error('invalid measurement timestamp');
+  }
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) {
+    throw new Error('invalid measurement timestamp');
+  }
+  return timestamp.toISOString();
 }
 
 module.exports = { createFusionSolarStore };

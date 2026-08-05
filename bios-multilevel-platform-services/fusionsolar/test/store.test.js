@@ -31,7 +31,7 @@ function createFakePool(queryHandler = async () => ({ rows: [], rowCount: 0 })) 
   };
 }
 
-test('nonce consumption uses one atomic, parameterized update', async () => {
+test('nonce consumption atomically returns its bound setup-token hash', async () => {
   let available = false;
   let created = false;
   const pool = createFakePool(async (sql) => {
@@ -42,24 +42,26 @@ test('nonce consumption uses one atomic, parameterized update', async () => {
     }
     if (/UPDATE fusionsolar_oauth_nonces/.test(sql) && available) {
       available = false;
-      return { rows: [{ nonce_hash: 'hash' }], rowCount: 1 };
+      return { rows: [{ setup_token_hash: 'setup-generation' }], rowCount: 1 };
     }
     return { rows: [], rowCount: 0 };
   });
   const store = createFusionSolarStore({ pool, cipher: fakeCipher() });
   const now = new Date();
 
-  await store.createNonce('hash', new Date(now.getTime() + 60_000));
-  assert.equal(await store.consumeNonce('hash', now), true);
+  await store.createNonce('hash', new Date(now.getTime() + 60_000), 'setup-generation');
+  assert.equal(await store.consumeNonce('hash', now), 'setup-generation');
   assert.equal(await store.consumeNonce('hash', now), false);
-  await store.createNonce('hash', new Date(now.getTime() + 60_000));
+  await store.createNonce('hash', new Date(now.getTime() + 60_000), 'setup-generation');
   assert.equal(await store.consumeNonce('hash', now), false);
 
   const updates = pool.queries.filter(({ sql }) => /UPDATE fusionsolar_oauth_nonces/.test(sql));
   assert.equal(updates.length, 3);
   assert.match(updates[0].sql, /consumed_at IS NULL AND expires_at > \$2/);
-  assert.match(updates[0].sql, /RETURNING nonce_hash/);
+  assert.match(updates[0].sql, /RETURNING setup_token_hash/);
   assert.deepEqual(updates[0].values, ['hash', now]);
+  const insert = pool.queries.find(({ sql }) => /INSERT INTO fusionsolar_oauth_nonces/.test(sql));
+  assert.deepEqual(insert.values, ['hash', new Date(now.getTime() + 60_000), 'setup-generation']);
 });
 
 test('setup-token consumption is persisted by digest and remains single-use', async () => {
@@ -213,6 +215,7 @@ test('authorization state and inventory upserts are parameterized', async () => 
     deviceType: 'inverter',
     model: 'SUN2000',
     serialNumber: 'serial-1',
+    visible: false,
     metadata: { vendor: 'Huawei' },
   }]);
 
@@ -221,6 +224,7 @@ test('authorization state and inventory upserts are parameterized', async () => 
   assert.match(plants.sql, /ON CONFLICT \(plant_code\) DO UPDATE/);
   assert.deepEqual(plants.values.slice(0, 2), ['plant-1', 'HUAWEI:plant-1']);
   assert.match(devices.sql, /ON CONFLICT \(device_id\) DO UPDATE/);
+  assert.match(devices.sql, /visible = EXCLUDED\.visible/);
   assert.deepEqual(devices.values.slice(0, 2), ['device-1', 'plant-1']);
 });
 
@@ -403,6 +407,12 @@ test('checkpoints, status, schema initialization, and close use the injected poo
           backfill_completed: '1',
           backfill_total: '3',
           backfill_last_success_at: new Date('2026-08-05T09:00:00Z'),
+          cycles: '7',
+          huawei_failures: '2',
+          token_refreshes: '1',
+          rows_ingested: '42',
+          skipped_fields: '3',
+          backfill_steps: '5',
         }],
         rowCount: 1,
       };
@@ -414,6 +424,11 @@ test('checkpoints, status, schema initialization, and close use the injected poo
   await store.init();
   await store.setCheckpoint('plant:1', { cursor: 'next' }, {
     lastSuccessAt: new Date('2026-08-05T10:00:00Z'),
+  });
+  await store.recordCounters({
+    cycles: 1,
+    huaweiFailures: 2,
+    rowsIngested: 3,
   });
   assert.deepEqual(await store.getCheckpoint('plant:1'), { cursor: 'next' });
   assert.deepEqual(await store.status(), {
@@ -430,10 +445,21 @@ test('checkpoints, status, schema initialization, and close use the injected poo
       total: 3,
       lastSuccessAt: new Date('2026-08-05T09:00:00Z'),
     },
+    counters: {
+      cycles: 7,
+      huaweiFailures: 2,
+      tokenRefreshes: 1,
+      rowsIngested: 42,
+      skippedFields: 3,
+      backfillSteps: 5,
+    },
   });
   await store.close();
 
   assert.match(pool.queries[0].sql, /CREATE TABLE IF NOT EXISTS fusionsolar_oauth_credentials/);
+  const counterWrite = pool.queries.find(({ sql }) => /INSERT INTO fusionsolar_diagnostics/.test(sql));
+  assert.match(counterWrite.sql, /cycles = fusionsolar_diagnostics\.cycles \+ EXCLUDED\.cycles/);
+  assert.deepEqual(counterWrite.values, [1, 2, 0, 3, 0, 0]);
   assert.equal(pool.ended, true);
 });
 
@@ -488,6 +514,7 @@ test('inventory and sync state reads expose only ingestion fields', async () => 
           device_type: '1',
           model: 'SUN2000',
           serial_number: 'sanitized',
+          visible: true,
           metadata: { devDn: 'NE=DEVICE-1' },
         }],
         rowCount: 1,
@@ -522,8 +549,11 @@ test('inventory and sync state reads expose only ingestion fields', async () => 
     deviceType: '1',
     model: 'SUN2000',
     serialNumber: 'sanitized',
+    visible: true,
     metadata: { devDn: 'NE=DEVICE-1' },
   }]);
+  const deviceRead = pool.queries.find(({ sql }) => /FROM fusionsolar_devices/.test(sql));
+  assert.match(deviceRead.sql, /WHERE visible = TRUE/);
   assert.deepEqual(await store.getSyncState('backfill:device:device-1'), {
     checkpoint: { before: 123 },
     backoffUntil: new Date('2026-08-05T10:01:00Z'),
@@ -638,10 +668,10 @@ test('PostgreSQL integration preserves nonce and measurement idempotency', {
   try {
     await store.init();
     await store.init();
-    await store.createNonce(nonceHash, new Date(Date.now() + 60_000));
-    assert.equal(await store.consumeNonce(nonceHash, new Date()), true);
+    await store.createNonce(nonceHash, new Date(Date.now() + 60_000), setupTokenHash);
+    assert.equal(await store.consumeNonce(nonceHash, new Date()), setupTokenHash);
     assert.equal(await store.consumeNonce(nonceHash, new Date()), false);
-    await store.createNonce(nonceHash, new Date(Date.now() + 60_000));
+    await store.createNonce(nonceHash, new Date(Date.now() + 60_000), setupTokenHash);
     assert.equal(await store.consumeNonce(nonceHash, new Date()), false);
     assert.equal(await store.isSetupTokenConsumed(setupTokenHash), false);
     assert.equal(await store.consumeSetupToken(setupTokenHash), true);
@@ -816,7 +846,10 @@ test('PostgreSQL allows only one completion from two valid pre-issued OAuth stat
       'DELETE FROM fusionsolar_setup_tokens WHERE token_hash = $1',
       [setupTokenHash],
     );
-    const states = await Promise.all([stateManager.issue(), stateManager.issue()]);
+    const states = await Promise.all([
+      stateManager.issue(setupTokenHash),
+      stateManager.issue(setupTokenHash),
+    ]);
     for (const state of states) {
       const payload = JSON.parse(Buffer.from(state.split('.')[0], 'base64url').toString('utf8'));
       nonceHashes.push(crypto.createHash('sha256').update(payload.nonce).digest('hex'));

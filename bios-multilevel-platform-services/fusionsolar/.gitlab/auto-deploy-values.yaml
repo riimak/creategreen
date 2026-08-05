@@ -1,6 +1,6 @@
 # FusionSolar service — internal ClusterIP only (no public ingress).
 replicaCount: 1
-strategyType: "RollingUpdate"
+strategyType: "Recreate"
 
 image:
   repository: git.barrage.net/bios-multilevel/bios-multilevel-dashboard

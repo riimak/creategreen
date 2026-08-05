@@ -27,6 +27,7 @@ function createIntegration({
   let scheduledTimer = null;
   let activeCycle = null;
   let schedulerError = null;
+  let nextCycleDelayMs = config?.liveIntervalMs || 0;
 
   async function startUrl(suppliedToken) {
     if (
@@ -38,18 +39,18 @@ function createIntegration({
     ) {
       throw new OAuthRouteNotFoundError();
     }
-    const state = await stateManager.issue();
+    const state = await stateManager.issue(setupDigest);
     return client.authorizationUrl(state);
   }
 
   async function completeCallback(params) {
     try {
-      await stateManager.verifyAndConsume(params?.get?.('state'));
+      const issuedSetupDigest = await stateManager.verifyAndConsume(params?.get?.('state'));
       if (params.get('error')) return { ok: false };
       const code = params.get('code');
       if (typeof code !== 'string' || code === '') return { ok: false };
       const tokens = await client.exchangeCode(code, { persist: false });
-      const saved = await store.saveCredentialsIfSetupUnused(setupDigest, tokens);
+      const saved = await store.saveCredentialsIfSetupUnused(issuedSetupDigest, tokens);
       if (!saved) return { ok: false };
       requestImmediateCycle();
       return { ok: true };
@@ -95,18 +96,43 @@ function createIntegration({
           scheduledTimer = timer.setTimeout(() => {
             scheduledTimer = null;
             return runScheduledCycle();
-          }, config.liveIntervalMs);
+          }, nextCycleDelayMs);
         }
       });
     return activeCycle;
   }
 
   async function performScheduledCycle() {
+    nextCycleDelayMs = config.liveIntervalMs;
     const stored = await store.status();
     if (stored.state !== 'authorized') return;
-    await synchronizer.runLiveCycle();
+    const live = await synchronizer.runLiveCycle();
+    await recordCounters({
+      cycles: 1,
+      huaweiFailures: arrayLength(live?.failures),
+      rowsIngested: nonNegativeNumber(live?.measurements),
+      skippedFields: nonNegativeNumber(live?.skipped),
+    });
     schedulerError = null;
-    if (config.backfillEnabled) await synchronizer.runBackfillStep();
+    if (live?.state === 'backoff') {
+      nextCycleDelayMs = retryDelayUntil(live.retryAt, timer.now(), config.liveIntervalMs);
+      return;
+    }
+    if (config.backfillEnabled) {
+      const backfill = await synchronizer.runBackfillStep();
+      await recordCounters({
+        backfillSteps: 1,
+        huaweiFailures: ['backoff', 'error'].includes(backfill?.state) ? 1 : 0,
+        rowsIngested: nonNegativeNumber(backfill?.rows),
+        skippedFields: arrayLength(backfill?.skipped),
+      });
+    }
+  }
+
+  async function recordCounters(counters) {
+    if (typeof store.recordCounters === 'function') {
+      await store.recordCounters(counters);
+    }
   }
 
   async function status() {
@@ -120,6 +146,7 @@ function createIntegration({
         lastSyncAt: null,
         backfill: null,
         lastError: null,
+        counters: emptyCounters(),
       };
     }
     const stored = await store.status();
@@ -135,6 +162,7 @@ function createIntegration({
       lastSyncAt: stored.lastSuccessAt || null,
       backfill: sanitizeBackfill(stored.backfill),
       lastError: sanitizeError(stored.lastError) || schedulerError,
+      counters: sanitizeCounters(stored.counters),
     };
   }
 
@@ -190,6 +218,7 @@ async function buildIntegration(config, dependencies = {}) {
     config,
     now,
     sleep: dependencies.sleep,
+    random: dependencies.random,
   });
   return createIntegration({
     config,
@@ -232,6 +261,35 @@ function sanitizeBackfill(value) {
 function nonNegativeNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? number : 0;
+}
+
+function arrayLength(value) {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function emptyCounters() {
+  return {
+    cycles: 0,
+    huaweiFailures: 0,
+    tokenRefreshes: 0,
+    rowsIngested: 0,
+    skippedFields: 0,
+    backfillSteps: 0,
+  };
+}
+
+function sanitizeCounters(value) {
+  const counters = emptyCounters();
+  if (!value || typeof value !== 'object') return counters;
+  for (const key of Object.keys(counters)) counters[key] = nonNegativeNumber(value[key]);
+  return counters;
+}
+
+function retryDelayUntil(value, now, fallback) {
+  const retryAt = Date.parse(value);
+  const current = now instanceof Date ? now.getTime() : NaN;
+  if (!Number.isFinite(retryAt) || !Number.isFinite(current)) return fallback;
+  return Math.max(0, retryAt - current);
 }
 
 function sanitizeError(error) {

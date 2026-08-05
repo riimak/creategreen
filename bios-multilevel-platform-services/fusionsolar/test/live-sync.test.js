@@ -48,7 +48,12 @@ function createStore({
     },
     async getSyncState(key) {
       const checkpoint = checkpoints.get(key);
-      return checkpoint ? { checkpoint: structuredClone(checkpoint), backoffUntil: null } : null;
+      return checkpoint
+        ? {
+          checkpoint: structuredClone(checkpoint),
+          backoffUntil: checkpoint.backoffUntil || null,
+        }
+        : null;
     },
     async setCheckpoint(key, value) {
       checkpoints.set(key, structuredClone(value));
@@ -87,6 +92,13 @@ test('live polling uses documented batches, collection timestamps, and one atomi
       plantCode: 'NE=PLANT-2',
       deviceType: '17',
       metadata: { devDn: 'NE=DEVICE-202' },
+    },
+    {
+      deviceId: 'hidden',
+      plantCode: 'NE=PLANT-1',
+      deviceType: '1',
+      visible: false,
+      metadata: { devDn: 'NE=DEVICE-HIDDEN' },
     },
   ];
   const store = createStore({ plants, devices });
@@ -139,6 +151,7 @@ test('live polling uses documented batches, collection timestamps, and one atomi
     store,
     config: { inventoryIntervalMs: 60 * 60_000 },
     now: () => new Date('2026-08-05T10:00:00Z'),
+    random: () => 0.5,
   });
 
   const first = synchronizer.runLiveCycle();
@@ -376,6 +389,7 @@ test('flow control persists backoff and prevents lower-priority backfill', async
     store,
     config: { inventoryIntervalMs: 60 * 60_000 },
     now: () => new Date('2026-08-05T10:00:00Z'),
+    random: () => 0.5,
   });
 
   const live = await synchronizer.runLiveCycle();
@@ -400,4 +414,29 @@ test('flow control persists backoff and prevents lower-priority backfill', async
   });
   assert.equal(historyCalls, 0);
   assert.doesNotMatch(JSON.stringify(live), /provider detail/);
+});
+
+test('persisted live backoff prevents every Huawei call after restart', async () => {
+  const store = createStore();
+  store.checkpoints.set('live', {
+    backoffUntil: '2026-08-05T10:02:00.000Z',
+    failureAttempts: 2,
+  });
+  let calls = 0;
+  const synchronizer = createSynchronizer({
+    store,
+    now: () => new Date('2026-08-05T10:01:00Z'),
+    client: {
+      async request() {
+        calls += 1;
+        throw new Error('must not call Huawei');
+      },
+    },
+  });
+
+  assert.deepEqual(await synchronizer.runLiveCycle(), {
+    state: 'backoff',
+    retryAt: '2026-08-05T10:02:00.000Z',
+  });
+  assert.equal(calls, 0);
 });

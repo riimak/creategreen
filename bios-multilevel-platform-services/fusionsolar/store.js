@@ -32,12 +32,15 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
     }
   }
 
-  async function createNonce(nonceHash, expiresAt) {
+  async function createNonce(nonceHash, expiresAt, setupTokenHash) {
+    if (typeof setupTokenHash !== 'string' || setupTokenHash === '') {
+      throw new Error('setupTokenHash is required');
+    }
     await pool.query(
-      `INSERT INTO fusionsolar_oauth_nonces (nonce_hash, expires_at)
-       VALUES ($1, $2)
+      `INSERT INTO fusionsolar_oauth_nonces (nonce_hash, expires_at, setup_token_hash)
+       VALUES ($1, $2, $3)
        ON CONFLICT (nonce_hash) DO NOTHING`,
-      [nonceHash, expiresAt],
+      [nonceHash, expiresAt, setupTokenHash],
     );
   }
 
@@ -46,10 +49,10 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
       `UPDATE fusionsolar_oauth_nonces
        SET consumed_at = now()
        WHERE nonce_hash = $1 AND consumed_at IS NULL AND expires_at > $2
-       RETURNING nonce_hash`,
+       RETURNING setup_token_hash`,
       [nonceHash, now],
     );
-    return result.rowCount === 1;
+    return result.rows[0]?.setup_token_hash || false;
   }
 
   async function isSetupTokenConsumed(tokenHash) {
@@ -220,29 +223,31 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
     const rows = deduplicate(devices || [], (device) => device.deviceId);
     if (rows.length === 0) return { upserted: 0 };
 
-    const result = await executeBatches(rows, 6, (batch) => {
+    const result = await executeBatches(rows, 7, (batch) => {
       const values = [];
       const tuples = batch.map((device, index) => {
-        const offset = index * 6;
+        const offset = index * 7;
         values.push(
           device.deviceId,
           device.plantCode,
           device.deviceType ?? null,
           device.model ?? null,
           device.serialNumber ?? null,
+          device.visible !== false,
           device.metadata || {},
         );
-        return `($${offset + 1},$${offset + 2},$${offset + 3},$${offset + 4},$${offset + 5},$${offset + 6})`;
+        return `($${offset + 1},$${offset + 2},$${offset + 3},$${offset + 4},$${offset + 5},$${offset + 6},$${offset + 7})`;
       });
       return {
         sql: `INSERT INTO fusionsolar_devices
-                (device_id, plant_code, device_type, model, serial_number, metadata)
+                (device_id, plant_code, device_type, model, serial_number, visible, metadata)
               VALUES ${tuples.join(',')}
               ON CONFLICT (device_id) DO UPDATE SET
                 plant_code = EXCLUDED.plant_code,
                 device_type = EXCLUDED.device_type,
                 model = EXCLUDED.model,
                 serial_number = EXCLUDED.serial_number,
+                visible = EXCLUDED.visible,
                 metadata = EXCLUDED.metadata,
                 last_seen_at = now()`,
         values,
@@ -270,8 +275,9 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
 
   async function listDevices() {
     const { rows } = await pool.query(
-      `SELECT device_id, plant_code, device_type, model, serial_number, metadata
+      `SELECT device_id, plant_code, device_type, model, serial_number, visible, metadata
        FROM fusionsolar_devices
+       WHERE visible = TRUE
        ORDER BY device_id`,
     );
     return rows.map((row) => ({
@@ -280,6 +286,7 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
       deviceType: row.device_type,
       model: row.model,
       serialNumber: row.serial_number,
+      visible: row.visible,
       metadata: row.metadata || {},
     }));
   }
@@ -409,6 +416,32 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
     }
   }
 
+  async function recordCounters(counters = {}) {
+    const values = [
+      safeCounter(counters.cycles),
+      safeCounter(counters.huaweiFailures),
+      safeCounter(counters.tokenRefreshes),
+      safeCounter(counters.rowsIngested),
+      safeCounter(counters.skippedFields),
+      safeCounter(counters.backfillSteps),
+    ];
+    await pool.query(
+      `INSERT INTO fusionsolar_diagnostics
+         (id, cycles, huawei_failures, token_refreshes, rows_ingested,
+          skipped_fields, backfill_steps, updated_at)
+       VALUES ('active', $1, $2, $3, $4, $5, $6, now())
+       ON CONFLICT (id) DO UPDATE SET
+         cycles = fusionsolar_diagnostics.cycles + EXCLUDED.cycles,
+         huawei_failures = fusionsolar_diagnostics.huawei_failures + EXCLUDED.huawei_failures,
+         token_refreshes = fusionsolar_diagnostics.token_refreshes + EXCLUDED.token_refreshes,
+         rows_ingested = fusionsolar_diagnostics.rows_ingested + EXCLUDED.rows_ingested,
+         skipped_fields = fusionsolar_diagnostics.skipped_fields + EXCLUDED.skipped_fields,
+         backfill_steps = fusionsolar_diagnostics.backfill_steps + EXCLUDED.backfill_steps,
+         updated_at = now()`,
+      values,
+    );
+  }
+
   async function status() {
     const { rows } = await pool.query(
       `SELECT
@@ -418,7 +451,7 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
          credentials.authorized_at,
          credentials.updated_at,
          (SELECT count(*) FROM fusionsolar_plants WHERE visible = TRUE) AS plant_count,
-         (SELECT count(*) FROM fusionsolar_devices) AS device_count,
+         (SELECT count(*) FROM fusionsolar_devices WHERE visible = TRUE) AS device_count,
          (SELECT max(last_success_at) FROM fusionsolar_sync_state WHERE sync_key = 'live')
            AS last_success_at,
          (SELECT count(*) FROM fusionsolar_sync_state
@@ -427,9 +460,16 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
          (SELECT count(*) FROM fusionsolar_sync_state WHERE sync_key LIKE 'backfill:%')
            AS backfill_total,
          (SELECT max(last_success_at) FROM fusionsolar_sync_state
-          WHERE sync_key LIKE 'backfill:%') AS backfill_last_success_at
+          WHERE sync_key LIKE 'backfill:%') AS backfill_last_success_at,
+         diagnostics.cycles,
+         diagnostics.huawei_failures,
+         diagnostics.token_refreshes,
+         diagnostics.rows_ingested,
+         diagnostics.skipped_fields,
+         diagnostics.backfill_steps
        FROM (SELECT 1) AS singleton
-       LEFT JOIN fusionsolar_oauth_credentials AS credentials ON credentials.id = 'active'`,
+       LEFT JOIN fusionsolar_oauth_credentials AS credentials ON credentials.id = 'active'
+       LEFT JOIN fusionsolar_diagnostics AS diagnostics ON diagnostics.id = 'active'`,
     );
     const row = rows[0] || {};
     return {
@@ -448,6 +488,14 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
           lastSuccessAt: row.backfill_last_success_at || null,
         }
         : null,
+      counters: {
+        cycles: Number(row.cycles || 0),
+        huaweiFailures: Number(row.huawei_failures || 0),
+        tokenRefreshes: Number(row.token_refreshes || 0),
+        rowsIngested: Number(row.rows_ingested || 0),
+        skippedFields: Number(row.skipped_fields || 0),
+        backfillSteps: Number(row.backfill_steps || 0),
+      },
     };
   }
 
@@ -482,6 +530,7 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
     listDevices,
     saveMeasurements,
     saveMeasurementsAndCheckpoint,
+    recordCounters,
     getCheckpoint,
     getSyncState,
     setCheckpoint,
@@ -508,6 +557,14 @@ function canonicalTimestamp(value) {
     throw new Error('invalid measurement timestamp');
   }
   return timestamp.toISOString().replace(/\.(\d{3})Z$/, '.$1000Z');
+}
+
+function safeCounter(value) {
+  const number = Number(value ?? 0);
+  if (!Number.isSafeInteger(number) || number < 0) {
+    throw new Error('diagnostic counter must be a non-negative safe integer');
+  }
+  return number;
 }
 
 function canonicalIsoTimestamp(value) {

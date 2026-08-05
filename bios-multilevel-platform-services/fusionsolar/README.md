@@ -102,9 +102,11 @@ contains no token envelope or client secret and has these states:
 
 Other safe fields are `configured`, `authorized`, `lastSyncAt`,
 `backfill.completed`, `backfill.total`, `backfill.lastSuccessAt`, and a
-sanitized `lastError`. `setupAvailable` indicates only whether bootstrap is
-enabled; it never reveals the token. Do not infer plant visibility from
-`/status`; inspect the inventory tables.
+sanitized `lastError`. `counters` contains only numeric totals for scheduler
+cycles, Huawei failures, token refreshes, rows ingested, skipped fields, and
+backfill steps. `setupAvailable` indicates only whether bootstrap is enabled;
+it never reveals the token. Do not infer plant visibility from `/status`;
+inspect the inventory tables.
 
 ## Reauthorization and rotation
 
@@ -188,15 +190,21 @@ parameters to Device List when diagnosing missing inventory.
 Live polling has priority over backfill. The client refreshes before token
 expiry, performs one controlled refresh-and-retry after a `401`, retries one
 transient request, and honors `Retry-After` for `429`. The synchronizer records
-backoff state so restarts do not create a tight request loop. Historical work
-performs one bounded request per scheduler step, persists its backwards
-checkpoint transactionally with measurements, and reduces an oversized range.
+exponential backoff attempts with jitter so restarts do not create a tight
+request loop; an explicit longer `Retry-After` always wins. Historical work
+performs one bounded data request per scheduler step, retains the one controlled
+`401` refresh retry, disables automatic `429`/`5xx` data retries, persists its
+backwards checkpoint transactionally with measurements, and reduces an
+oversized range.
 
 Do not bypass backoff, run parallel manual collectors, or lower polling
 intervals to accelerate acceptance. If `429` persists, leave the recorded
 backoff in place and verify the account's Huawei flow-control allocation.
-Backfill stops only after Huawei returns an empty successful window. Huawei
-does not guarantee a fixed retention period, so do not configure or report one.
+An empty history window advances the checkpoint across the gap. Backfill stops
+at a documented grid-connection lower bound when one is available; without
+that bound, one empty window never establishes a global retention boundary.
+Huawei does not guarantee a fixed retention period, so do not configure or
+report one.
 
 ## Sombor production acceptance
 
@@ -217,8 +225,8 @@ Complete this checklist only after Huawei supplies production credentials:
       token material.
 - [ ] Backfill `before` checkpoints move backwards across scheduler cycles and
       process restart; flow-control backoff does not loop.
-- [ ] An empty successful Huawei history response marks the device retention
-      boundary without assuming a fixed age.
+- [ ] Empty successful Huawei history windows advance across gaps; completion
+      occurs only at an authoritative grid-connection lower bound when present.
 - [ ] The original setup token is removed after its digest is consumed;
       `/status` remains `authorized` with `setupAvailable: false`, polling
       continues, and `/start` returns 404.

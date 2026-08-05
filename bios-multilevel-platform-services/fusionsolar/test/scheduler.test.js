@@ -60,6 +60,9 @@ function dependencies({ authorization = 'authorized', live, backfill } = {}) {
     async close() {
       calls.push('close');
     },
+    async recordCounters(counters) {
+      calls.push(`counters:${JSON.stringify(counters)}`);
+    },
   };
   const synchronizer = {
     async runLiveCycle() {
@@ -91,6 +94,14 @@ test('unconfigured integration reports not_configured and never schedules pollin
     lastSyncAt: null,
     backfill: null,
     lastError: null,
+    counters: {
+      cycles: 0,
+      huaweiFailures: 0,
+      tokenRefreshes: 0,
+      rowsIngested: 0,
+      skippedFields: 0,
+      backfillSteps: 0,
+    },
   });
   assert.deepEqual(clock.pending(), []);
 });
@@ -113,17 +124,38 @@ test('authorized scheduler runs live immediately and one backfill step per caden
   const integration = createIntegration({ config: config(), clock, ...deps });
 
   await integration.startScheduler();
-  assert.deepEqual(deps.calls, ['status', 'live', 'backfill']);
+  assert.deepEqual(deps.calls, [
+    'status',
+    'live',
+    'counters:{"cycles":1,"huaweiFailures":0,"rowsIngested":0,"skippedFields":0}',
+    'backfill',
+    'counters:{"backfillSteps":1,"huaweiFailures":0,"rowsIngested":0,"skippedFields":0}',
+  ]);
 
   const [[timerId, scheduled]] = clock.pending();
   assert.equal(scheduled.delay, 5_000);
   await clock.run(timerId);
 
-  assert.deepEqual(deps.calls, [
-    'status', 'live', 'backfill',
-    'status', 'live', 'backfill',
-  ]);
+  assert.equal(deps.calls.filter((call) => call === 'live').length, 2);
+  assert.equal(deps.calls.filter((call) => call === 'backfill').length, 2);
   assert.equal(clock.pending().length, 1);
+});
+
+test('scheduler waits for a persisted backoff retry time and skips backfill', async () => {
+  const clock = fakeClock();
+  const deps = dependencies({
+    live: async () => ({
+      state: 'backoff',
+      retryAt: '2026-08-05T10:02:00.000Z',
+    }),
+  });
+  const integration = createIntegration({ config: config(), clock, ...deps });
+
+  await integration.startScheduler();
+
+  assert.equal(deps.calls.filter((call) => call === 'live').length, 1);
+  assert.equal(deps.calls.includes('backfill'), false);
+  assert.equal(clock.pending()[0][1].delay, 120_000);
 });
 
 test('authorized scheduler continues polling after redeploy without a setup token', async () => {
@@ -137,7 +169,8 @@ test('authorized scheduler continues polling after redeploy without a setup toke
 
   await integration.startScheduler();
 
-  assert.deepEqual(deps.calls, ['status', 'live', 'backfill']);
+  assert.equal(deps.calls.filter((call) => call === 'live').length, 1);
+  assert.equal(deps.calls.filter((call) => call === 'backfill').length, 1);
   assert.deepEqual(await integration.status(), {
     state: 'authorized',
     configured: true,
@@ -147,6 +180,14 @@ test('authorized scheduler continues polling after redeploy without a setup toke
     lastSyncAt: null,
     backfill: null,
     lastError: null,
+    counters: {
+      cycles: 0,
+      huaweiFailures: 0,
+      tokenRefreshes: 0,
+      rowsIngested: 0,
+      skippedFields: 0,
+      backfillSteps: 0,
+    },
   });
   assert.equal(clock.pending().length, 1);
 });

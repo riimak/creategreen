@@ -84,13 +84,15 @@ function historyPayload(body, data) {
   };
 }
 
-test('backfill uses the recommended endpoint, walks backward, and resumes after restart', async () => {
+test('backfill walks backward across empty gaps and persists progress after restart', async () => {
   const store = createStore();
   const requests = [];
   const now = Date.parse('2026-08-05T10:00:00Z');
   const client = {
     async request(path, options) {
       assert.equal(path, HISTORICAL_DEVICE_PATH);
+      assert.equal(options.retryTransient, false);
+      assert.equal(options.retryUnauthorized, true);
       const body = JSON.parse(options.body);
       requests.push(body);
       if (requests.length <= 2) {
@@ -143,15 +145,15 @@ test('backfill uses the recommended endpoint, walks backward, and resumes after 
   assert.equal(requests[1].startTime, now - 2 * DAY_MS);
   assert.equal(second.nextBefore, now - 2 * DAY_MS);
 
-  const boundary = await restarted.runBackfillStep();
+  const emptyGap = await restarted.runBackfillStep();
   assert.equal(requests[2].endTime, now - 2 * DAY_MS);
-  assert.deepEqual(boundary, {
-    state: 'complete',
+  assert.deepEqual(emptyGap, {
+    state: 'progress',
     nextBefore: now - 3 * DAY_MS,
     rows: 0,
-    reachedBoundary: true,
+    reachedBoundary: false,
   });
-  assert.equal(store.checkpoints.get('backfill:device:101').reachedBoundary, true);
+  assert.equal(store.checkpoints.get('backfill:device:101').reachedBoundary, false);
 });
 
 test('documented oversized-range response halves the window with one request per step', async () => {
@@ -285,7 +287,7 @@ test('candidate selection skips backed-off devices and chooses another unfinishe
   const result = await synchronizer.runBackfillStep();
 
   assert.equal(requestedDevice, 'NE=DEVICE-202');
-  assert.equal(result.state, 'complete');
+  assert.equal(result.state, 'progress');
 });
 
 test('all backed-off candidates return the earliest retry time without HTTP', async () => {
@@ -417,7 +419,68 @@ test('backfill has no fixed cutoff and live work preempts it', async () => {
 
   const oldHistory = await synchronizer.runBackfillStep();
   assert.equal(historyCalls, 1);
-  assert.equal(oldHistory.reachedBoundary, true);
+  assert.equal(oldHistory.reachedBoundary, false);
+});
+
+test('grid connection timestamp is the authoritative lower boundary', async () => {
+  const now = Date.parse('2026-08-05T10:00:00Z');
+  const connectedAt = now - 2 * DAY_MS;
+  const store = createStore({
+    plants: [{
+      plantCode: 'NE=PLANT-1',
+      sourceKey: 'HUAWEI:NE=PLANT-1',
+      visible: true,
+      metadata: { gridConnectionDate: new Date(connectedAt).toISOString() },
+    }],
+    checkpoints: new Map([[
+      'backfill:device:101',
+      { before: connectedAt + DAY_MS, windowMs: 2 * DAY_MS, reachedBoundary: false },
+    ]]),
+  });
+  let requestBody;
+  const synchronizer = createSynchronizer({
+    store,
+    now: () => new Date(now),
+    client: {
+      async request(_path, options) {
+        requestBody = JSON.parse(options.body);
+        return jsonResponse(historyPayload(requestBody, []));
+      },
+    },
+  });
+
+  assert.deepEqual(await synchronizer.runBackfillStep(), {
+    state: 'complete',
+    nextBefore: connectedAt,
+    rows: 0,
+    reachedBoundary: true,
+  });
+  assert.equal(requestBody.startTime, connectedAt);
+});
+
+test('backfill excludes invisible devices', async () => {
+  const store = createStore({
+    devices: [{
+      deviceId: 'hidden',
+      plantCode: 'NE=PLANT-1',
+      deviceType: '1',
+      visible: false,
+      metadata: { devDn: 'NE=HIDDEN' },
+    }],
+  });
+  let calls = 0;
+  const synchronizer = createSynchronizer({
+    store,
+    client: {
+      async request() {
+        calls += 1;
+        throw new Error('invisible device must not be polled');
+      },
+    },
+  });
+
+  assert.equal((await synchronizer.runBackfillStep()).state, 'complete');
+  assert.equal(calls, 0);
 });
 
 test('live preempts backfill while candidate checkpoint work is pending', async () => {
@@ -547,8 +610,9 @@ test('live preempts backfill while the live checkpoint read is pending', async (
 
   const backfill = synchronizer.runBackfillStep();
   await checkpointStart;
-  await synchronizer.runLiveCycle();
+  const live = synchronizer.runLiveCycle();
   releaseCheckpoint();
+  await live;
 
   assert.equal((await backfill).state, 'live_pending');
   assert.equal(historyCalls, 0);
@@ -564,6 +628,7 @@ test('HTTP 429 without Retry-After backs off for sixty seconds but 503 uses shor
     const synchronizer = createSynchronizer({
       store,
       now: () => new Date(now),
+      random: () => 0.5,
       client: {
         async request() {
           return jsonResponse({}, { status });
@@ -577,6 +642,46 @@ test('HTTP 429 without Retry-After backs off for sixty seconds but 503 uses shor
       expectedBackoff,
     );
   }
+});
+
+test('transient backoff attempts grow exponentially with injected jitter and reset on success', async () => {
+  let current = Date.parse('2026-08-05T10:00:00Z');
+  let responseStatus = 503;
+  const store = createStore();
+  const synchronizer = createSynchronizer({
+    store,
+    now: () => new Date(current),
+    random: () => 0.5,
+    client: {
+      async request(_path, options) {
+        const body = JSON.parse(options.body);
+        if (responseStatus === 200) return jsonResponse(historyPayload(body, []));
+        return jsonResponse({}, { status: responseStatus });
+      },
+    },
+  });
+
+  assert.equal((await synchronizer.runBackfillStep()).state, 'backoff');
+  assert.deepEqual(store.checkpoints.get('backfill:device:101'), {
+    before: current,
+    windowMs: DAY_MS,
+    reachedBoundary: false,
+    backoffUntil: '2026-08-05T10:00:01.000Z',
+    failureAttempts: 1,
+  });
+
+  current += 1000;
+  assert.equal((await synchronizer.runBackfillStep()).state, 'backoff');
+  assert.equal(
+    store.checkpoints.get('backfill:device:101').backoffUntil,
+    '2026-08-05T10:00:03.000Z',
+  );
+  assert.equal(store.checkpoints.get('backfill:device:101').failureAttempts, 2);
+
+  current += 2000;
+  responseStatus = 200;
+  assert.equal((await synchronizer.runBackfillStep()).state, 'progress');
+  assert.equal(store.checkpoints.get('backfill:device:101').failureAttempts, 0);
 });
 
 test('malformed historical records return sanitized skipped diagnostics and advance', async () => {

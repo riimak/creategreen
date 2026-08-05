@@ -31,10 +31,12 @@ function createStore() {
   const plantWrites = [];
   const deviceWrites = [];
   const checkpointWrites = [];
+  const checkpointOptions = [];
   return {
     plantWrites,
     deviceWrites,
     checkpointWrites,
+    checkpointOptions,
     async upsertPlants(plants) {
       plantWrites.push(structuredClone(plants));
       return { upserted: plants.length };
@@ -49,9 +51,9 @@ function createStore() {
     },
     async setCheckpoint(key, value, options) {
       assert.equal(key, 'inventory');
-      assert.equal(options.lastError, null);
       checkpoint = structuredClone(value);
       checkpointWrites.push(structuredClone(value));
+      checkpointOptions.push(structuredClone(options));
     },
     async status() {
       return { state: 'authorized', plantCount: 2, deviceCount: 2 };
@@ -155,6 +157,10 @@ test('consumes every plant page, attaches devices, and marks missing plants invi
   assert.deepEqual(
     store.plantWrites[1].map((item) => [item.plantCode, item.visible]),
     [['NE=PLANT-1', true], ['NE=PLANT-2', false]],
+  );
+  assert.deepEqual(
+    store.deviceWrites[1].map((item) => [item.deviceId, item.visible]),
+    [['200', true], ['100', false], ['101', false]],
   );
   assert.deepEqual(await synchronizer.status(), {
     state: 'authorized',
@@ -473,4 +479,107 @@ test('incomplete plant snapshots preserve visibility until a later clean omissio
     store.checkpointWrites[2].plants.map((item) => item.plantCode),
     ['NE=CURRENT'],
   );
+});
+
+test('malformed device snapshots preserve prior visibility until a clean omission', async () => {
+  const store = createStore();
+  let refresh = 1;
+  const client = {
+    async request(path, options) {
+      if (path === PLANT_PATH) {
+        return response({
+          success: true,
+          data: {
+            list: [plant('NE=KNOWN', 'Known plant')],
+            pageCount: 1,
+            pageNo: 1,
+          },
+          failCode: 0,
+        });
+      }
+      assert.equal(path, DEVICE_PATH);
+      const records = refresh === 1
+        ? [{
+          id: 1,
+          devDn: 'NE=DEVICE-1',
+          stationCode: 'NE=KNOWN',
+          devTypeId: 1,
+        }]
+        : refresh === 2
+          ? [{
+            id: null,
+            stationCode: 'NE=KNOWN',
+            devTypeId: 1,
+            rawToken: 'MUST-NOT-LEAK',
+          }]
+          : [];
+      return response({
+        success: true,
+        data: records,
+        failCode: 0,
+        params: { stationCodes: JSON.parse(options.body).stationCodes },
+      });
+    },
+  };
+  const synchronizer = createSynchronizer({
+    client,
+    store,
+    now: () => new Date(`2026-08-05T10:0${refresh - 1}:00Z`),
+  });
+
+  await synchronizer.refreshInventory();
+  refresh = 2;
+  const incomplete = await synchronizer.refreshInventory();
+  assert.deepEqual(store.deviceWrites[1], []);
+  assert.equal(store.checkpointWrites[1].devices[0].visible, true);
+  assert.doesNotMatch(JSON.stringify(incomplete), /MUST-NOT-LEAK|rawToken/);
+
+  refresh = 3;
+  await synchronizer.refreshInventory();
+  assert.deepEqual(
+    store.deviceWrites[2].map((item) => [item.deviceId, item.visible]),
+    [['1', false]],
+  );
+});
+
+test('inventory failures persist exponential backoff and block calls after restart', async () => {
+  const store = createStore();
+  let current = Date.parse('2026-08-05T10:00:00Z');
+  let calls = 0;
+  const client = {
+    async request() {
+      calls += 1;
+      const error = new Error('raw provider failure');
+      error.status = 503;
+      error.retryAfterMs = 90_000;
+      error.transient = true;
+      throw error;
+    },
+  };
+  const first = createSynchronizer({
+    client,
+    store,
+    now: () => new Date(current),
+    random: () => 0.5,
+  });
+
+  assert.deepEqual(await first.refreshInventory(), {
+    state: 'backoff',
+    retryAt: '2026-08-05T10:01:30.000Z',
+  });
+  assert.equal(store.checkpointWrites[0].failureAttempts, 1);
+  assert.equal(store.checkpointOptions[0].lastError, 'inventory request deferred');
+
+  current += 60_000;
+  const restarted = createSynchronizer({
+    client,
+    store,
+    now: () => new Date(current),
+    random: () => 0.5,
+  });
+  assert.deepEqual(await restarted.refreshInventory(), {
+    state: 'backoff',
+    retryAt: '2026-08-05T10:01:30.000Z',
+  });
+  assert.equal(calls, 1);
 });

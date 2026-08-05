@@ -20,7 +20,10 @@ function createStateManager({ secret, store, now = () => new Date() } = {}) {
     return crypto.createHmac('sha256', secret).update(payload).digest();
   }
 
-  async function issue() {
+  async function issue(setupTokenHash) {
+    if (typeof setupTokenHash !== 'string' || setupTokenHash === '') {
+      throw new Error('setup-token hash is required for OAuth state');
+    }
     const issuedAt = requireCurrentTime(now);
     const nonce = crypto.randomBytes(32).toString('base64url');
     const payload = Buffer.from(JSON.stringify({
@@ -32,6 +35,7 @@ function createStateManager({ secret, store, now = () => new Date() } = {}) {
     await store.createNonce(
       nonceHash,
       new Date(issuedAt.getTime() + STATE_MAX_AGE_MS),
+      setupTokenHash,
     );
     return `${encodedPayload}.${sign(payload).toString('base64url')}`;
   }
@@ -81,9 +85,9 @@ function createStateManager({ secret, store, now = () => new Date() } = {}) {
     if (age < 0) throw new Error('OAuth state was issued in the future');
     if (age > STATE_MAX_AGE_MS) throw new Error('OAuth state expired');
 
-    const consumed = await store.consumeNonce(hashNonce(payload.nonce), current);
-    if (!consumed) throw new Error('OAuth state is invalid or already used');
-    return true;
+    const setupTokenHash = await store.consumeNonce(hashNonce(payload.nonce), current);
+    if (!setupTokenHash) throw new Error('OAuth state is invalid or already used');
+    return setupTokenHash;
   }
 
   return { issue, verifyAndConsume };

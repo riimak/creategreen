@@ -22,6 +22,7 @@ function memoryStore(credentials = null) {
     credentials,
     saved: [],
     states: [],
+    counters: [],
     async loadCredentials() {
       return this.credentials;
     },
@@ -31,6 +32,9 @@ function memoryStore(credentials = null) {
     },
     async setAuthorizationState(state, message) {
       this.states.push({ state, message });
+    },
+    async recordCounters(value) {
+      this.counters.push(value);
     },
   };
 }
@@ -173,6 +177,7 @@ test('refreshes at least sixty seconds early and preserves an omitted refresh to
   assert.equal(refreshBody.get('grant_type'), 'refresh_token');
   assert.equal(refreshBody.get('refresh_token'), 'stored-refresh');
   assert.equal(store.saved[0].refreshToken, 'stored-refresh');
+  assert.deepEqual(store.counters, [{ tokenRefreshes: 1 }]);
 });
 
 test('coalesces concurrent refreshes into one request', async () => {

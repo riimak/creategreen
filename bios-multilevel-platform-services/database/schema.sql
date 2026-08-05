@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS fusionsolar_oauth_credentials (
 
 CREATE TABLE IF NOT EXISTS fusionsolar_oauth_nonces (
   nonce_hash       TEXT PRIMARY KEY,
+  setup_token_hash TEXT NOT NULL,
   expires_at       TIMESTAMPTZ NOT NULL,
   consumed_at      TIMESTAMPTZ,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -148,10 +149,16 @@ CREATE TABLE IF NOT EXISTS fusionsolar_devices (
   device_type      TEXT,
   model            TEXT,
   serial_number    TEXT,
+  visible          BOOLEAN NOT NULL DEFAULT TRUE,
   metadata         JSONB NOT NULL DEFAULT '{}',
   first_seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_seen_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE fusionsolar_oauth_nonces
+  ADD COLUMN IF NOT EXISTS setup_token_hash TEXT;
+ALTER TABLE fusionsolar_devices
+  ADD COLUMN IF NOT EXISTS visible BOOLEAN NOT NULL DEFAULT TRUE;
 
 CREATE INDEX IF NOT EXISTS idx_fusionsolar_devices_plant
   ON fusionsolar_devices (plant_code);
@@ -162,6 +169,17 @@ CREATE TABLE IF NOT EXISTS fusionsolar_sync_state (
   backoff_until    TIMESTAMPTZ,
   last_success_at  TIMESTAMPTZ,
   last_error       TEXT,
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS fusionsolar_diagnostics (
+  id               TEXT PRIMARY KEY DEFAULT 'active',
+  cycles           BIGINT NOT NULL DEFAULT 0,
+  huawei_failures  BIGINT NOT NULL DEFAULT 0,
+  token_refreshes  BIGINT NOT NULL DEFAULT 0,
+  rows_ingested    BIGINT NOT NULL DEFAULT 0,
+  skipped_fields   BIGINT NOT NULL DEFAULT 0,
+  backfill_steps   BIGINT NOT NULL DEFAULT 0,
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

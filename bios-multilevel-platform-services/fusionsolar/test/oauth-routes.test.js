@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const { createServer } = require('../server');
 const { createIntegration } = require('../integration');
 
@@ -25,8 +26,8 @@ function dependencies(overrides = {}) {
   const calls = [];
   const store = {
     async isSetupTokenConsumed() { return false; },
-    async saveCredentialsIfSetupUnused() {
-      calls.push('save-if-unused');
+    async saveCredentialsIfSetupUnused(setupTokenHash) {
+      calls.push(`save-if-unused:${setupTokenHash}`);
       return true;
     },
     async loadCredentials() { return null; },
@@ -45,13 +46,13 @@ function dependencies(overrides = {}) {
     async close() {},
   };
   const stateManager = {
-    async issue() {
-      calls.push('issue');
+    async issue(setupTokenHash) {
+      calls.push(`issue:${setupTokenHash}`);
       return 'signed-state';
     },
     async verifyAndConsume() {
       calls.push('verify');
-      return true;
+      return crypto.createHash('sha256').update(SETUP_TOKEN).digest('hex');
     },
   };
   const client = {
@@ -132,7 +133,10 @@ test('OAuth start redirects valid bootstrap requests without caching or referrer
   assert.equal(response.headers.get('location'), 'https://oauth.example.com/authorize?state=signed-state');
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
-  assert.deepEqual(deps.calls, ['issue', 'authorize:signed-state']);
+  assert.deepEqual(deps.calls, [
+    `issue:${crypto.createHash('sha256').update(SETUP_TOKEN).digest('hex')}`,
+    'authorize:signed-state',
+  ]);
 });
 
 test('OAuth callback consumes state before handling Huawei errors and returns generic HTML', async (t) => {
@@ -171,7 +175,11 @@ test('OAuth callback verifies state before code exchange and consumes bootstrap 
   const body = await response.text();
 
   assert.equal(response.status, 200);
-  assert.deepEqual(deps.calls, ['verify', 'exchange:false', 'save-if-unused']);
+  assert.deepEqual(deps.calls, [
+    'verify',
+    'exchange:false',
+    `save-if-unused:${crypto.createHash('sha256').update(SETUP_TOKEN).digest('hex')}`,
+  ]);
   assert.equal(body.includes(code), false);
   assert.equal(body.includes('access-secret'), false);
   assert.match(body, /authorization completed/);
@@ -180,7 +188,7 @@ test('OAuth callback verifies state before code exchange and consumes bootstrap 
 test('OAuth callback generically rejects a second completion that loses setup claim', async (t) => {
   const deps = dependencies();
   deps.store.saveCredentialsIfSetupUnused = async () => {
-    deps.calls.push('save-if-unused');
+    deps.calls.push('save-if-unused:rejected');
     return false;
   };
   const integration = createIntegration({ config: configured(), ...deps });
@@ -193,7 +201,7 @@ test('OAuth callback generically rejects a second completion that loses setup cl
   const body = await response.text();
 
   assert.equal(response.status, 400);
-  assert.deepEqual(deps.calls, ['verify', 'exchange:false', 'save-if-unused']);
+  assert.deepEqual(deps.calls, ['verify', 'exchange:false', 'save-if-unused:rejected']);
   assert.equal(body.includes(code), false);
   assert.equal(body.includes('state'), false);
   assert.match(body, /authorization failed/);
@@ -224,8 +232,33 @@ test('transient code exchange failure leaves setup token claim available to a fr
     'exchange:false',
     'verify',
     'exchange:false',
-    'save-if-unused',
+    `save-if-unused:${crypto.createHash('sha256').update(SETUP_TOKEN).digest('hex')}`,
   ]);
+});
+
+test('outstanding state claims its issued setup generation after rotation or removal', async () => {
+  const oldHash = crypto.createHash('sha256').update('old-setup-token').digest('hex');
+  for (const setupToken of ['replacement-setup-token', '']) {
+    const deps = dependencies();
+    deps.stateManager.verifyAndConsume = async () => {
+      deps.calls.push('verify');
+      return oldHash;
+    };
+    const claimed = [];
+    deps.store.saveCredentialsIfSetupUnused = async (hash) => {
+      claimed.push(hash);
+      return true;
+    };
+    const integration = createIntegration({
+      config: configured({ setupToken }),
+      ...deps,
+    });
+
+    assert.deepEqual(await integration.completeCallback(
+      new URLSearchParams({ code: 'issued-before-change', state: 'old-state' }),
+    ), { ok: true });
+    assert.deepEqual(claimed, [oldHash]);
+  }
 });
 
 test('consumed bootstrap token remains unusable until configuration rotates it', async (t) => {
@@ -261,6 +294,14 @@ test('status exposes only sanitized integration state', async (t) => {
     lastSyncAt: null,
     backfill: null,
     lastError: null,
+    counters: {
+      cycles: 0,
+      huaweiFailures: 0,
+      tokenRefreshes: 0,
+      rowsIngested: 0,
+      skippedFields: 0,
+      backfillSteps: 0,
+    },
   });
   assert.equal(/ciphertext|refreshToken|plantCode|identifier/i.test(serialized), false);
 });

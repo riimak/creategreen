@@ -136,11 +136,13 @@ function createFakeHuaweiServer({
           plantCode: 'SOMBOR-A',
           plantName: 'Sombor A',
           capacity: 100,
+          gridConnectionDate: new Date(currentTime - 3 * 86_400_000).toISOString(),
         }],
         [{
           plantCode: 'SOMBOR-B',
           plantName: 'Sombor B',
           capacity: 200,
+          gridConnectionDate: new Date(currentTime - 3 * 86_400_000).toISOString(),
         }],
       ];
       if (!Number.isInteger(pageNo) || pageNo < 1 || pageNo > pages.length) {

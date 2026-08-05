@@ -82,6 +82,9 @@ function createHuaweiClient({
           currentCredentials.refreshToken,
         );
         await store.saveCredentials(refreshed);
+        if (typeof store.recordCounters === 'function') {
+          await store.recordCounters({ tokenRefreshes: 1 });
+        }
         return refreshed;
       } catch (error) {
         if (error instanceof HuaweiClientError && error.permanent) {

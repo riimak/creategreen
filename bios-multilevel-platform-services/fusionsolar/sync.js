@@ -20,6 +20,7 @@ const DEFAULT_BACKFILL_WINDOW_MS = 24 * 60 * 60_000;
 const MIN_BACKFILL_WINDOW_MS = 5 * 60_000;
 const DEFAULT_TRANSIENT_BACKOFF_MS = 1000;
 const DEFAULT_THROTTLE_BACKOFF_MS = 60_000;
+const MAX_BACKOFF_MS = 60 * 60_000;
 
 function createSynchronizer({
   client,
@@ -27,6 +28,7 @@ function createSynchronizer({
   config = {},
   now = () => new Date(),
   sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  random = Math.random,
 } = {}) {
   validateDependencies(client, store, now, sleep);
   const pageCap = inventoryPageCap(config.inventoryPageCap);
@@ -46,14 +48,55 @@ function createSynchronizer({
 
   async function refreshInventory() {
     const previous = await store.getCheckpoint(INVENTORY_CHECKPOINT);
+    if (isBackoffActive(previous?.backoffUntil, currentTime())) {
+      return {
+        state: 'backoff',
+        retryAt: timestampString(previous.backoffUntil),
+      };
+    }
+    try {
+      return await performInventoryRefresh(previous);
+    } catch (error) {
+      if (!isFlowOrTransient(error)) throw error;
+      const failureAttempts = nonNegativeInteger(previous?.failureAttempts) + 1;
+      const delayMs = exponentialBackoffMs({
+        attempt: failureAttempts,
+        baseMs: baseRetryDelayMs(error),
+        retryAfterMs: error.retryAfterMs,
+        random,
+      });
+      const backoffUntil = new Date(currentTime().getTime() + delayMs);
+      await store.setCheckpoint(
+        INVENTORY_CHECKPOINT,
+        {
+          ...(previous || {}),
+          failureAttempts,
+          backoffUntil: backoffUntil.toISOString(),
+        },
+        {
+          backoffUntil,
+          lastError: 'inventory request deferred',
+        },
+      );
+      return {
+        state: 'backoff',
+        retryAt: backoffUntil.toISOString(),
+      };
+    }
+  }
+
+  async function performInventoryRefresh(previous) {
     const previousPlants = checkpointPlants(previous);
+    const previousDevices = checkpointDevices(previous);
     const plantInventory = await fetchAllPlants();
     const currentPlants = plantInventory.records;
     const currentByCode = new Map(currentPlants.map((plant) => [plant.plantCode, plant]));
     const deviceInventory = await fetchAllDevices(currentPlants.map((plant) => plant.plantCode));
-    const devices = deviceInventory.records;
+    const devices = deviceInventory.records.map((device) => ({ ...device, visible: true }));
     const diagnostics = [...plantInventory.diagnostics, ...deviceInventory.diagnostics];
     const plantSnapshotIncomplete = plantInventory.diagnostics.length > 0;
+    const deviceSnapshotIncomplete = plantSnapshotIncomplete
+      || deviceInventory.diagnostics.length > 0;
     const missingPlants = plantSnapshotIncomplete
       ? []
       : previousPlants
@@ -62,13 +105,28 @@ function createSynchronizer({
     const checkpointPlantRecords = plantSnapshotIncomplete
       ? mergePlants(previousPlants, currentPlants)
       : currentPlants;
+    const currentDevicesById = new Map(devices.map((device) => [device.deviceId, device]));
+    const missingDevices = deviceSnapshotIncomplete
+      ? []
+      : previousDevices
+        .filter((device) => !currentDevicesById.has(device.deviceId))
+        .map((device) => ({ ...device, visible: false }));
+    const checkpointDeviceRecords = deviceSnapshotIncomplete
+      ? mergeDevices(previousDevices, devices)
+      : devices;
 
     await store.upsertPlants([...currentPlants, ...missingPlants]);
-    await store.upsertDevices(devices);
+    await store.upsertDevices([...devices, ...missingDevices]);
     const refreshedAt = currentTime().toISOString();
     await store.setCheckpoint(
       INVENTORY_CHECKPOINT,
-      { plants: checkpointPlantRecords, refreshedAt },
+      {
+        plants: checkpointPlantRecords,
+        devices: checkpointDeviceRecords,
+        refreshedAt,
+        failureAttempts: 0,
+        backoffUntil: null,
+      },
       { lastSuccessAt: refreshedAt, lastError: null },
     );
     const result = { plants: currentPlants.length, devices: devices.length };
@@ -187,7 +245,7 @@ function createSynchronizer({
         body: JSON.stringify(body),
         signal,
         retryTransient: !oneCall,
-        retryUnauthorized: !oneCall,
+        retryUnauthorized: true,
       });
     } catch (error) {
       throw new SyncApiError(`Huawei ${operation} request failed`, {
@@ -240,13 +298,26 @@ function createSynchronizer({
 
   async function doLiveCycle() {
     requireIngestionStore(store);
-    if (await inventoryIsStale()) await refreshInventory();
+    const persistedLiveCheckpoint = await store.getCheckpoint(LIVE_CHECKPOINT) || {};
+    const persistedLiveBackoff = persistedLiveCheckpoint.backoffUntil;
+    if (isBackoffActive(persistedLiveBackoff, currentTime())) {
+      return {
+        state: 'backoff',
+        retryAt: timestampString(persistedLiveBackoff),
+      };
+    }
+    if (await inventoryIsStale()) {
+      const inventory = await refreshInventory();
+      if (inventory?.state === 'backoff') return inventory;
+    }
 
     const plants = await store.listPlants();
     const visiblePlants = plants.filter((plant) => plant.visible !== false);
     const visibleByCode = new Map(visiblePlants.map((plant) => [plant.plantCode, plant]));
     const devices = (await store.listDevices()).filter((device) => (
-      visibleByCode.has(device.plantCode) && REGISTRY[String(device.deviceType)]
+      device.visible !== false
+      && visibleByCode.has(device.plantCode)
+      && REGISTRY[String(device.deviceType)]
     ));
     const measurements = [];
     const failures = [];
@@ -376,9 +447,21 @@ function createSynchronizer({
     }
 
     const completedAt = currentTime();
+    const previousAttempts = nonNegativeInteger(persistedLiveCheckpoint.failureAttempts);
+    const failureAttempts = backoffUntil ? previousAttempts + 1 : 0;
+    if (backoffUntil) {
+      const retryAfterMs = Math.max(0, backoffUntil.getTime() - completedAt.getTime());
+      backoffUntil = new Date(completedAt.getTime() + exponentialBackoffMs({
+        attempt: failureAttempts,
+        baseMs: retryAfterMs,
+        retryAfterMs,
+        random,
+      }));
+    }
     const checkpoint = {
       completedAt: completedAt.toISOString(),
       backoffUntil: backoffUntil?.toISOString() || null,
+      failureAttempts,
     };
     await store.saveMeasurementsAndCheckpoint(
       measurements,
@@ -449,7 +532,10 @@ function createSynchronizer({
       initialBackfillWindowMs,
       'backfill checkpoint windowMs',
     );
-    const startTime = before - windowMs;
+    const lowerBound = authoritativeLowerBound(plant);
+    const startTime = lowerBound === null
+      ? before - windowMs
+      : Math.max(lowerBound, before - windowMs);
     let response;
     try {
       response = await requestJson(
@@ -481,15 +567,21 @@ function createSynchronizer({
         return backfillResult('range_reduced', before, 0, false);
       }
       if (isFlowOrTransient(error)) {
-        const backoffUntil = new Date(
-          currentTime().getTime() + retryDelayMs(error),
-        );
+        const failureAttempts = nonNegativeInteger(checkpoint.failureAttempts) + 1;
+        const delayMs = exponentialBackoffMs({
+          attempt: failureAttempts,
+          baseMs: baseRetryDelayMs(error),
+          retryAfterMs: error.retryAfterMs,
+          random,
+        });
+        const backoffUntil = new Date(currentTime().getTime() + delayMs);
         const deferred = {
           ...checkpoint,
           before,
           windowMs,
           reachedBoundary: false,
           backoffUntil: backoffUntil.toISOString(),
+          failureAttempts,
         };
         await store.setCheckpoint(key, deferred, {
           backoffUntil,
@@ -542,12 +634,15 @@ function createSynchronizer({
         skipped.push(invalidRecordDiagnostic(`device:${device.deviceId}`, { index }));
       }
     }
-    const reachedBoundary = payload.data.length === 0;
+    const reachedBoundary = payload.data.length === 0
+      && lowerBound !== null
+      && startTime <= lowerBound;
     const nextCheckpoint = {
       before: startTime,
       windowMs,
       reachedBoundary,
       backoffUntil: null,
+      failureAttempts: 0,
     };
     const savedAt = currentTime();
     await store.saveMeasurementsAndCheckpoint(
@@ -632,6 +727,15 @@ function checkpointPlants(checkpoint) {
   ));
 }
 
+function checkpointDevices(checkpoint) {
+  if (!checkpoint || !Array.isArray(checkpoint.devices)) return [];
+  return checkpoint.devices.filter((device) => (
+    device
+    && typeof device.deviceId === 'string'
+    && typeof device.plantCode === 'string'
+  ));
+}
+
 function deduplicatePlants(plants) {
   const unique = new Map();
   for (const plant of plants) unique.set(plant.plantCode, plant);
@@ -640,6 +744,16 @@ function deduplicatePlants(plants) {
 
 function mergePlants(previousPlants, currentPlants) {
   return deduplicatePlants([...previousPlants, ...currentPlants]);
+}
+
+function deduplicateDevices(devices) {
+  const unique = new Map();
+  for (const device of devices) unique.set(device.deviceId, device);
+  return [...unique.values()];
+}
+
+function mergeDevices(previousDevices, currentDevices) {
+  return deduplicateDevices([...previousDevices, ...currentDevices]);
 }
 
 function invalidRecordDiagnostic(scope, location) {
@@ -745,15 +859,31 @@ function isFlowOrTransient(error) {
     || isTransientStatus(error?.status);
 }
 
-function retryDelayMs(error) {
-  if (Number.isFinite(error?.retryAfterMs) && error.retryAfterMs >= 0) {
-    return error.retryAfterMs;
-  }
+function baseRetryDelayMs(error) {
   if (error?.failCode === 407) return 5 * 60_000;
   if (error?.failCode === 429 || error?.status === 429) {
     return DEFAULT_THROTTLE_BACKOFF_MS;
   }
   return DEFAULT_TRANSIENT_BACKOFF_MS;
+}
+
+function exponentialBackoffMs({
+  attempt,
+  baseMs,
+  retryAfterMs,
+  random,
+}) {
+  const exponent = Math.min(20, Math.max(0, attempt - 1));
+  const exponential = Math.min(MAX_BACKOFF_MS, baseMs * (2 ** exponent));
+  const randomValue = Number(random());
+  const jitterFactor = Number.isFinite(randomValue)
+    ? 0.5 + Math.min(1, Math.max(0, randomValue))
+    : 1;
+  const jittered = Math.min(MAX_BACKOFF_MS, Math.round(exponential * jitterFactor));
+  return Math.max(
+    jittered,
+    Number.isFinite(retryAfterMs) && retryAfterMs >= 0 ? retryAfterMs : 0,
+  );
 }
 
 function liveFailure(error, scope, now) {
@@ -764,7 +894,10 @@ function liveFailure(error, scope, now) {
       reason: flowControlled ? 'flow_controlled' : 'request_failed',
     },
     backoffUntil: flowControlled
-      ? new Date(now.getTime() + retryDelayMs(error))
+      ? new Date(now.getTime() + Math.max(
+        baseRetryDelayMs(error),
+        Number.isFinite(error?.retryAfterMs) ? error.retryAfterMs : 0,
+      ))
       : null,
   };
 }
@@ -777,6 +910,21 @@ function laterBackoff(current, candidate) {
 
 function finiteTimestamp(value, fallback) {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function nonNegativeInteger(value) {
+  return Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
+function authoritativeLowerBound(plant) {
+  const metadata = plant?.metadata;
+  if (!metadata || typeof metadata !== 'object') return null;
+  for (const field of ['gridConnectionDate', 'gridConnectedAt', 'gridConnectionTime']) {
+    const raw = metadata[field];
+    const parsed = typeof raw === 'number' ? raw : Date.parse(raw);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
 }
 
 function timestampString(value) {
@@ -805,6 +953,8 @@ async function eligibleBackfillDevices(store) {
   const plantsByCode = new Map(plants.map((plant) => [plant.plantCode, plant]));
   return (await store.listDevices())
     .filter((device) => (
+      device.visible !== false
+      &&
       plantsByCode.has(device.plantCode)
       && REGISTRY[String(device.deviceType)]
       && typeof device.metadata?.devDn === 'string'

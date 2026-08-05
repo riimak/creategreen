@@ -315,18 +315,72 @@ function deduplicate(rows, keyFor) {
 }
 
 function canonicalTimestamp(value) {
-  if (
-    value === null
-    || value === undefined
-    || (!['string', 'number'].includes(typeof value) && !(value instanceof Date))
-  ) {
+  if (typeof value === 'string') {
+    return canonicalIsoTimestamp(value);
+  }
+  if (typeof value !== 'number' && !(value instanceof Date)) {
     throw new Error('invalid measurement timestamp');
   }
   const timestamp = new Date(value);
   if (Number.isNaN(timestamp.getTime())) {
     throw new Error('invalid measurement timestamp');
   }
-  return timestamp.toISOString();
+  return timestamp.toISOString().replace(/\.(\d{3})Z$/, '.$1000Z');
+}
+
+function canonicalIsoTimestamp(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+  if (!match) throw new Error('invalid measurement timestamp');
+
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, fraction = '', zone] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  if (
+    year < 1
+    || month < 1
+    || month > 12
+    || day < 1
+    || day > daysInMonth(year, month)
+    || hour > 23
+    || minute > 59
+    || second > 59
+  ) {
+    throw new Error('invalid measurement timestamp');
+  }
+
+  let offsetMinutes = 0;
+  if (zone !== 'Z') {
+    const sign = zone[0] === '+' ? 1 : -1;
+    const offsetHours = Number(zone.slice(1, 3));
+    const offsetMinutePart = Number(zone.slice(4, 6));
+    if (offsetHours > 23 || offsetMinutePart > 59) {
+      throw new Error('invalid measurement timestamp');
+    }
+    offsetMinutes = sign * (offsetHours * 60 + offsetMinutePart);
+  }
+
+  const local = new Date(0);
+  local.setUTCFullYear(year, month - 1, day);
+  local.setUTCHours(hour, minute, second, 0);
+  const utc = new Date(local.getTime() - offsetMinutes * 60_000);
+  if (utc.getUTCFullYear() < 1 || utc.getUTCFullYear() > 9999) {
+    throw new Error('invalid measurement timestamp');
+  }
+
+  const wholeSecond = utc.toISOString().slice(0, 19);
+  return `${wholeSecond}.${fraction.padEnd(6, '0')}Z`;
+}
+
+function daysInMonth(year, month) {
+  if (month === 2) {
+    const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    return leapYear ? 29 : 28;
+  }
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
 }
 
 module.exports = { createFusionSolarStore };

@@ -176,7 +176,7 @@ test('measurement writes preserve the raw_measurements natural key', async () =>
   assert.deepEqual(pool.queries[0].values, [
     'HUAWEI:plant-1',
     'huawei.plant.active_power_kw',
-    '2026-08-05T10:00:00.000Z',
+    '2026-08-05T10:00:00.000000Z',
     12.5,
     false,
   ]);
@@ -210,10 +210,57 @@ test('measurement writes canonicalize equivalent instants before deduplication',
   assert.deepEqual(pool.queries[0].values, [
     'HUAWEI:plant-1',
     'huawei.plant.active_power_kw',
-    '2026-08-05T10:00:00.000Z',
+    '2026-08-05T10:00:00.000000Z',
     13.5,
     false,
   ]);
+});
+
+test('measurement writes preserve microseconds and handle offset day rollover', async () => {
+  const pool = createFakePool(async (_sql, values) => ({
+    rows: [],
+    rowCount: values.length / 5,
+  }));
+  const store = createFusionSolarStore({ pool, cipher: fakeCipher() });
+
+  assert.deepEqual(await store.saveMeasurements([
+    {
+      source: 'HUAWEI:plant-1',
+      metric: 'huawei.device.voltage_v',
+      ts: '2026-08-05T10:00:00.0001Z',
+      value: 1,
+      isMissing: false,
+    },
+    {
+      source: 'HUAWEI:plant-1',
+      metric: 'huawei.device.voltage_v',
+      ts: '2026-08-05T10:00:00.0002Z',
+      value: 2,
+      isMissing: false,
+    },
+  ]), { upserted: 2 });
+  assert.deepEqual(
+    [pool.queries[0].values[2], pool.queries[0].values[7]],
+    ['2026-08-05T10:00:00.000100Z', '2026-08-05T10:00:00.000200Z'],
+  );
+
+  assert.deepEqual(await store.saveMeasurements([
+    {
+      source: 'HUAWEI:plant-1',
+      metric: 'huawei.plant.energy_kwh',
+      ts: '2026-08-05T00:30:00.1234+02:00',
+      value: 3,
+      isMissing: false,
+    },
+    {
+      source: 'HUAWEI:plant-1',
+      metric: 'huawei.plant.energy_kwh',
+      ts: '2026-08-04T22:30:00.123400Z',
+      value: 4,
+      isMissing: false,
+    },
+  ]), { upserted: 1 });
+  assert.equal(pool.queries[1].values[2], '2026-08-04T22:30:00.123400Z');
 });
 
 test('measurement deduplication keys cannot collide on field delimiters', async () => {
@@ -249,16 +296,24 @@ test('measurement writes reject invalid timestamps before querying PostgreSQL', 
   const pool = createFakePool(async () => ({ rows: [], rowCount: 1 }));
   const store = createFusionSolarStore({ pool, cipher: fakeCipher() });
 
-  await assert.rejects(
-    store.saveMeasurements([{
-      source: 'HUAWEI:plant-1',
-      metric: 'huawei.plant.active_power_kw',
-      ts: 'not-a-timestamp',
-      value: 12.5,
-      isMissing: false,
-    }]),
-    /invalid measurement timestamp/,
-  );
+  for (const ts of [
+    'not-a-timestamp',
+    '2026-08-05T10:00:00.1234567Z',
+    '2026-02-30T10:00:00Z',
+    '2026-08-05T10:00:00',
+    '2026-08-05T10:00:00+24:00',
+  ]) {
+    await assert.rejects(
+      store.saveMeasurements([{
+        source: 'HUAWEI:plant-1',
+        metric: 'huawei.plant.active_power_kw',
+        ts,
+        value: 12.5,
+        isMissing: false,
+      }]),
+      /invalid measurement timestamp/,
+    );
+  }
   assert.equal(pool.queries.length, 0);
 });
 
@@ -347,7 +402,7 @@ test('PostgreSQL integration preserves nonce and measurement idempotency', {
     const measurement = {
       source,
       metric: 'huawei.plant.active_power_kw',
-      ts: '2026-08-05T10:00:00Z',
+      ts: '2026-08-05T00:30:00.1234+02:00',
       value: 12.5,
       isMissing: false,
     };
@@ -355,10 +410,24 @@ test('PostgreSQL integration preserves nonce and measurement idempotency', {
       measurement,
       {
         ...measurement,
-        ts: '2026-08-05T12:00:00+02:00',
+        ts: '2026-08-04T22:30:00.123400Z',
         value: 13.5,
       },
     ]), { upserted: 1 });
+    assert.deepEqual(await store.saveMeasurements([
+      {
+        ...measurement,
+        metric: 'huawei.device.voltage_v',
+        ts: '2026-08-05T10:00:00.0001Z',
+        value: 1,
+      },
+      {
+        ...measurement,
+        metric: 'huawei.device.voltage_v',
+        ts: '2026-08-05T10:00:00.0002Z',
+        value: 2,
+      },
+    ]), { upserted: 2 });
 
     await store.setCheckpoint(syncKey, { cursor: 'complete' });
     assert.deepEqual(await store.getCheckpoint(syncKey), { cursor: 'complete' });
@@ -366,10 +435,24 @@ test('PostgreSQL integration preserves nonce and measurement idempotency', {
     const { rows } = await pool.query(
       `SELECT count(*)::integer AS count, max(value) AS value
        FROM raw_measurements WHERE source = $1 AND metric = $2 AND ts = $3`,
-      [source, measurement.metric, measurement.ts],
+      [source, measurement.metric, '2026-08-04T22:30:00.123400Z'],
     );
     assert.equal(rows[0].count, 1);
     assert.equal(rows[0].value, 13.5);
+    const microseconds = await pool.query(
+      `SELECT to_char(
+         ts AT TIME ZONE 'UTC',
+         'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+       ) AS ts
+       FROM raw_measurements
+       WHERE source = $1 AND metric = $2
+       ORDER BY ts`,
+      [source, 'huawei.device.voltage_v'],
+    );
+    assert.deepEqual(
+      microseconds.rows.map((row) => row.ts),
+      ['2026-08-05T10:00:00.000100Z', '2026-08-05T10:00:00.000200Z'],
+    );
   } finally {
     await pool.query('DELETE FROM fusionsolar_oauth_nonces WHERE nonce_hash = $1', [nonceHash]);
     await pool.query('DELETE FROM fusionsolar_sync_state WHERE sync_key = $1', [syncKey]);

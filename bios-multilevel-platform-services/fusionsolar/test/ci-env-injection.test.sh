@@ -20,11 +20,15 @@ FUSIONSOLAR_CLIENT_SECRET="$(printf '%s\n%s\n%s' \
   'quote: "double" and backslash: \server\share' \
   '# literal hash at line start' \
   "single quote: ' remains literal")"
+export FUSIONSOLAR_CLIENT_ID=$'one trailing newline\n'
+export FUSIONSOLAR_SETUP_TOKEN=$'multiple trailing newlines\n\n\n'
 
 bash "$FORWARD_SCRIPT" "$VALUES_FILE" \
   FUSIONSOLAR_API_BASE_URL \
   FUSIONSOLAR_REDIRECT_URI \
-  FUSIONSOLAR_CLIENT_SECRET
+  FUSIONSOLAR_CLIENT_SECRET \
+  FUSIONSOLAR_CLIENT_ID \
+  FUSIONSOLAR_SETUP_TOKEN
 
 npm install --silent --prefix "$TEST_TMP/yaml-parser" yaml
 NODE_PATH="$TEST_TMP/yaml-parser/node_modules" node - "$VALUES_FILE" <<'NODE'
@@ -40,6 +44,8 @@ for (const name of [
   'FUSIONSOLAR_API_BASE_URL',
   'FUSIONSOLAR_REDIRECT_URI',
   'FUSIONSOLAR_CLIENT_SECRET',
+  'FUSIONSOLAR_CLIENT_ID',
+  'FUSIONSOLAR_SETUP_TOKEN',
 ]) {
   const matches = entries.filter((entry) => entry.name === name);
   assert.equal(matches.length, 1, `${name} must occur exactly once`);

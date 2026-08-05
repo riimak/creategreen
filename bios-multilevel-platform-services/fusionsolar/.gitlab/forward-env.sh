@@ -12,8 +12,13 @@ for name in "$@"; do
     sed -i "/^  - name: ${name}$/,+1d" "$VALUES_FILE"
     {
       printf '  - name: %s\n' "$name"
-      printf '    value: |-\n'
-      printf '%s\n' "$value" | sed 's/^/      /'
+      if [[ "$value" == *$'\n' ]]; then
+        printf '    value: |+\n'
+        printf '%s' "$value" | sed 's/^/      /'
+      else
+        printf '    value: |-\n'
+        printf '%s\n' "$value" | sed 's/^/      /'
+      fi
     } >> "$VALUES_FILE"
     printf 'Forwarded CI variable %s\n' "$name"
   else

@@ -60,6 +60,20 @@ test('fake Huawei returns sanitized 401 and 429 responses and redacts recorded f
   assert.equal(empty.status, 200);
   assert.deepEqual((await empty.json()).data, []);
 
+  const oversizedDeviceBatch = await fake.fetchAsAuthorized('/thirdData/getDevList', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      stationCodes: Array.from({ length: 101 }, (_, index) => `PLANT-${index}`).join(','),
+    }),
+  });
+  assert.equal(oversizedDeviceBatch.status, 200);
+  assert.deepEqual(await oversizedDeviceBatch.json(), {
+    success: false,
+    failCode: 20015,
+    data: null,
+  });
+
   await fake.exchangeFixtureCode();
   const tokenCall = fake.calls().find((call) => call.path.endsWith('/token'));
   assert.ok(tokenCall);
@@ -110,9 +124,29 @@ test('OAuth, live ingestion, refresh, and restartable history work against Postg
   const fakeBaseUrl = await fake.listen();
   config.oauthBaseUrl = fakeBaseUrl;
   config.apiBaseUrl = fakeBaseUrl;
+  const fakeOrigin = new URL(fakeBaseUrl).origin;
+  const outboundDestinations = [];
+  const recordingFetch = async (url, options) => {
+    const destination = new URL(url);
+    outboundDestinations.push({
+      href: destination.toString(),
+      origin: destination.origin,
+      hostname: destination.hostname,
+      pathname: destination.pathname,
+    });
+    if (destination.origin !== fakeOrigin) {
+      throw new Error('unexpected outbound integration destination');
+    }
+    return fetch(destination, options);
+  };
   t.after(() => fake.close());
 
-  const first = await createRuntime({ config, schema, now });
+  const first = await createRuntime({
+    config,
+    schema,
+    now,
+    fetchImpl: recordingFetch,
+  });
   const firstBaseUrl = await listen(first.server);
   fake.setCallbackBaseUrl(firstBaseUrl);
   t.after(async () => {
@@ -158,6 +192,18 @@ test('OAuth, live ingestion, refresh, and restartable history work against Postg
     { plant_code: 'SOMBOR-A', source_key: 'HUAWEI:SOMBOR-A' },
     { plant_code: 'SOMBOR-B', source_key: 'HUAWEI:SOMBOR-B' },
   ]);
+  const devices = await first.pool.query(
+    `SELECT device_id, plant_code FROM fusionsolar_devices ORDER BY device_id`,
+  );
+  assert.deepEqual(devices.rows, [
+    { device_id: 'inverter-a', plant_code: 'SOMBOR-A' },
+    { device_id: 'inverter-b', plant_code: 'SOMBOR-B' },
+  ]);
+  const deviceListCalls = fake.calls()
+    .filter((call) => call.path === '/thirdData/getDevList');
+  assert.equal(deviceListCalls.length, 1);
+  assert.equal(deviceListCalls[0].json.stationCodes, 'SOMBOR-A,SOMBOR-B');
+  assert.equal(deviceListCalls[0].responseKind, 'devices-batch');
   const liveRows = await first.pool.query(
     `SELECT DISTINCT source FROM raw_measurements
      WHERE source IN ('HUAWEI:SOMBOR-A', 'HUAWEI:SOMBOR-B')
@@ -188,12 +234,29 @@ test('OAuth, live ingestion, refresh, and restartable history work against Postg
 
   await first.stop();
 
-  const second = await createRuntime({ config, schema, now });
+  const redeployedConfig = { ...config, setupToken: '' };
+  const second = await createRuntime({
+    config: redeployedConfig,
+    schema,
+    now,
+    fetchImpl: recordingFetch,
+  });
   const secondBaseUrl = await listen(second.server);
   fake.setCallbackBaseUrl(secondBaseUrl);
   t.after(async () => {
     await second.stop();
   });
+  const redeployedStatus = await second.integration.status();
+  assert.equal(redeployedStatus.state, 'authorized');
+  assert.equal(redeployedStatus.configured, true);
+  assert.equal(redeployedStatus.setupAvailable, false);
+  assert.equal(redeployedStatus.authorized, true);
+  assert.deepEqual(redeployedStatus.grantedScopes, ['pvms.openapi.basic']);
+  const unavailableStart = await fetch(
+    `${secondBaseUrl}/oauth/fusionsolar/start?setup_token=removed`,
+    { redirect: 'manual' },
+  );
+  assert.equal(unavailableStart.status, 404);
 
   const resumed = await second.synchronizer.runBackfillStep();
   assert.equal(resumed.state, 'progress');
@@ -232,9 +295,25 @@ test('OAuth, live ingestion, refresh, and restartable history work against Postg
     fake.calls().some((call) => call.path.includes('postRawDataInput')),
     false,
   );
+  assert.ok(outboundDestinations.length > 0);
+  assert.equal(
+    outboundDestinations.every(({ origin }) => origin === fakeOrigin),
+    true,
+  );
+  assert.equal(
+    outboundDestinations.some(({ hostname, pathname }) => (
+      hostname.includes('mars2') || pathname.includes('postRawDataInput')
+    )),
+    false,
+  );
 });
 
-async function createRuntime({ config, schema, now }) {
+async function createRuntime({
+  config,
+  schema,
+  now,
+  fetchImpl,
+}) {
   const pool = new Pool({
     connectionString: config.databaseUrl,
     options: `-c search_path=${schema}`,
@@ -249,6 +328,7 @@ async function createRuntime({ config, schema, now }) {
   const client = createHuaweiClient({
     config,
     store,
+    fetchImpl,
     now,
     sleep: async () => {},
   });
@@ -278,6 +358,7 @@ async function createRuntime({ config, schema, now }) {
     store,
     client,
     synchronizer,
+    integration,
     server,
     async stop() {
       if (stopped) return;

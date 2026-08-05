@@ -100,6 +100,24 @@ test('OAuth start hides missing and incorrect setup tokens with 404', async (t) 
   assert.deepEqual(deps.calls, []);
 });
 
+test('OAuth start remains unavailable after the bootstrap token is removed', async (t) => {
+  const deps = dependencies();
+  const integration = createIntegration({
+    config: configured({ setupToken: '' }),
+    ...deps,
+  });
+  const baseUrl = await startServer(t, integration);
+
+  for (const query of ['', `?setup_token=${encodeURIComponent(SETUP_TOKEN)}`]) {
+    const response = await fetch(`${baseUrl}/oauth/fusionsolar/start${query}`, {
+      redirect: 'manual',
+    });
+    assert.equal(response.status, 404);
+    assert.deepEqual(await response.json(), { error: 'not found' });
+  }
+  assert.deepEqual(deps.calls, []);
+});
+
 test('OAuth start redirects valid bootstrap requests without caching or referrers', async (t) => {
   const deps = dependencies();
   const integration = createIntegration({ config: configured(), ...deps });
@@ -237,6 +255,7 @@ test('status exposes only sanitized integration state', async (t) => {
   assert.deepEqual(status, {
     state: 'not_authorized',
     configured: true,
+    setupAvailable: true,
     authorized: false,
     grantedScopes: [],
     lastSyncAt: null,

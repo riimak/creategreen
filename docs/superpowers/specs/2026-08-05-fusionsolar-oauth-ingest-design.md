@@ -219,7 +219,7 @@ Required production configuration:
 - `FUSIONSOLAR_CLIENT_ID`
 - `FUSIONSOLAR_CLIENT_SECRET`
 - `FUSIONSOLAR_REDIRECT_URI`
-- `FUSIONSOLAR_SETUP_TOKEN`
+- `FUSIONSOLAR_SETUP_TOKEN` (bootstrap only; remove after successful authorization)
 - `FUSIONSOLAR_TOKEN_ENCRYPTION_KEY`
 - `FUSIONSOLAR_OAUTH_BASE_URL`
 - `FUSIONSOLAR_API_BASE_URL`
@@ -229,9 +229,10 @@ Optional scheduler, timeout, and backfill settings receive conservative
 defaults. Secrets are provided through protected deployment variables or
 Kubernetes Secrets and are never committed to the repository.
 
-The service remains healthy but reports `not_configured` when required Huawei
-configuration is absent. This permits deployment before Huawei returns client
-credentials.
+The service remains healthy but reports `not_configured` when required core
+Huawei configuration is absent. This permits deployment before Huawei returns
+client credentials. The setup token is not core runtime configuration:
+removing it after authorization disables `/start` without stopping polling.
 
 ## Failure handling and observability
 

@@ -152,7 +152,7 @@ function loadConfig(env = process.env) {
 
 function configurationState(config) {
   return config.clientId && config.clientSecret && config.redirectUri
-    && config.setupToken && config.tokenEncryptionKey
+    && config.tokenEncryptionKey
     && config.apiBaseUrl && config.databaseUrl
     ? 'configured'
     : 'not_configured';
@@ -160,6 +160,9 @@ function configurationState(config) {
 
 module.exports = { loadConfig, configurationState };
 ```
+
+`setupToken` is bootstrap-only and is not part of core runtime configuration.
+After authorization it may be removed without stopping the scheduler.
 
 - [ ] **Step 4: Add a minimal injectable HTTP server and tests**
 
@@ -652,12 +655,14 @@ is consumed, both plants are stored, devices remain attached to the correct
 plant, and a missing plant on a later refresh becomes `visible=false` rather
 than being deleted.
 
-- [ ] **Step 4: Implement paginated inventory discovery**
+- [ ] **Step 4: Implement paginated plants and batched device discovery**
 
 Use the 26.1 Plant List and Device List API request/response shapes. Keep API
-paths in named constants. Pagination must stop on the documented terminal
-condition, with a hard safety cap that raises a sanitized error if Huawei
-returns a repeating page.
+paths in named constants. Consume Plant List pages until the documented
+terminal condition, with a hard safety cap that raises a sanitized error if
+Huawei returns a repeating page. Device List is not paginated: submit
+`stationCodes` in documented batches of at most 100 plants and consume every
+device returned for each batch. Do not invent Device List page parameters.
 
 Create source keys as:
 
@@ -805,7 +810,8 @@ git commit -m "feat: ingest live and historical FusionSolar data"
 
 Cover:
 
-- `/start` rejects missing/wrong setup token with `404` rather than revealing configuration;
+- `/start` rejects missing/wrong setup tokens and removed setup-token
+  configuration with `404` rather than revealing configuration;
 - valid `/start` returns `302` to Huawei;
 - callback errors produce a safe HTML result;
 - valid callback verifies state before exchanging code;
@@ -844,6 +850,7 @@ Inject timers/clock. Assert:
 - service starts as `not_configured` without secrets;
 - configured but unauthorized service does not poll;
 - authorized service runs live sync immediately and then at the configured cadence;
+- authorized service continues polling after redeploy with an empty setup token;
 - one backfill step follows successful live work;
 - shutdown clears timers and closes the store.
 
@@ -1116,7 +1123,8 @@ git commit -m "build: deploy FusionSolar integration service"
 
 **Interfaces:**
 - Fake server implements authorize redirect, token exchange, refresh, paginated
-  plants/devices, live KPI, history, `401`, `429`, and empty retention boundary.
+  plants, station-batched devices (at most 100 plants per Device List request),
+  live KPI, history, `401`, `429`, and empty retention boundary.
 - Runbook documents configuration, authorization, status, reauthorization,
   credential rotation, and production acceptance.
 

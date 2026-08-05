@@ -85,6 +85,7 @@ test('unconfigured integration reports not_configured and never schedules pollin
   assert.deepEqual(await integration.status(), {
     state: 'not_configured',
     configured: false,
+    setupAvailable: true,
     authorized: false,
     grantedScopes: [],
     lastSyncAt: null,
@@ -122,6 +123,31 @@ test('authorized scheduler runs live immediately and one backfill step per caden
     'status', 'live', 'backfill',
     'status', 'live', 'backfill',
   ]);
+  assert.equal(clock.pending().length, 1);
+});
+
+test('authorized scheduler continues polling after redeploy without a setup token', async () => {
+  const clock = fakeClock();
+  const deps = dependencies();
+  const integration = createIntegration({
+    config: config({ setupToken: '' }),
+    clock,
+    ...deps,
+  });
+
+  await integration.startScheduler();
+
+  assert.deepEqual(deps.calls, ['status', 'live', 'backfill']);
+  assert.deepEqual(await integration.status(), {
+    state: 'authorized',
+    configured: true,
+    setupAvailable: false,
+    authorized: true,
+    grantedScopes: ['pvms.openapi.basic'],
+    lastSyncAt: null,
+    backfill: null,
+    lastError: null,
+  });
   assert.equal(clock.pending().length, 1);
 });
 

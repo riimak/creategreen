@@ -123,8 +123,9 @@ Result: exit 0; `CI_ENV_ROUND_TRIP_OK`.
   `/oauth/fusionsolar/callback`; its 8 tests reject every other path/method.
 - `pvms.openapi.control` appears only in a negative unit-test fixture that
   verifies rejection. Runtime requests use only `pvms.openapi.basic`.
-- `postRawDataInput` appears in FusionSolar executable source only as the Task
-  9 negative assertion; there is no Mars2 write implementation or call.
+- The end-to-end test injects one recording fetch into every Huawei token/API
+  request, rejects any destination outside the fake Huawei origin, and asserts
+  zero Mars2 host or `postRawDataInput` destinations.
 - No configured production value or real credential was added.
 
 ## Runbook coverage
@@ -141,12 +142,86 @@ Mars2 write permission/counter/`counterNodeId` prerequisites.
 - Production acceptance remains pending Huawei credentials and must confirm
   the real regional API origin, both expected Sombor plant codes, and their
   inverter inventory.
-- The current service requires a non-empty setup token to remain
-  `configured`. After authorization its digest is single-use, so operators
-  must retain that consumed value. Removing it stops polling; replacing it
-  intentionally enables reauthorization.
 - Encryption-key rotation has no dual-key or rewrap support. It requires a
-  maintenance window, retention of the old key for rollback, and immediate
-  reauthorization under a fresh setup token.
+  maintenance window and immediate reauthorization under a fresh setup token.
+  Old-key rollback works directly only before reauthorization overwrites the
+  ciphertext; afterwards rollback requires retaining the new key or restoring
+  the protected pre-rotation database snapshot with its matching old key.
 - The blockchain image build reports two existing dependency advisories
   (one low, one high). Task 9 did not change blockchain dependencies.
+
+## Review follow-up
+
+Task 9 review findings were fixed in a second local commit:
+
+- core configuration and scheduling no longer depend on
+  `FUSIONSOLAR_SETUP_TOKEN`;
+- `/start` explicitly rejects absent setup configuration with the same 404 as
+  a wrong token;
+- sanitized status now exposes `setupAvailable`;
+- config, route, scheduler, and PostgreSQL end-to-end tests prove an authorized
+  redeploy with an empty setup token remains configured and operational;
+- `.env.example`, design, and runbook now direct operators to remove the setup
+  token after authorization;
+- the Huawei 26.1 contract was rechecked against the authoritative PDF:
+  Plant List is paginated, while Device List accepts `stationCodes` for at
+  most 100 plants per request and has no pagination contract;
+- the implementation plan now says paginated plants and station-batched
+  devices, and the fake rejects a 101-plant batch with fail code `20015`;
+- PostgreSQL assertions verify both expected device IDs are attached to their
+  correct Sombor plants; and
+- encryption rotation instructions preserve matched snapshot/key rollback
+  pairs and explicitly describe the post-overwrite boundary.
+
+### Red/green bootstrap evidence
+
+RED command:
+
+```text
+wsl.exe -- bash -lc 'cd /mnt/c/Users/ivan/Workspace/worktrees/bios-creategreen-fusionsolar && docker build -f bios-multilevel-platform-services/fusionsolar/Dockerfile -t bios-fusionsolar-task9-review-red . >/tmp/task9-review-red-build.log && docker run --rm bios-fusionsolar-task9-review-red node --test fusionsolar/test/config.test.js fusionsolar/test/oauth-routes.test.js fusionsolar/test/scheduler.test.js'
+```
+
+Result before the runtime fix: exit 1; the new config test reported
+`not_configured`, the authorized scheduler made zero calls, and status omitted
+`setupAvailable`.
+
+GREEN command used the same three test files in
+`bios-fusionsolar-task9-review`.
+
+Result: exit 0; 21 passed, 0 failed.
+
+The fake's 101-plant Device List test also failed before enforcement because
+the fake returned both devices, then passed after batch validation was added.
+
+### Final review verification
+
+Focused PostgreSQL end-to-end command:
+
+```text
+wsl.exe -- bash -lc 'docker network create task9-review-net >/dev/null && docker run -d --name task9-review-pg --network task9-review-net -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_USER=bios -e POSTGRES_DB=bios postgres:16-alpine >/dev/null && until docker exec task9-review-pg pg_isready -U bios -d bios >/dev/null 2>&1; do sleep 1; done && docker run --rm --network task9-review-net -v /mnt/c/Users/ivan/Workspace/worktrees/bios-creategreen-fusionsolar/bios-multilevel-platform-services/fusionsolar:/app/fusionsolar:ro -e NODE_PATH=/app/database/node_modules -e TEST_DATABASE_URL=postgresql://bios@task9-review-pg:5432/bios bios-fusionsolar-task9-review node --test fusionsolar/test/end-to-end.test.js'
+```
+
+Result: exit 0; 2 passed, 0 failed, 0 skipped.
+
+Final full PostgreSQL-backed command:
+
+```text
+wsl.exe -- bash -lc 'docker start task9-review-pg >/dev/null && until docker exec task9-review-pg pg_isready -U bios -d bios >/dev/null 2>&1; do sleep 1; done && docker run --rm --network task9-review-net -e NODE_PATH=/app/database/node_modules -e TEST_DATABASE_URL=postgresql://bios@task9-review-pg:5432/bios bios-fusionsolar-task9-review-final node --test fusionsolar/test/*.test.js'
+```
+
+Result: exit 0; 97 passed, 0 failed, 0 skipped. An earlier attempt started
+after the temporary PostgreSQL container had been externally stopped and
+reported only `EAI_AGAIN`; the quoted final command explicitly restarted and
+readiness-checked PostgreSQL.
+
+Regression results:
+
+- dashboard OAuth proxy: 8 passed, 0 failed;
+- dashboard `deno check`: exit 0;
+- prediction regression in a read-only mount with `/tmp` working directory:
+  `prediction tests passed`;
+- blockchain regression with its hard-coded data path under disposable
+  container `/tmp`: `blockchain tests passed`;
+- Compose config render: exit 0;
+- CI variable forwarding: exit 0, `CI_ENV_ROUND_TRIP_OK`;
+- `git diff --check`: exit 0.

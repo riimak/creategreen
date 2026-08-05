@@ -20,7 +20,7 @@ GitLab's masking rules permit it, and never put values in job scripts or logs.
 | --- | --- | --- |
 | `FUSIONSOLAR_CLIENT_ID` | yes | Huawei-issued application client ID |
 | `FUSIONSOLAR_CLIENT_SECRET` | yes | Huawei-issued client secret |
-| `FUSIONSOLAR_SETUP_TOKEN` | yes | New high-entropy bootstrap token |
+| `FUSIONSOLAR_SETUP_TOKEN` | yes during authorization | New high-entropy bootstrap token; remove after successful authorization |
 | `FUSIONSOLAR_TOKEN_ENCRYPTION_KEY` | yes | Canonical base64 for exactly 32 random bytes |
 | `FUSIONSOLAR_API_BASE_URL` | no | Huawei regional API origin assigned to this account |
 | `FUSIONSOLAR_OAUTH_BASE_URL` | no | `https://oauth2.fusionsolar.huawei.com` unless Huawei assigns another origin |
@@ -34,6 +34,10 @@ GitLab's masking rules permit it, and never put values in job scripts or logs.
 the shared protected PostgreSQL connection secret; it is deliberately not
 forwarded by the FusionSolar CI variable loop. The optional mounted CA is
 selected with `DATABASE_CA_FILE=/etc/ssl/pg/ca.crt`.
+
+`FUSIONSOLAR_SETUP_TOKEN` is not a core runtime credential. An authorized
+service remains configured and continues polling when it is empty. An empty
+value makes `/oauth/fusionsolar/start` uniformly return 404.
 
 Generate the encryption key and setup token from WSL using disposable Docker
 containers. Run each command once and copy its output directly into the
@@ -69,10 +73,10 @@ value across environments.
 6. The callback must show `FusionSolar authorization completed`. Close the
    private window. The setup token digest is now consumed and the same link
    cannot authorize again.
-7. Leave the now-consumed setup-token value configured. Its digest is
-   single-use, and the current service also needs a non-empty setup token to
-   remain in the `configured` state. Do not remove it after authorization.
-   Explicitly replacing it with a new value is what enables reauthorization.
+7. Remove `FUSIONSOLAR_SETUP_TOKEN` from the protected deployment variables
+   and redeploy. Confirm `/status` remains `authorized`, reports
+   `setupAvailable: false`, and live polling continues. `/start` must now
+   return 404 even when a caller supplies the old value.
 
 Never use `curl -v`, browser developer-tools exports, proxy capture, or CI job
 output for the setup or callback URLs. They contain setup token, state, or
@@ -98,8 +102,9 @@ contains no token envelope or client secret and has these states:
 
 Other safe fields are `configured`, `authorized`, `lastSyncAt`,
 `backfill.completed`, `backfill.total`, `backfill.lastSuccessAt`, and a
-sanitized `lastError`. Do not infer plant visibility from `/status`; inspect
-the inventory tables.
+sanitized `lastError`. `setupAvailable` indicates only whether bootstrap is
+enabled; it never reveals the token. Do not infer plant visibility from
+`/status`; inspect the inventory tables.
 
 ## Reauthorization and rotation
 
@@ -114,8 +119,8 @@ change:
    owner authorization.
 5. Confirm `authorized`, the basic scope, both plants, live writes, and a later
    successful refresh.
-6. Retain the newly consumed setup-token value. Replace it again only when
-   another explicit reauthorization is required.
+6. Remove the setup-token variable and redeploy. Confirm the authorized
+   scheduler continues and `/start` returns 404.
 
 Changing the client secret does not re-encrypt stored tokens. Existing access
 tokens may work until refresh, but refresh can fail after Huawei invalidates
@@ -123,12 +128,24 @@ the old client secret; plan immediate reauthorization.
 
 The token encryption key has no key identifier, dual-key read path, or online
 rewrap operation. Replacing it makes all existing encrypted tokens unreadable.
-Do not rotate it as an ordinary rolling configuration change. Schedule a
-maintenance window, retain the old key for rollback, scale the single replica
-down, update the encryption key and a fresh setup token together, deploy, and
-immediately reauthorize so the credential row is overwritten under the new
-key. Confirm refresh before destroying the old key. Never copy plaintext
-tokens out of PostgreSQL to assist rotation.
+Do not rotate it as an ordinary rolling configuration change:
+
+1. Take and verify a protected database snapshot, and retain the old key as a
+   matched rollback pair with that snapshot.
+2. Scale the single replica down.
+3. Configure the new encryption key and a fresh setup token, then deploy.
+4. Immediately reauthorize so the credential row is overwritten under the new
+   key.
+5. Confirm live polling and refresh under the new key, remove the setup token,
+   and retain the new key with the live database.
+
+Old-key rollback works directly only before step 4 overwrites the ciphertext.
+After new authorization, the live credential row is encrypted with the new
+key: rolling back application code must retain that new key, or operations must
+restore the protected pre-rotation database snapshot together with its old
+key. Do not destroy the old key/snapshot pair or the new key until post-rotation
+refresh and rollback readiness are verified. Never copy plaintext tokens out
+of PostgreSQL to assist rotation.
 
 ## Plant, device, and measurement checks
 
@@ -160,6 +177,11 @@ ORDER BY sync_key;
 Do not query, export, or log `encrypted_access_token` or
 `encrypted_refresh_token`. Although encrypted, those envelopes remain
 sensitive credential material.
+
+Huawei 26.1 uses pagination for Plant List. Device List is not paginated: the
+service submits `stationCodes` in documented batches of at most 100 plants and
+stores every device returned for each batch. Do not add unsupported page
+parameters to Device List when diagnosing missing inventory.
 
 ## Huawei flow control and retention
 
@@ -197,9 +219,9 @@ Complete this checklist only after Huawei supplies production credentials:
       process restart; flow-control backoff does not loop.
 - [ ] An empty successful Huawei history response marks the device retention
       boundary without assuming a fixed age.
-- [ ] The original setup-token digest is consumed. The configured value is
-      retained because removing it currently stops polling; no replacement
-      token is generated unless reauthorization is intentionally required.
+- [ ] The original setup token is removed after its digest is consumed;
+      `/status` remains `authorized` with `setupAvailable: false`, polling
+      continues, and `/start` returns 404.
 - [ ] Prediction, blockchain, dashboard, and existing Mars2 ingestion remain
       healthy.
 

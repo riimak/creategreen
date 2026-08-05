@@ -37,7 +37,7 @@ function loadConfig(env = process.env) {
 
 function configurationState(config) {
   return config.clientId && config.clientSecret && config.redirectUri === PRODUCTION_REDIRECT_URI
-    && config.setupToken && config.tokenEncryptionKey
+    && config.tokenEncryptionKey
     && config.apiBaseUrl && config.databaseUrl
     ? 'configured'
     : 'not_configured';

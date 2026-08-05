@@ -31,6 +31,8 @@ function createIntegration({
   async function startUrl(suppliedToken) {
     if (
       !configured
+      || typeof config.setupToken !== 'string'
+      || config.setupToken === ''
       || !constantTimeTokenMatch(config.setupToken, suppliedToken)
       || await store.isSetupTokenConsumed(setupDigest)
     ) {
@@ -112,6 +114,7 @@ function createIntegration({
       return {
         state: 'not_configured',
         configured: false,
+        setupAvailable: Boolean(config?.setupToken),
         authorized: false,
         grantedScopes: [],
         lastSyncAt: null,
@@ -124,6 +127,7 @@ function createIntegration({
     return {
       state,
       configured: true,
+      setupAvailable: Boolean(config?.setupToken),
       authorized: state === 'authorized',
       grantedScopes: Array.isArray(stored.scopes)
         ? stored.scopes.filter((scope) => typeof scope === 'string')

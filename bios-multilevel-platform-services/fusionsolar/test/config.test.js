@@ -57,3 +57,13 @@ test('requires the production redirect URI to report configured', () => {
 
   assert.equal(configurationState(config), 'not_configured');
 });
+
+test('setup token is optional for core runtime configuration after bootstrap', () => {
+  const config = loadConfig({
+    ...configuredEnv(),
+    FUSIONSOLAR_SETUP_TOKEN: '',
+  });
+
+  assert.equal(config.setupToken, '');
+  assert.equal(configurationState(config), 'configured');
+});

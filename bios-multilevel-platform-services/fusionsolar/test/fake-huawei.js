@@ -155,11 +155,24 @@ function createFakeHuaweiServer({
       });
     }
     if (pathname === '/thirdData/getDevList') {
-      call.responseKind = 'devices';
+      const stationCodes = String(body?.stationCodes || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
+      if (stationCodes.length > 100) {
+        call.responseKind = 'device-batch-too-large';
+        return json(res, 200, {
+          success: false,
+          failCode: 20015,
+          data: null,
+        });
+      }
+      const requested = new Set(stationCodes);
+      call.responseKind = 'devices-batch';
       return success(res, [
         device('inverter-a', 'SOMBOR-A', 'NE=FAKE-INVERTER-A', 'FAKE-A'),
         device('inverter-b', 'SOMBOR-B', 'NE=FAKE-INVERTER-B', 'FAKE-B'),
-      ]);
+      ].filter((row) => requested.has(row.stationCode)));
     }
     if (pathname === '/thirdData/getStationRealKpi') {
       const requested = new Set(String(body?.stationCodes || '').split(','));

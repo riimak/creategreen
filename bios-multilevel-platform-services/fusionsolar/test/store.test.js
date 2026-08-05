@@ -2,6 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createFusionSolarStore } = require('../store');
 const { createTokenCipher } = require('../crypto');
+const { createIntegration } = require('../integration');
+const { createStateManager } = require('../oauth-state');
 
 function fakeCipher() {
   return {
@@ -87,6 +89,43 @@ test('setup-token consumption is persisted by digest and remains single-use', as
   assert.match(insert.sql, /RETURNING token_hash/);
 });
 
+test('credential persistence is conditional on atomically claiming the setup token', async () => {
+  let claimed = false;
+  const pool = createFakePool(async (sql) => {
+    if (/WITH claimed_setup AS/.test(sql)) {
+      if (claimed) return { rows: [], rowCount: 0 };
+      claimed = true;
+      return { rows: [{ id: 'active' }], rowCount: 1 };
+    }
+    return { rows: [], rowCount: 0 };
+  });
+  const store = createFusionSolarStore({ pool, cipher: fakeCipher() });
+  const tokens = {
+    accessToken: 'first-access',
+    refreshToken: 'first-refresh',
+    accessExpiresAt: new Date('2026-08-05T11:00:00Z'),
+    scopes: ['pvms.openapi.basic'],
+    tokenType: 'Bearer',
+  };
+
+  assert.equal(await store.saveCredentialsIfSetupUnused('setup-digest', tokens), true);
+  assert.equal(await store.saveCredentialsIfSetupUnused('setup-digest', {
+    ...tokens,
+    accessToken: 'second-access',
+    refreshToken: 'second-refresh',
+  }), false);
+
+  assert.equal(pool.queries.length, 2);
+  assert.match(pool.queries[0].sql, /INSERT INTO fusionsolar_setup_tokens/);
+  assert.match(pool.queries[0].sql, /ON CONFLICT \(token_hash\) DO NOTHING/);
+  assert.match(pool.queries[0].sql, /FROM claimed_setup/);
+  assert.deepEqual(pool.queries[0].values.slice(0, 3), [
+    'setup-digest',
+    { version: 1, ciphertext: 'encrypted:first-access' },
+    { version: 1, ciphertext: 'encrypted:first-refresh' },
+  ]);
+});
+
 test('credentials are encrypted before reaching parameterized SQL and decrypted on load', async () => {
   const pool = createFakePool(async (sql) => {
     if (/SELECT encrypted_access_token/.test(sql)) {
@@ -115,15 +154,13 @@ test('credentials are encrypted before reaching parameterized SQL and decrypted 
     accessExpiresAt: new Date('2026-08-05T11:00:00Z'),
     scopes: ['pvms.openapi.basic'],
     tokenType: 'Bearer',
-    setupTokenHash: 'setup-digest',
   });
 
   const insert = pool.queries[0];
   assert.doesNotMatch(insert.sql, /access-secret|refresh-secret/);
-  assert.match(insert.sql, /INSERT INTO fusionsolar_setup_tokens/);
+  assert.doesNotMatch(insert.sql, /fusionsolar_setup_tokens/);
   assert.deepEqual(insert.values[0], { version: 1, ciphertext: 'encrypted:access-secret' });
   assert.deepEqual(insert.values[1], { version: 1, ciphertext: 'encrypted:refresh-secret' });
-  assert.equal(insert.values[5], 'setup-digest');
   assert.equal(insert.values.includes('access-secret'), false);
   assert.equal(insert.values.includes('refresh-secret'), false);
 
@@ -582,14 +619,13 @@ test('PostgreSQL integration preserves nonce and measurement idempotency', {
     assert.equal(await store.consumeSetupToken(setupTokenHash), true);
     assert.equal(await store.isSetupTokenConsumed(setupTokenHash), true);
     assert.equal(await store.consumeSetupToken(setupTokenHash), false);
-    await store.saveCredentials({
+    assert.equal(await store.saveCredentialsIfSetupUnused(authorizedSetupHash, {
       accessToken: 'integration-access',
       refreshToken: 'integration-refresh',
       accessExpiresAt: new Date('2026-08-05T11:00:00Z'),
       scopes: ['pvms.openapi.basic'],
       tokenType: 'Bearer',
-      setupTokenHash: authorizedSetupHash,
-    });
+    }), true);
     assert.equal(await store.isSetupTokenConsumed(authorizedSetupHash), true);
     assert.equal((await store.loadCredentials()).state, 'authorized');
 
@@ -680,6 +716,109 @@ test('PostgreSQL integration preserves nonce and measurement idempotency', {
     await pool.query('DELETE FROM fusionsolar_sync_state WHERE sync_key = $1', [syncKey]);
     await pool.query('DELETE FROM raw_measurements WHERE source = $1', [source]);
     await pool.query('DELETE FROM fusionsolar_plants WHERE plant_code = $1', [plantCode]);
+    await store.close();
+  }
+});
+
+test('PostgreSQL allows only one completion from two valid pre-issued OAuth states', {
+  skip: !process.env.TEST_DATABASE_URL,
+}, async () => {
+  const crypto = require('node:crypto');
+  const { Pool } = require('pg');
+  const pool = new Pool({ connectionString: process.env.TEST_DATABASE_URL, max: 5 });
+  const cipher = createTokenCipher(Buffer.alloc(32, 12));
+  const store = createFusionSolarStore({
+    databaseUrl: process.env.TEST_DATABASE_URL,
+    cipher,
+    pool,
+  });
+  const setupToken = `concurrent-setup-${process.pid}-${Date.now()}`;
+  const setupTokenHash = crypto.createHash('sha256').update(setupToken).digest('hex');
+  const nonceHashes = [];
+  let arrivals = 0;
+  let releaseExchanges;
+  const exchangesReady = new Promise((resolve) => {
+    releaseExchanges = resolve;
+  });
+  const client = {
+    async exchangeCode(code) {
+      arrivals += 1;
+      if (arrivals === 2) releaseExchanges();
+      await exchangesReady;
+      return {
+        accessToken: `access-${code}`,
+        refreshToken: `refresh-${code}`,
+        accessExpiresAt: new Date('2026-08-05T11:00:00Z'),
+        scopes: ['pvms.openapi.basic'],
+        tokenType: 'Bearer',
+      };
+    },
+  };
+  const stateManager = createStateManager({
+    secret: Buffer.alloc(32, 13),
+    store,
+    now: () => new Date('2026-08-05T10:00:00Z'),
+  });
+  const integration = createIntegration({
+    config: {
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      redirectUri: 'https://bios-multilevel.barrage.net/oauth/fusionsolar/callback',
+      setupToken,
+      tokenEncryptionKey: Buffer.alloc(32, 12),
+      oauthBaseUrl: 'https://oauth.example.com',
+      apiBaseUrl: 'https://api.example.com',
+      databaseUrl: process.env.TEST_DATABASE_URL,
+      liveIntervalMs: 300_000,
+      backfillEnabled: true,
+    },
+    store,
+    client,
+    stateManager,
+    synchronizer: {
+      async runLiveCycle() {},
+      async runBackfillStep() {},
+    },
+  });
+
+  try {
+    await store.init();
+    await pool.query("DELETE FROM fusionsolar_oauth_credentials WHERE id = 'active'");
+    await pool.query(
+      'DELETE FROM fusionsolar_setup_tokens WHERE token_hash = $1',
+      [setupTokenHash],
+    );
+    const states = await Promise.all([stateManager.issue(), stateManager.issue()]);
+    for (const state of states) {
+      const payload = JSON.parse(Buffer.from(state.split('.')[0], 'base64url').toString('utf8'));
+      nonceHashes.push(crypto.createHash('sha256').update(payload.nonce).digest('hex'));
+    }
+
+    const results = await Promise.all([
+      integration.completeCallback(new URLSearchParams({ state: states[0], code: 'code-a' })),
+      integration.completeCallback(new URLSearchParams({ state: states[1], code: 'code-b' })),
+    ]);
+
+    assert.equal(results.filter(({ ok }) => ok).length, 1);
+    const credentials = await store.loadCredentials();
+    assert.equal(['access-code-a', 'access-code-b'].includes(credentials.accessToken), true);
+    const consumed = await pool.query(
+      'SELECT count(*)::integer AS count FROM fusionsolar_setup_tokens WHERE token_hash = $1',
+      [setupTokenHash],
+    );
+    assert.equal(consumed.rows[0].count, 1);
+  } finally {
+    await pool.query("DELETE FROM fusionsolar_oauth_credentials WHERE id = 'active'");
+    await pool.query(
+      'DELETE FROM fusionsolar_setup_tokens WHERE token_hash = $1',
+      [setupTokenHash],
+    );
+    if (nonceHashes.length > 0) {
+      await pool.query(
+        'DELETE FROM fusionsolar_oauth_nonces WHERE nonce_hash = ANY($1)',
+        [nonceHashes],
+      );
+    }
     await store.close();
   }
 });

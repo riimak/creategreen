@@ -60,21 +60,10 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
   }
 
   async function saveCredentials(tokens) {
-    if (typeof tokens?.accessToken !== 'string' || tokens.accessToken.trim() === '') {
-      throw new Error('accessToken is required');
-    }
-    if (typeof tokens.refreshToken !== 'string' || tokens.refreshToken.trim() === '') {
-      throw new Error('refreshToken is required');
-    }
+    const values = credentialValues(tokens);
 
     await pool.query(
-      `WITH consumed_setup AS (
-         INSERT INTO fusionsolar_setup_tokens (token_hash)
-         SELECT $6::text WHERE $6::text IS NOT NULL
-         ON CONFLICT (token_hash) DO NOTHING
-         RETURNING token_hash
-       )
-       INSERT INTO fusionsolar_oauth_credentials
+      `INSERT INTO fusionsolar_oauth_credentials
          (id, encrypted_access_token, encrypted_refresh_token, access_expires_at,
           granted_scopes, token_type, state, authorized_at, updated_at)
        VALUES ('active', $1, $2, $3, $4, $5, 'authorized', now(), now())
@@ -87,15 +76,56 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
          state = 'authorized',
          last_error = NULL,
          updated_at = now()`,
-      [
-        cipher.encrypt(tokens.accessToken),
-        cipher.encrypt(tokens.refreshToken),
-        tokens.accessExpiresAt,
-        tokens.scopes || [],
-        tokens.tokenType,
-        tokens.setupTokenHash || null,
-      ],
+      values,
     );
+  }
+
+  async function saveCredentialsIfSetupUnused(setupTokenHash, tokens) {
+    if (typeof setupTokenHash !== 'string' || setupTokenHash === '') {
+      throw new Error('setupTokenHash is required');
+    }
+    const values = credentialValues(tokens);
+    const result = await pool.query(
+      `WITH claimed_setup AS (
+         INSERT INTO fusionsolar_setup_tokens (token_hash)
+         VALUES ($1)
+         ON CONFLICT (token_hash) DO NOTHING
+         RETURNING token_hash
+       )
+       INSERT INTO fusionsolar_oauth_credentials
+         (id, encrypted_access_token, encrypted_refresh_token, access_expires_at,
+          granted_scopes, token_type, state, authorized_at, updated_at)
+       SELECT 'active', $2, $3, $4, $5, $6, 'authorized', now(), now()
+       FROM claimed_setup
+       ON CONFLICT (id) DO UPDATE SET
+         encrypted_access_token = EXCLUDED.encrypted_access_token,
+         encrypted_refresh_token = EXCLUDED.encrypted_refresh_token,
+         access_expires_at = EXCLUDED.access_expires_at,
+         granted_scopes = EXCLUDED.granted_scopes,
+         token_type = EXCLUDED.token_type,
+         state = 'authorized',
+         last_error = NULL,
+         updated_at = now()
+       RETURNING id`,
+      [setupTokenHash, ...values],
+    );
+    return result.rowCount === 1;
+  }
+
+  function credentialValues(tokens) {
+    if (typeof tokens?.accessToken !== 'string' || tokens.accessToken.trim() === '') {
+      throw new Error('accessToken is required');
+    }
+    if (typeof tokens.refreshToken !== 'string' || tokens.refreshToken.trim() === '') {
+      throw new Error('refreshToken is required');
+    }
+    return [
+      cipher.encrypt(tokens.accessToken),
+      cipher.encrypt(tokens.refreshToken),
+      tokens.accessExpiresAt,
+      tokens.scopes || [],
+      tokens.tokenType,
+    ];
   }
 
   async function loadCredentials() {
@@ -429,6 +459,7 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
     isSetupTokenConsumed,
     consumeSetupToken,
     saveCredentials,
+    saveCredentialsIfSetupUnused,
     loadCredentials,
     setAuthorizationState,
     upsertPlants,

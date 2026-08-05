@@ -26,7 +26,7 @@ function createHuaweiClient({
     return url.toString();
   }
 
-  async function exchangeCode(code, { setupTokenHash } = {}) {
+  async function exchangeCode(code, { persist = true } = {}) {
     if (typeof code !== 'string' || code === '') throw new Error('authorization code is required');
     const credentials = await requestToken(new URLSearchParams({
       grant_type: 'authorization_code',
@@ -35,10 +35,7 @@ function createHuaweiClient({
       client_secret: config.clientSecret,
       redirect_uri: config.redirectUri,
     }));
-    await store.saveCredentials({
-      ...credentials,
-      ...(setupTokenHash ? { setupTokenHash } : {}),
-    });
+    if (persist) await store.saveCredentials(credentials);
     return credentials;
   }
 

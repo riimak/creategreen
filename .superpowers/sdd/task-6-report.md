@@ -8,8 +8,8 @@ Implemented and verified.
 
 - Added import-safe FusionSolar integration composition and process entrypoint.
 - Added constant-time setup-token validation with uniform `404` rejection.
-- Persisted SHA-256 setup-token consumption and made credential persistence plus
-  bootstrap consumption one PostgreSQL statement.
+- Persisted SHA-256 setup-token consumption and made credential persistence
+  conditional on winning the bootstrap claim in one PostgreSQL statement.
 - Added safe OAuth start/callback routes with no-store, no-referrer, and
   restrictive CSP headers; callback output never reflects Huawei parameters.
 - Added sanitized status output containing only configuration/authorization,
@@ -61,3 +61,52 @@ nonce replay prevention, and measurement/checkpoint persistence.
 None blocking. Production authorization still requires Huawei-issued
 credentials and an operator-driven acceptance test; no real Huawei request was
 made by this task.
+
+## Blocking Race Correction
+
+The original callback flow exchanged the Huawei code through a client method
+that persisted credentials, then separately attempted setup-token consumption.
+Two callbacks holding valid pre-issued states could therefore both report
+success and the second could overwrite the first credential set.
+
+The corrected flow:
+
+1. verifies and consumes OAuth state;
+2. exchanges the Huawei code with persistence deferred;
+3. calls `saveCredentialsIfSetupUnused(setupTokenHash, tokens)`;
+4. uses one data-modifying PostgreSQL CTE to claim the setup-token hash and
+   insert/update credentials only from the successful claim; and
+5. returns the same generic callback failure when the claim returns `false`.
+
+A failed Huawei exchange occurs before any setup-token claim, so a fresh state
+can retry a transient exchange failure.
+
+### Race-fix TDD evidence
+
+- Store contract RED:
+  `store.saveCredentialsIfSetupUnused is not a function`.
+- PostgreSQL callback-concurrency RED: two valid pre-issued states completed
+  concurrently and failed with `2 !== 1` successful callbacks.
+- Deferred-exchange RED: `exchangeCode(..., { persist: false })` still populated
+  the credential store before the client change.
+- Generic loser callback and transient-exchange retry are covered by route
+  tests without reflecting code or state.
+
+### Race-fix verification
+
+Executed through WSL Docker with PostgreSQL 16:
+
+```text
+node --test test/oauth-routes.test.js test/scheduler.test.js test/store.test.js
+```
+
+Result: exit `0`; `31` tests passed, `0` failed, `0` skipped. This includes the
+real PostgreSQL test `PostgreSQL allows only one completion from two valid
+pre-issued OAuth states`.
+
+```text
+npm test
+```
+
+Result: exit `0`; `91` tests passed, `0` failed, `0` skipped, with
+`TEST_DATABASE_URL` set to the isolated PostgreSQL 16 container.

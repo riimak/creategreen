@@ -46,8 +46,9 @@ function createIntegration({
       if (params.get('error')) return { ok: false };
       const code = params.get('code');
       if (typeof code !== 'string' || code === '') return { ok: false };
-      await client.exchangeCode(code, { setupTokenHash: setupDigest });
-      await store.consumeSetupToken(setupDigest);
+      const tokens = await client.exchangeCode(code, { persist: false });
+      const saved = await store.saveCredentialsIfSetupUnused(setupDigest, tokens);
+      if (!saved) return { ok: false };
       requestImmediateCycle();
       return { ok: true };
     } catch {

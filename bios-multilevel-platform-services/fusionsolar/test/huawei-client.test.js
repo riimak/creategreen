@@ -99,10 +99,7 @@ test('code exchange uses the exact token path and form body, then persists norma
     now: () => NOW,
   });
 
-  const credentials = await client.exchangeCode(
-    'fixture-authorization-code',
-    { setupTokenHash: 'fixture-setup-digest' },
-  );
+  const credentials = await client.exchangeCode('fixture-authorization-code');
 
   assert.equal(new URL(requests[0].url).pathname, '/rest/dp/uidm/oauth2/v1/token');
   assert.equal(requests[0].options.method, 'POST');
@@ -122,10 +119,22 @@ test('code exchange uses the exact token path and form body, then persists norma
     scopes: [REQUIRED_SCOPE],
     tokenType: 'Bearer',
   });
-  assert.deepEqual(store.saved, [{
-    ...credentials,
-    setupTokenHash: 'fixture-setup-digest',
-  }]);
+  assert.deepEqual(store.saved, [credentials]);
+});
+
+test('code exchange can defer persistence to an atomic setup-token claim', async () => {
+  const store = memoryStore();
+  const client = createHuaweiClient({
+    config: config(),
+    store,
+    fetchImpl: async () => tokenResponse(),
+    now: () => NOW,
+  });
+
+  const credentials = await client.exchangeCode('fixture-code', { persist: false });
+
+  assert.equal(credentials.accessToken, 'fixture-access');
+  assert.deepEqual(store.saved, []);
 });
 
 test('token exchange requires Bearer type and the granted basic scope', async () => {

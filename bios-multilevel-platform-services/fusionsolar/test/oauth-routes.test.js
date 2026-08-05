@@ -25,7 +25,10 @@ function dependencies(overrides = {}) {
   const calls = [];
   const store = {
     async isSetupTokenConsumed() { return false; },
-    async consumeSetupToken() { calls.push('consume-setup'); },
+    async saveCredentialsIfSetupUnused() {
+      calls.push('save-if-unused');
+      return true;
+    },
     async loadCredentials() { return null; },
     async status() {
       return {
@@ -56,8 +59,8 @@ function dependencies(overrides = {}) {
       calls.push(`authorize:${state}`);
       return `https://oauth.example.com/authorize?state=${state}`;
     },
-    async exchangeCode() {
-      calls.push('exchange');
+    async exchangeCode(_code, options = {}) {
+      calls.push(`exchange:${options.persist}`);
       return { scopes: ['pvms.openapi.basic'], accessToken: 'access-secret' };
     },
   };
@@ -150,10 +153,61 @@ test('OAuth callback verifies state before code exchange and consumes bootstrap 
   const body = await response.text();
 
   assert.equal(response.status, 200);
-  assert.deepEqual(deps.calls, ['verify', 'exchange', 'consume-setup']);
+  assert.deepEqual(deps.calls, ['verify', 'exchange:false', 'save-if-unused']);
   assert.equal(body.includes(code), false);
   assert.equal(body.includes('access-secret'), false);
   assert.match(body, /authorization completed/);
+});
+
+test('OAuth callback generically rejects a second completion that loses setup claim', async (t) => {
+  const deps = dependencies();
+  deps.store.saveCredentialsIfSetupUnused = async () => {
+    deps.calls.push('save-if-unused');
+    return false;
+  };
+  const integration = createIntegration({ config: configured(), ...deps });
+  const baseUrl = await startServer(t, integration);
+  const code = 'second-valid-but-losing-code';
+
+  const response = await fetch(
+    `${baseUrl}/oauth/fusionsolar/callback?code=${code}&state=second-valid-state`,
+  );
+  const body = await response.text();
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(deps.calls, ['verify', 'exchange:false', 'save-if-unused']);
+  assert.equal(body.includes(code), false);
+  assert.equal(body.includes('state'), false);
+  assert.match(body, /authorization failed/);
+});
+
+test('transient code exchange failure leaves setup token claim available to a fresh state', async () => {
+  const deps = dependencies();
+  let attempts = 0;
+  deps.client.exchangeCode = async (_code, options = {}) => {
+    deps.calls.push(`exchange:${options.persist}`);
+    attempts += 1;
+    if (attempts === 1) throw new Error('transient exchange failure');
+    return { scopes: ['pvms.openapi.basic'], accessToken: 'replacement-access' };
+  };
+  const integration = createIntegration({ config: configured(), ...deps });
+
+  const first = await integration.completeCallback(
+    new URLSearchParams({ code: 'first-code', state: 'first-state' }),
+  );
+  const second = await integration.completeCallback(
+    new URLSearchParams({ code: 'second-code', state: 'fresh-state' }),
+  );
+
+  assert.deepEqual(first, { ok: false });
+  assert.deepEqual(second, { ok: true });
+  assert.deepEqual(deps.calls, [
+    'verify',
+    'exchange:false',
+    'verify',
+    'exchange:false',
+    'save-if-unused',
+  ]);
 });
 
 test('consumed bootstrap token remains unusable until configuration rotates it', async (t) => {

@@ -1,3 +1,6 @@
+import { proxyFusionSolarOAuth } from "./oauth-proxy.ts";
+import { applyDashboardSecurityHeaders } from "./security-headers.ts";
+
 const dashboardHtml = await Deno.readTextFile(new URL("./index.html", import.meta.url));
 const euVisibilityHtml = await safeReadHtml(new URL("./eu-visibility.html", import.meta.url));
 const encoder = new TextEncoder();
@@ -91,18 +94,10 @@ const csp = [
   "object-src 'none'",
 ].join("; ");
 
-const securityHeaders: Record<string, string> = {
-  "Content-Security-Policy": csp,
-  // The barrage-prod ClusterIssuer terminates TLS at the ingress. HSTS is safe.
-  "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-  "X-Content-Type-Options": "nosniff",
-  "X-Frame-Options": "DENY",
-  "Referrer-Policy": "no-referrer",
-  "Permissions-Policy": "geolocation=(), microphone=(), camera=(), payment=(), usb=()",
-};
-
 function withSecurity(extra: Record<string, string> = {}): Record<string, string> {
-  return { ...securityHeaders, ...extra };
+  const headers = new Headers(extra);
+  applyDashboardSecurityHeaders(headers, csp);
+  return Object.fromEntries(headers);
 }
 
 function json(data: unknown, status = 200, extra: Record<string, string> = {}): Response {
@@ -698,7 +693,7 @@ async function proxy(req: Request, kind: "prediction" | "blockchain", prefix: st
       if (lower === "server" || lower === "x-powered-by") continue;
       headers.set(key, value);
     }
-    for (const [key, value] of Object.entries(securityHeaders)) headers.set(key, value);
+    applyDashboardSecurityHeaders(headers, csp);
     return new Response(res.body, { status: res.status, headers });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -758,6 +753,14 @@ async function handleRequest(req: Request, ip: string): Promise<Response> {
 
   if (url.pathname.startsWith("/blockchain")) {
     return proxy(req, "blockchain", "/blockchain");
+  }
+
+  if (url.pathname.startsWith("/oauth/fusionsolar/")) {
+    const serviceBase = Deno.env.get("FUSIONSOLAR_SERVICE_URL") || "";
+    if (!serviceBase) {
+      return json({ error: "FusionSolar service is not configured" }, 502);
+    }
+    return proxyFusionSolarOAuth(req, serviceBase);
   }
 
   if (url.pathname === "/health") {

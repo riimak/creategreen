@@ -21,22 +21,29 @@ function createSynchronizer({
 
   async function refreshInventory() {
     const previous = await store.getCheckpoint(INVENTORY_CHECKPOINT);
+    const previousPlants = checkpointPlants(previous);
     const plantInventory = await fetchAllPlants();
     const currentPlants = plantInventory.records;
     const currentByCode = new Map(currentPlants.map((plant) => [plant.plantCode, plant]));
     const deviceInventory = await fetchAllDevices(currentPlants.map((plant) => plant.plantCode));
     const devices = deviceInventory.records;
     const diagnostics = [...plantInventory.diagnostics, ...deviceInventory.diagnostics];
-    const missingPlants = checkpointPlants(previous)
-      .filter((plant) => !currentByCode.has(plant.plantCode))
-      .map((plant) => ({ ...plant, visible: false }));
+    const plantSnapshotIncomplete = plantInventory.diagnostics.length > 0;
+    const missingPlants = plantSnapshotIncomplete
+      ? []
+      : previousPlants
+        .filter((plant) => !currentByCode.has(plant.plantCode))
+        .map((plant) => ({ ...plant, visible: false }));
+    const checkpointPlantRecords = plantSnapshotIncomplete
+      ? mergePlants(previousPlants, currentPlants)
+      : currentPlants;
 
     await store.upsertPlants([...currentPlants, ...missingPlants]);
     await store.upsertDevices(devices);
     const refreshedAt = currentTime().toISOString();
     await store.setCheckpoint(
       INVENTORY_CHECKPOINT,
-      { plants: currentPlants, refreshedAt },
+      { plants: checkpointPlantRecords, refreshedAt },
       { lastSuccessAt: refreshedAt, lastError: null },
     );
     const result = { plants: currentPlants.length, devices: devices.length };
@@ -187,6 +194,10 @@ function deduplicatePlants(plants) {
   const unique = new Map();
   for (const plant of plants) unique.set(plant.plantCode, plant);
   return [...unique.values()];
+}
+
+function mergePlants(previousPlants, currentPlants) {
+  return deduplicatePlants([...previousPlants, ...currentPlants]);
 }
 
 function invalidRecordDiagnostic(scope, location) {

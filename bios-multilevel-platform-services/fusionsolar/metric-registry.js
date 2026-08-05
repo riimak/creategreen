@@ -176,6 +176,9 @@ function normalizePlant(raw) {
   const plantCode = requiredText(raw.plantCode, 'plantCode');
   const metadata = {};
   if (raw.capacity != null) {
+    if (typeof raw.capacity !== 'number' || !Number.isFinite(raw.capacity)) {
+      throw new Error('plant capacity must be a finite number');
+    }
     metadata.capacity = raw.capacity;
     metadata.capacityUnit = 'kWp';
   }

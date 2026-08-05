@@ -30,9 +30,11 @@ function createStore() {
   let checkpoint = null;
   const plantWrites = [];
   const deviceWrites = [];
+  const checkpointWrites = [];
   return {
     plantWrites,
     deviceWrites,
+    checkpointWrites,
     async upsertPlants(plants) {
       plantWrites.push(structuredClone(plants));
       return { upserted: plants.length };
@@ -49,6 +51,7 @@ function createStore() {
       assert.equal(key, 'inventory');
       assert.equal(options.lastError, null);
       checkpoint = structuredClone(value);
+      checkpointWrites.push(structuredClone(value));
     },
     async status() {
       return { state: 'authorized', plantCount: 2, deviceCount: 2 };
@@ -379,4 +382,95 @@ test('skips malformed records while completing valid plant and device discovery'
   const diagnostics = JSON.stringify(result.diagnostics);
   assert.doesNotMatch(diagnostics, /PLANT-SECRET|DEVICE-TOKEN|RAW-ERROR/);
   assert.doesNotMatch(diagnostics, /plantCode|stationCode|accessToken|rawError/);
+});
+
+test('incomplete plant snapshots preserve visibility until a later clean omission', async () => {
+  const store = createStore();
+  let refresh = 1;
+  const knownPlant = plant('NE=KNOWN', 'Known plant');
+  const currentPlant = plant('NE=CURRENT', 'Current plant');
+  const client = {
+    async request(path, options) {
+      if (path === DEVICE_PATH) {
+        return response({
+          success: true,
+          data: [],
+          failCode: 0,
+          params: {
+            stationCodes: JSON.parse(options.body).stationCodes,
+            currentTime: 1785924000000,
+          },
+          message: null,
+        });
+      }
+
+      assert.equal(path, PLANT_PATH);
+      let list;
+      if (refresh === 1) {
+        list = [knownPlant];
+      } else if (refresh === 2) {
+        list = [
+          { ...knownPlant, capacity: 'malformed-double', accessToken: 'MUST-NOT-LEAK' },
+          currentPlant,
+        ];
+      } else {
+        list = [currentPlant];
+      }
+      return response({
+        success: true,
+        data: {
+          list,
+          pageCount: 1,
+          pageNo: 1,
+          pageSize: list.length,
+          total: list.length,
+        },
+        failCode: 0,
+        message: null,
+      });
+    },
+  };
+  const synchronizer = createSynchronizer({
+    client,
+    store,
+    config: {},
+    now: () => new Date(`2026-08-05T10:0${refresh - 1}:00Z`),
+    sleep: async () => {},
+  });
+
+  assert.deepEqual(await synchronizer.refreshInventory(), { plants: 1, devices: 0 });
+  assert.deepEqual(
+    store.checkpointWrites[0].plants.map((item) => item.plantCode),
+    ['NE=KNOWN'],
+  );
+
+  refresh = 2;
+  const incomplete = await synchronizer.refreshInventory();
+  assert.deepEqual(incomplete, {
+    plants: 1,
+    devices: 0,
+    diagnostics: [
+      { scope: 'plant', page: 1, index: 0, reason: 'invalid_record' },
+    ],
+  });
+  assert.deepEqual(
+    store.plantWrites[1].map((item) => [item.plantCode, item.visible]),
+    [['NE=CURRENT', true]],
+  );
+  assert.deepEqual(
+    store.checkpointWrites[1].plants.map((item) => [item.plantCode, item.visible]),
+    [['NE=KNOWN', true], ['NE=CURRENT', true]],
+  );
+  assert.doesNotMatch(JSON.stringify(incomplete.diagnostics), /MUST-NOT-LEAK|accessToken/);
+
+  refresh = 3;
+  assert.deepEqual(await synchronizer.refreshInventory(), { plants: 1, devices: 0 });
+  assert.deepEqual(
+    store.plantWrites[2].map((item) => [item.plantCode, item.visible]),
+    [['NE=CURRENT', true], ['NE=KNOWN', false]],
+  );
+  assert.deepEqual(
+    store.checkpointWrites[2].plants.map((item) => item.plantCode),
+    ['NE=CURRENT'],
+  );
 });

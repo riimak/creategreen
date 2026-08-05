@@ -124,6 +124,7 @@ test('backfill walks backward across empty gaps and persists progress after rest
     nextBefore: now - DAY_MS,
     rows: 1,
     reachedBoundary: false,
+    huaweiFailureDelta: 0,
   });
   assert.equal(store.transactions[0].key, 'backfill:device:101');
   assert.deepEqual(store.transactions[0].measurements[0], {
@@ -152,6 +153,7 @@ test('backfill walks backward across empty gaps and persists progress after rest
     nextBefore: now - 3 * DAY_MS,
     rows: 0,
     reachedBoundary: false,
+    huaweiFailureDelta: 0,
   });
   assert.equal(store.checkpoints.get('backfill:device:101').reachedBoundary, false);
 });
@@ -193,6 +195,7 @@ test('documented oversized-range response halves the window with one request per
     nextBefore: now,
     rows: 0,
     reachedBoundary: false,
+    huaweiFailureDelta: 1,
   });
   assert.equal(store.checkpoints.get('backfill:device:101').windowMs, DAY_MS);
 
@@ -228,6 +231,7 @@ test('flow control honors Retry-After, persists backoff, and survives restart', 
     nextBefore: now,
     rows: 0,
     reachedBoundary: false,
+    huaweiFailureDelta: 1,
   });
   assert.equal(
     store.checkpoints.get('backfill:device:101').backoffUntil,
@@ -242,6 +246,7 @@ test('flow control honors Retry-After, persists backoff, and survives restart', 
   const skipped = await restarted.runBackfillStep();
   assert.equal(skipped.state, 'backoff');
   assert.equal(skipped.retryAt, '2026-08-05T10:01:30.000Z');
+  assert.equal(skipped.huaweiFailureDelta, 0);
   assert.equal(requests, 1);
 });
 
@@ -338,6 +343,7 @@ test('all backed-off candidates return the earliest retry time without HTTP', as
     nextBefore: null,
     rows: 0,
     reachedBoundary: false,
+    huaweiFailureDelta: 0,
     retryAt: '2026-08-05T10:02:00.000Z',
   });
   assert.equal(requests, 0);
@@ -412,6 +418,7 @@ test('backfill has no fixed cutoff and live work preempts it', async () => {
     nextBefore: oldBefore,
     rows: 0,
     reachedBoundary: false,
+    huaweiFailureDelta: 0,
   });
   assert.equal(historyCalls, 0);
   releaseLive();
@@ -454,6 +461,7 @@ test('grid connection timestamp is the authoritative lower boundary', async () =
     nextBefore: connectedAt,
     rows: 0,
     reachedBoundary: true,
+    huaweiFailureDelta: 0,
   });
   assert.equal(requestBody.startTime, connectedAt);
 });
@@ -492,6 +500,7 @@ test('non-empty final lower-bound window completes once and is never requested a
     nextBefore: connectedAt,
     rows: 1,
     reachedBoundary: true,
+    huaweiFailureDelta: 0,
   });
   assert.equal(store.transactions[0].measurements[0].ts, new Date(connectedAt).toISOString());
   assert.equal((await synchronizer.runBackfillStep()).state, 'complete');
@@ -532,6 +541,7 @@ test('checkpoint at or before grid lower bound completes without an invalid requ
     nextBefore: connectedAt,
     rows: 0,
     reachedBoundary: true,
+    huaweiFailureDelta: 0,
   });
   assert.equal(store.checkpoints.get('backfill:device:101').reachedBoundary, true);
   assert.equal(requests, 0);

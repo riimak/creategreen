@@ -589,7 +589,9 @@ function createSynchronizer({
           backoffUntil: null,
         };
         await store.setCheckpoint(key, resized, { lastError: null });
-        return backfillResult('range_reduced', before, 0, false);
+        return backfillResult('range_reduced', before, 0, false, {
+          huaweiFailureDelta: 1,
+        });
       }
       if (isFlowOrTransient(error)) {
         const failureAttempts = nonNegativeInteger(checkpoint.failureAttempts) + 1;
@@ -612,7 +614,9 @@ function createSynchronizer({
           backoffUntil,
           lastError: 'historical request deferred',
         });
-        return backfillResult('backoff', before, 0, false);
+        return backfillResult('backoff', before, 0, false, {
+          huaweiFailureDelta: 1,
+        });
       }
       await store.setCheckpoint(key, {
         ...checkpoint,
@@ -620,7 +624,9 @@ function createSynchronizer({
         windowMs,
         reachedBoundary: false,
       }, { lastError: 'historical request failed' });
-      return backfillResult('error', before, 0, false);
+      return backfillResult('error', before, 0, false, {
+        huaweiFailureDelta: 1,
+      });
     }
 
     const { payload } = response;
@@ -631,7 +637,9 @@ function createSynchronizer({
         windowMs,
         reachedBoundary: false,
       }, { lastError: 'historical response invalid' });
-      return backfillResult('error', before, 0, false);
+      return backfillResult('error', before, 0, false, {
+        huaweiFailureDelta: 1,
+      });
     }
 
     const measurements = [];
@@ -968,6 +976,7 @@ function backfillResult(state, nextBefore, rows, reachedBoundary, details) {
     rows,
     reachedBoundary,
     ...(details || {}),
+    huaweiFailureDelta: details?.huaweiFailureDelta === 1 ? 1 : 0,
   };
 }
 

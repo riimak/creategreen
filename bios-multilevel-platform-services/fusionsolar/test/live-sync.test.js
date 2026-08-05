@@ -411,6 +411,7 @@ test('flow control persists backoff and prevents lower-priority backfill', async
     nextBefore: null,
     rows: 0,
     reachedBoundary: false,
+    huaweiFailureDelta: 0,
   });
   assert.equal(historyCalls, 0);
   assert.doesNotMatch(JSON.stringify(live), /provider detail/);

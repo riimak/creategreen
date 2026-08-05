@@ -185,6 +185,33 @@ test('known per-asset failures are counted once without an extra cycle failure',
   );
 });
 
+test('backfill counts one new Huawei failure but repeated persisted backoff counts none', async () => {
+  const clock = fakeClock();
+  let attempts = 0;
+  const deps = dependencies({
+    backfill: async () => {
+      attempts += 1;
+      return {
+        state: 'backoff',
+        huaweiFailureDelta: attempts === 1 ? 1 : 0,
+      };
+    },
+  });
+  const integration = createIntegration({ config: config(), clock, ...deps });
+
+  await integration.startScheduler();
+  const [[timerId]] = clock.pending();
+  await clock.run(timerId);
+
+  assert.deepEqual(
+    deps.calls.filter((call) => call.startsWith('counters:{"backfillSteps"')),
+    [
+      'counters:{"backfillSteps":1,"huaweiFailures":1,"rowsIngested":0,"skippedFields":0}',
+      'counters:{"backfillSteps":1,"huaweiFailures":0,"rowsIngested":0,"skippedFields":0}',
+    ],
+  );
+});
+
 test('authorized scheduler continues polling after redeploy without a setup token', async () => {
   const clock = fakeClock();
   const deps = dependencies();

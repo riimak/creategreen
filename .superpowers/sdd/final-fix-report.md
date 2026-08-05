@@ -223,3 +223,46 @@ Two initial verification wrappers failed before invoking their intended test:
 Windows-to-WSL quote stripping broke a Ruby `-e` expression and a BusyBox
 `sh -c` command. Both checks were rerun with argument-safe invocations and
 passed as recorded above; these were harness errors, not product failures.
+
+## Final minor backfill-counter fix
+
+Applied on top of `85ab42b`.
+
+- Every resolved `runBackfillStep` result now carries a sanitized
+  `huaweiFailureDelta` of exactly zero or one.
+- A delta of one is emitted only after this invocation made a Huawei request
+  and received a new request/API failure, including documented range and flow
+  failures or an unusable provider response.
+- Idle/completion, live-preemption, persisted live/device gates, and
+  all-candidates-backed-off selection return zero.
+- Scheduler integration records that explicit delta. It still increments
+  `backfillSteps` for every invoked step, but no longer infers a Huawei failure
+  from `backoff` or `error` state alone.
+
+### Counter TDD and verification evidence
+
+Focused RED:
+
+```text
+docker run --rm -v <workspace>:/workspace \
+  -w /workspace/bios-multilevel-platform-services/fusionsolar \
+  node:22-alpine node --test test/backfill.test.js test/scheduler.test.js
+```
+
+Result: exit 1; 25 tests, 22 passed and 3 failed. The failures proved that
+new and persisted backoff results lacked deltas and that integration counted
+the second persisted backoff as another Huawei failure.
+
+Focused GREEN: the same command exited 0 with 25/25 tests passing. The
+scheduler regression observed two invoked backfill steps: the new failed
+request recorded Huawei delta one, while the repeated persisted gate recorded
+zero.
+
+The first full-suite run correctly exposed one stale `live-sync` result-shape
+assertion after the result contract changed (111 passed, 1 failed). After
+updating that assertion, the FusionSolar image was rebuilt and the full
+PostgreSQL 16-backed command was rerun with reliable exit propagation:
+exit 0; 112 tests passed, 0 failed, 0 skipped.
+
+`git diff --check` exited 0. No production secret, provider payload, raw error,
+identifier, or request URL was added to diagnostics.

@@ -132,7 +132,7 @@ function createIntegration({
       const backfill = await synchronizer.runBackfillStep();
       await recordCounters({
         backfillSteps: 1,
-        huaweiFailures: ['backoff', 'error'].includes(backfill?.state) ? 1 : 0,
+        huaweiFailures: backfill?.huaweiFailureDelta === 1 ? 1 : 0,
         rowsIngested: nonNegativeNumber(backfill?.rows),
         skippedFields: arrayLength(backfill?.skipped),
       });

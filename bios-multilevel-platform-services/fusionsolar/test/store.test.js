@@ -437,6 +437,34 @@ test('checkpoints, status, schema initialization, and close use the injected poo
   assert.equal(pool.ended, true);
 });
 
+test('real-pool schema initialization is serialized with a session advisory lock', async () => {
+  const statements = [];
+  let released = false;
+  const client = {
+    async query(sql) {
+      statements.push(sql);
+      return { rows: [], rowCount: 0 };
+    },
+    release() {
+      released = true;
+    },
+  };
+  const pool = {
+    async connect() {
+      return client;
+    },
+    async end() {},
+  };
+  const store = createFusionSolarStore({ pool, cipher: fakeCipher() });
+
+  await store.init();
+
+  assert.equal(statements[0], 'SELECT pg_advisory_lock(20260805, 9)');
+  assert.match(statements[1], /CREATE EXTENSION IF NOT EXISTS "pgcrypto"/);
+  assert.equal(statements[2], 'SELECT pg_advisory_unlock(20260805, 9)');
+  assert.equal(released, true);
+});
+
 test('inventory and sync state reads expose only ingestion fields', async () => {
   const pool = createFakePool(async (sql) => {
     if (/FROM fusionsolar_plants/.test(sql)) {

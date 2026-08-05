@@ -15,7 +15,21 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
       path.resolve(__dirname, '../database/schema.sql'),
       'utf8',
     );
-    await pool.query(schema);
+    if (typeof pool.connect !== 'function') {
+      await pool.query(schema);
+      return;
+    }
+    const client = await pool.connect();
+    try {
+      await client.query('SELECT pg_advisory_lock(20260805, 9)');
+      await client.query(schema);
+    } finally {
+      try {
+        await client.query('SELECT pg_advisory_unlock(20260805, 9)');
+      } finally {
+        client.release();
+      }
+    }
   }
 
   async function createNonce(nonceHash, expiresAt) {

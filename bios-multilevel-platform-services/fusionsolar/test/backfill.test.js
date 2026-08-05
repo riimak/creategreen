@@ -29,6 +29,7 @@ function createStore({
     visible: true,
   }],
   getSyncState,
+  getCheckpoint,
 } = {}) {
   const transactions = [];
   return {
@@ -43,6 +44,7 @@ function createStore({
       return structuredClone(devices);
     },
     async getCheckpoint(key) {
+      if (getCheckpoint) return getCheckpoint(key, checkpoints);
       return structuredClone(checkpoints.get(key) || null);
     },
     async getSyncState(key) {
@@ -479,6 +481,74 @@ test('live preempts backfill while candidate checkpoint work is pending', async 
   await candidateStart;
   await synchronizer.runLiveCycle();
   releaseCandidate();
+
+  assert.equal((await backfill).state, 'live_pending');
+  assert.equal(historyCalls, 0);
+});
+
+test('live preempts backfill while the live checkpoint read is pending', async () => {
+  const now = Date.parse('2026-08-05T10:00:00Z');
+  let releaseCheckpoint;
+  let checkpointStarted;
+  const checkpointPending = new Promise((resolve) => { releaseCheckpoint = resolve; });
+  const checkpointStart = new Promise((resolve) => { checkpointStarted = resolve; });
+  const store = createStore({
+    checkpoints: new Map([[
+      'inventory',
+      {
+        refreshedAt: '2026-08-05T09:30:00.000Z',
+        plants: [{
+          plantCode: 'NE=PLANT-1',
+          sourceKey: 'HUAWEI:NE=PLANT-1',
+          visible: true,
+        }],
+      },
+    ]]),
+    async getCheckpoint(key, checkpoints) {
+      if (key === 'live') {
+        checkpointStarted();
+        await checkpointPending;
+      }
+      return structuredClone(checkpoints.get(key) || null);
+    },
+  });
+  let historyCalls = 0;
+  const client = {
+    async request(path, options) {
+      if (path === PLANT_REALTIME_PATH) {
+        return jsonResponse({
+          success: true,
+          failCode: 0,
+          params: { currentTime: now },
+          data: [{
+            stationCode: 'NE=PLANT-1',
+            dataItemMap: { day_power: 1 },
+          }],
+        });
+      }
+      if (path === '/thirdData/getDevRealKpi') {
+        return jsonResponse({
+          success: true,
+          failCode: 0,
+          params: { currentTime: now },
+          data: [{ devId: 101, dataItemMap: { active_power: 2 } }],
+        });
+      }
+      historyCalls += 1;
+      return jsonResponse(historyPayload(JSON.parse(options.body), []));
+    },
+  };
+  const synchronizer = createSynchronizer({
+    client,
+    store,
+    config: { inventoryIntervalMs: DAY_MS },
+    now: () => new Date(now),
+  });
+
+  const backfill = synchronizer.runBackfillStep();
+  await checkpointStart;
+  await synchronizer.runLiveCycle();
+  releaseCheckpoint();
 
   assert.equal((await backfill).state, 'live_pending');
   assert.equal(historyCalls, 0);

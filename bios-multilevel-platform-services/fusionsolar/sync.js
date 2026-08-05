@@ -434,6 +434,9 @@ function createSynchronizer({
 
     if (liveRun) return backfillResult('live_pending', before, 0, false);
     const liveCheckpoint = await store.getCheckpoint(LIVE_CHECKPOINT);
+    if (controller.signal.aborted || liveRun) {
+      return backfillResult('live_pending', before, 0, false);
+    }
     if (isBackoffActive(liveCheckpoint?.backoffUntil, currentTime())) {
       return backfillResult('backoff', null, 0, false);
     }

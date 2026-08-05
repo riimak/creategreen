@@ -104,6 +104,62 @@ SELECT
   count(*) FILTER (WHERE ts > now() - interval '7 days')   AS rows_7d
 FROM raw_measurements;
 
+-- FusionSolar OAuth, inventory, and synchronization state.
+
+CREATE TABLE IF NOT EXISTS fusionsolar_oauth_credentials (
+  id                     TEXT PRIMARY KEY DEFAULT 'active',
+  encrypted_access_token JSONB,
+  encrypted_refresh_token JSONB,
+  access_expires_at      TIMESTAMPTZ,
+  granted_scopes         TEXT[] NOT NULL DEFAULT '{}',
+  token_type             TEXT,
+  state                  TEXT NOT NULL DEFAULT 'not_authorized',
+  last_error             TEXT,
+  authorized_at          TIMESTAMPTZ,
+  updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS fusionsolar_oauth_nonces (
+  nonce_hash       TEXT PRIMARY KEY,
+  expires_at       TIMESTAMPTZ NOT NULL,
+  consumed_at      TIMESTAMPTZ,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS fusionsolar_plants (
+  plant_code       TEXT PRIMARY KEY,
+  source_key       TEXT NOT NULL UNIQUE,
+  display_name     TEXT,
+  timezone         TEXT,
+  visible          BOOLEAN NOT NULL DEFAULT TRUE,
+  metadata         JSONB NOT NULL DEFAULT '{}',
+  first_seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS fusionsolar_devices (
+  device_id        TEXT PRIMARY KEY,
+  plant_code       TEXT NOT NULL REFERENCES fusionsolar_plants(plant_code) ON DELETE CASCADE,
+  device_type      TEXT,
+  model            TEXT,
+  serial_number    TEXT,
+  metadata         JSONB NOT NULL DEFAULT '{}',
+  first_seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_fusionsolar_devices_plant
+  ON fusionsolar_devices (plant_code);
+
+CREATE TABLE IF NOT EXISTS fusionsolar_sync_state (
+  sync_key         TEXT PRIMARY KEY,
+  checkpoint       JSONB NOT NULL DEFAULT '{}',
+  backoff_until    TIMESTAMPTZ,
+  last_success_at  TIMESTAMPTZ,
+  last_error       TEXT,
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Blockchain service tables
 
 CREATE TABLE IF NOT EXISTS blockchain_events (

@@ -84,6 +84,46 @@ test('maps only documented Huawei 26.1 plant yield fields', () => {
   assert.equal(REGISTRY.plant.day_power.verified, true);
 });
 
+test('maps exact Huawei 26.1 daily grid and use energy fields in kWh', () => {
+  const result = normalizeKpis({
+    source: 'HUAWEI:NE=12345678',
+    deviceType: 'plant',
+    timestamp: 1785924000000,
+    payload: {
+      daily_on_grid_energy: '9500.12',
+      daily_use_energy: 500.41,
+      day_on_grid_energy: 1,
+      day_use_energy: 2,
+    },
+  });
+
+  assert.deepEqual(result.measurements, [
+    {
+      source: 'HUAWEI:NE=12345678',
+      metric: 'huawei.plant.daily_on_grid_energy_kwh',
+      ts: '2026-08-05T10:00:00.000Z',
+      value: 9500.12,
+      isMissing: false,
+    },
+    {
+      source: 'HUAWEI:NE=12345678',
+      metric: 'huawei.plant.daily_consumption_kwh',
+      ts: '2026-08-05T10:00:00.000Z',
+      value: 500.41,
+      isMissing: false,
+    },
+  ]);
+  assert.deepEqual(result.skipped, ['day_on_grid_energy', 'day_use_energy']);
+  assert.equal(REGISTRY.plant.daily_on_grid_energy.field, 'daily_on_grid_energy');
+  assert.equal(REGISTRY.plant.daily_on_grid_energy.sourceUnit, 'kWh');
+  assert.equal(REGISTRY.plant.daily_on_grid_energy.destinationUnit, 'kWh');
+  assert.equal(REGISTRY.plant.daily_use_energy.field, 'daily_use_energy');
+  assert.equal(REGISTRY.plant.daily_use_energy.sourceUnit, 'kWh');
+  assert.equal(REGISTRY.plant.daily_use_energy.destinationUnit, 'kWh');
+  assert.equal(REGISTRY.plant.day_on_grid_energy, undefined);
+  assert.equal(REGISTRY.plant.day_use_energy, undefined);
+});
+
 test('converts documented meter watts to kW without coercing invalid values', () => {
   const result = normalizeKpis({
     source: 'HUAWEI:device-17',

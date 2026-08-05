@@ -67,12 +67,12 @@ const REGISTRY = Object.freeze({
     day_power: plantEntry('day_power', 'huawei.plant.daily_yield_kwh'),
     month_power: plantEntry('month_power', 'huawei.plant.monthly_yield_kwh'),
     total_power: plantEntry('total_power', 'huawei.plant.total_yield_kwh'),
-    day_on_grid_energy: plantEntry(
-      'day_on_grid_energy',
+    daily_on_grid_energy: plantEntry(
+      'daily_on_grid_energy',
       'huawei.plant.daily_on_grid_energy_kwh',
     ),
-    day_use_energy: plantEntry(
-      'day_use_energy',
+    daily_use_energy: plantEntry(
+      'daily_use_energy',
       'huawei.plant.daily_consumption_kwh',
     ),
   }),

@@ -281,3 +281,102 @@ test('queries devices in documented batches of at most 100 plants', async () => 
   assert.deepEqual(await synchronizer.refreshInventory(), { plants: 101, devices: 0 });
   assert.deepEqual(deviceBatchSizes, [100, 1]);
 });
+
+test('skips malformed records while completing valid plant and device discovery', async () => {
+  const store = createStore();
+  const client = {
+    async request(path, options) {
+      const body = JSON.parse(options.body);
+      if (path === PLANT_PATH) {
+        const firstPage = body.pageNo === 1;
+        return response({
+          success: true,
+          data: {
+            list: firstPage
+              ? [
+                plant('NE=VALID-1', 'Valid one'),
+                {
+                  plantCode: ' ',
+                  plantName: 'Malformed plant',
+                  clientSecret: 'PLANT-SECRET-MUST-NOT-LEAK',
+                },
+              ]
+              : [plant('NE=VALID-2', 'Valid two')],
+            pageCount: 2,
+            pageNo: body.pageNo,
+            pageSize: firstPage ? 2 : 1,
+            total: 3,
+          },
+          failCode: 0,
+          message: null,
+        });
+      }
+
+      assert.equal(path, DEVICE_PATH);
+      return response({
+        success: true,
+        data: [
+          {
+            id: 200,
+            stationCode: 'NE=VALID-1',
+            esnCode: 'SANITIZED-200',
+            devTypeId: 1,
+            model: 'SUN2000-17KTL',
+          },
+          {
+            id: null,
+            stationCode: 'NE=VALID-1',
+            devTypeId: 1,
+            accessToken: 'DEVICE-TOKEN-MUST-NOT-LEAK',
+          },
+          {
+            id: 999,
+            stationCode: 'NE=UNRELATED',
+            devTypeId: 1,
+            rawError: 'RAW-ERROR-MUST-NOT-LEAK',
+          },
+          {
+            id: 201,
+            stationCode: 'NE=VALID-2',
+            esnCode: 'SANITIZED-201',
+            devTypeId: 38,
+            model: 'SUN2000-10KTL',
+          },
+        ],
+        failCode: 0,
+        params: { stationCodes: body.stationCodes, currentTime: 1785924000000 },
+        message: null,
+      });
+    },
+  };
+  const synchronizer = createSynchronizer({
+    client,
+    store,
+    config: {},
+    now: () => new Date('2026-08-05T10:00:00Z'),
+    sleep: async () => {},
+  });
+
+  const result = await synchronizer.refreshInventory();
+
+  assert.deepEqual(result, {
+    plants: 2,
+    devices: 2,
+    diagnostics: [
+      { scope: 'plant', page: 1, index: 1, reason: 'invalid_record' },
+      { scope: 'device', batch: 1, index: 1, reason: 'invalid_record' },
+      { scope: 'device', batch: 1, index: 2, reason: 'invalid_record' },
+    ],
+  });
+  assert.deepEqual(
+    store.plantWrites[0].map((item) => item.plantCode),
+    ['NE=VALID-1', 'NE=VALID-2'],
+  );
+  assert.deepEqual(
+    store.deviceWrites[0].map((item) => [item.deviceId, item.plantCode]),
+    [['200', 'NE=VALID-1'], ['201', 'NE=VALID-2']],
+  );
+  const diagnostics = JSON.stringify(result.diagnostics);
+  assert.doesNotMatch(diagnostics, /PLANT-SECRET|DEVICE-TOKEN|RAW-ERROR/);
+  assert.doesNotMatch(diagnostics, /plantCode|stationCode|accessToken|rawError/);
+});

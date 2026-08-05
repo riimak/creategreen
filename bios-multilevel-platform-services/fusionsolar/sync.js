@@ -21,9 +21,12 @@ function createSynchronizer({
 
   async function refreshInventory() {
     const previous = await store.getCheckpoint(INVENTORY_CHECKPOINT);
-    const currentPlants = await fetchAllPlants();
+    const plantInventory = await fetchAllPlants();
+    const currentPlants = plantInventory.records;
     const currentByCode = new Map(currentPlants.map((plant) => [plant.plantCode, plant]));
-    const devices = await fetchAllDevices(currentPlants.map((plant) => plant.plantCode));
+    const deviceInventory = await fetchAllDevices(currentPlants.map((plant) => plant.plantCode));
+    const devices = deviceInventory.records;
+    const diagnostics = [...plantInventory.diagnostics, ...deviceInventory.diagnostics];
     const missingPlants = checkpointPlants(previous)
       .filter((plant) => !currentByCode.has(plant.plantCode))
       .map((plant) => ({ ...plant, visible: false }));
@@ -36,11 +39,14 @@ function createSynchronizer({
       { plants: currentPlants, refreshedAt },
       { lastSuccessAt: refreshedAt, lastError: null },
     );
-    return { plants: currentPlants.length, devices: devices.length };
+    const result = { plants: currentPlants.length, devices: devices.length };
+    if (diagnostics.length > 0) result.diagnostics = diagnostics;
+    return result;
   }
 
   async function fetchAllPlants() {
     const plants = [];
+    const diagnostics = [];
     const pageSignatures = new Set();
     for (let requestedPage = 1; requestedPage <= pageCap; requestedPage += 1) {
       const payload = await postJson(PLANT_LIST_PATH, { pageNo: requestedPage }, 'plant inventory');
@@ -51,8 +57,7 @@ function createSynchronizer({
       const pageNo = positivePageNumber(data.pageNo, 'pageNo');
       const pageCount = nonNegativePageNumber(data.pageCount, 'pageCount');
 
-      const pagePlants = data.list.map(normalizePlant);
-      const signature = JSON.stringify(pagePlants.map((plant) => plant.plantCode));
+      const signature = JSON.stringify(data.list);
       if (pageSignatures.has(signature)) {
         throw new Error('Huawei plant inventory returned a repeated page');
       }
@@ -60,17 +65,27 @@ function createSynchronizer({
         throw new Error('Huawei plant inventory returned an unexpected page');
       }
       pageSignatures.add(signature);
-      plants.push(...pagePlants);
+      for (let index = 0; index < data.list.length; index += 1) {
+        try {
+          plants.push(normalizePlant(data.list[index]));
+        } catch {
+          diagnostics.push(invalidRecordDiagnostic('plant', { page: pageNo, index }));
+        }
+      }
 
-      if (pageCount === 0 || pageNo >= pageCount) return deduplicatePlants(plants);
+      if (pageCount === 0 || pageNo >= pageCount) {
+        return { records: deduplicatePlants(plants), diagnostics };
+      }
     }
     throw new Error('Huawei plant inventory exceeded the page safety cap');
   }
 
   async function fetchAllDevices(plantCodes) {
-    const devices = [];
+    const devices = new Map();
+    const diagnostics = [];
     for (let offset = 0; offset < plantCodes.length; offset += DEVICE_PLANT_BATCH_SIZE) {
       const batch = plantCodes.slice(offset, offset + DEVICE_PLANT_BATCH_SIZE);
+      const batchNumber = Math.floor(offset / DEVICE_PLANT_BATCH_SIZE) + 1;
       const allowedPlants = new Set(batch);
       const payload = await postJson(
         DEVICE_LIST_PATH,
@@ -80,17 +95,30 @@ function createSynchronizer({
       if (!Array.isArray(payload.data)) {
         throw new Error('Huawei device inventory returned an invalid response');
       }
-      for (const rawDevice of payload.data) {
-        const plantCode = typeof rawDevice?.stationCode === 'string'
-          ? rawDevice.stationCode.trim()
-          : '';
-        if (!allowedPlants.has(plantCode)) {
-          throw new Error('Huawei device inventory returned an unexpected plant');
+      for (let index = 0; index < payload.data.length; index += 1) {
+        try {
+          const rawDevice = payload.data[index];
+          const plantCode = typeof rawDevice?.stationCode === 'string'
+            ? rawDevice.stationCode.trim()
+            : '';
+          if (!allowedPlants.has(plantCode)) {
+            throw new Error('unexpected plant');
+          }
+          const device = normalizeDevice(rawDevice, plantCode);
+          const existing = devices.get(device.deviceId);
+          if (existing && existing.plantCode !== device.plantCode) {
+            throw new Error('conflicting device');
+          }
+          devices.set(device.deviceId, device);
+        } catch {
+          diagnostics.push(invalidRecordDiagnostic('device', {
+            batch: batchNumber,
+            index,
+          }));
         }
-        devices.push(normalizeDevice(rawDevice, plantCode));
       }
     }
-    return deduplicateDevices(devices);
+    return { records: [...devices.values()], diagnostics };
   }
 
   async function postJson(path, body, operation) {
@@ -161,16 +189,12 @@ function deduplicatePlants(plants) {
   return [...unique.values()];
 }
 
-function deduplicateDevices(devices) {
-  const unique = new Map();
-  for (const device of devices) {
-    const existing = unique.get(device.deviceId);
-    if (existing && existing.plantCode !== device.plantCode) {
-      throw new Error('Huawei device inventory returned a conflicting device');
-    }
-    unique.set(device.deviceId, device);
-  }
-  return [...unique.values()];
+function invalidRecordDiagnostic(scope, location) {
+  return {
+    scope,
+    ...location,
+    reason: 'invalid_record',
+  };
 }
 
 function inventoryPageCap(value) {

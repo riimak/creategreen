@@ -883,3 +883,57 @@ test('PostgreSQL allows only one completion from two valid pre-issued OAuth stat
     await store.close();
   }
 });
+
+test('PostgreSQL schema upgrade removes unbound legacy nonces and enforces digest not-null', {
+  skip: !process.env.TEST_DATABASE_URL,
+}, async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const { Pool } = require('pg');
+  const pool = new Pool({ connectionString: process.env.TEST_DATABASE_URL });
+  const client = await pool.connect();
+  const schemaName = `fusionsolar_migration_${process.pid}_${Date.now()}`;
+  const quotedSchema = `"${schemaName}"`;
+  const schemaSql = fs.readFileSync(
+    path.resolve(__dirname, '../../database/schema.sql'),
+    'utf8',
+  );
+
+  try {
+    await client.query(`CREATE SCHEMA ${quotedSchema}`);
+    await client.query(`SET search_path TO ${quotedSchema}, public`);
+    await client.query(`
+      CREATE TABLE fusionsolar_oauth_nonces (
+        nonce_hash TEXT PRIMARY KEY,
+        expires_at TIMESTAMPTZ NOT NULL,
+        consumed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
+    await client.query(
+      `INSERT INTO fusionsolar_oauth_nonces (nonce_hash, expires_at)
+       VALUES ('legacy-unbound', now() + interval '10 minutes')`,
+    );
+
+    await client.query(schemaSql);
+
+    const remaining = await client.query(
+      'SELECT count(*)::integer AS count FROM fusionsolar_oauth_nonces',
+    );
+    assert.equal(remaining.rows[0].count, 0);
+    const column = await client.query(
+      `SELECT is_nullable
+       FROM information_schema.columns
+       WHERE table_schema = $1
+         AND table_name = 'fusionsolar_oauth_nonces'
+         AND column_name = 'setup_token_hash'`,
+      [schemaName],
+    );
+    assert.equal(column.rows[0].is_nullable, 'NO');
+  } finally {
+    await client.query('RESET search_path');
+    await client.query(`DROP SCHEMA IF EXISTS ${quotedSchema} CASCADE`);
+    client.release();
+    await pool.end();
+  }
+});

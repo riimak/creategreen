@@ -157,6 +157,10 @@ CREATE TABLE IF NOT EXISTS fusionsolar_devices (
 
 ALTER TABLE fusionsolar_oauth_nonces
   ADD COLUMN IF NOT EXISTS setup_token_hash TEXT;
+DELETE FROM fusionsolar_oauth_nonces
+  WHERE setup_token_hash IS NULL OR btrim(setup_token_hash) = '';
+ALTER TABLE fusionsolar_oauth_nonces
+  ALTER COLUMN setup_token_hash SET NOT NULL;
 ALTER TABLE fusionsolar_devices
   ADD COLUMN IF NOT EXISTS visible BOOLEAN NOT NULL DEFAULT TRUE;
 

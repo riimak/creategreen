@@ -437,6 +437,7 @@ test('persisted live backoff prevents every Huawei call after restart', async ()
   assert.deepEqual(await synchronizer.runLiveCycle(), {
     state: 'backoff',
     retryAt: '2026-08-05T10:02:00.000Z',
+    huaweiFailureDelta: 0,
   });
   assert.equal(calls, 0);
 });

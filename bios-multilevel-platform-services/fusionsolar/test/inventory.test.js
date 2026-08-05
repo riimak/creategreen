@@ -566,6 +566,7 @@ test('inventory failures persist exponential backoff and block calls after resta
   assert.deepEqual(await first.refreshInventory(), {
     state: 'backoff',
     retryAt: '2026-08-05T10:01:30.000Z',
+    huaweiFailureDelta: 1,
   });
   assert.equal(store.checkpointWrites[0].failureAttempts, 1);
   assert.equal(store.checkpointOptions[0].lastError, 'inventory request deferred');
@@ -580,6 +581,99 @@ test('inventory failures persist exponential backoff and block calls after resta
   assert.deepEqual(await restarted.refreshInventory(), {
     state: 'backoff',
     retryAt: '2026-08-05T10:01:30.000Z',
+    huaweiFailureDelta: 0,
   });
   assert.equal(calls, 1);
+});
+
+test('inventory business flow errors preserve fail codes and gate retries across restart', async () => {
+  const store = createStore();
+  let current = Date.parse('2026-08-05T10:00:00Z');
+  let calls = 0;
+  const client = {
+    async request() {
+      calls += 1;
+      return new Response(JSON.stringify({
+        success: false,
+        failCode: 407,
+        data: null,
+        message: 'raw provider detail must not leak',
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  };
+  const first = createSynchronizer({
+    client,
+    store,
+    now: () => new Date(current),
+    random: () => 0.5,
+  });
+
+  assert.deepEqual(await first.refreshInventory(), {
+    state: 'backoff',
+    retryAt: '2026-08-05T10:05:00.000Z',
+    huaweiFailureDelta: 1,
+  });
+  assert.equal(store.checkpointWrites[0].failureAttempts, 1);
+  assert.doesNotMatch(
+    JSON.stringify(store.checkpointWrites[0]),
+    /raw provider detail|message/i,
+  );
+
+  current += 4 * 60_000;
+  const restarted = createSynchronizer({
+    client,
+    store,
+    now: () => new Date(current),
+    random: () => 0.5,
+  });
+  assert.deepEqual(await restarted.refreshInventory(), {
+    state: 'backoff',
+    retryAt: '2026-08-05T10:05:00.000Z',
+    huaweiFailureDelta: 0,
+  });
+  assert.equal(calls, 1);
+
+  current += 60_000;
+  assert.deepEqual(await restarted.refreshInventory(), {
+    state: 'backoff',
+    retryAt: '2026-08-05T10:15:00.000Z',
+    huaweiFailureDelta: 1,
+  });
+  assert.equal(store.checkpointWrites.at(-1).failureAttempts, 2);
+  assert.equal(calls, 2);
+});
+
+test('inventory business flow codes 429 and 20004 are classified as transient', async () => {
+  for (const [failCode, expectedRetryAt] of [
+    [429, '2026-08-05T10:01:30.000Z'],
+    [20004, '2026-08-05T10:00:01.000Z'],
+  ]) {
+    const store = createStore();
+    const synchronizer = createSynchronizer({
+      store,
+      now: () => new Date('2026-08-05T10:00:00Z'),
+      random: () => 0.5,
+      client: {
+        async request() {
+          return new Response(JSON.stringify({
+            success: false,
+            failCode,
+            data: null,
+          }), {
+            status: 200,
+            headers: failCode === 429 ? { 'retry-after': '90' } : {},
+          });
+        },
+      },
+    });
+
+    assert.deepEqual(await synchronizer.refreshInventory(), {
+      state: 'backoff',
+      retryAt: expectedRetryAt,
+      huaweiFailureDelta: 1,
+    });
+  }
 });

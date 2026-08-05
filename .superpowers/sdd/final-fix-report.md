@@ -156,3 +156,70 @@ Result: exit 0; `blockchain tests passed`.
   snapshot/key pairing, and immediate reauthorization procedure.
 - The blockchain image build continues to report its pre-existing dependency
   advisories; this fix wave did not change blockchain dependencies.
+
+## Follow-up final-review fixes
+
+The follow-up review was applied on top of `b72006f`.
+
+- Inventory HTTP-200 business failures now become `SyncApiError` instances
+  with only a sanitized numeric `failCode`, parsed `Retry-After`, and transient
+  classification. Codes 407, 429, and 20004 enter the existing persistent
+  exponential-backoff path. A failed request reports a failure delta of one;
+  a restart-time backoff gate reports zero because it made no Huawei call.
+- Backfill marks a checkpoint complete before HTTP when `before` is already at
+  or below the authoritative grid-connection lower bound. It never sends an
+  inverted historical range. A successful window whose `startTime` reaches
+  the lower bound completes even when that window contains measurements.
+- Every authorized live-cycle attempt records its cycle counter in a
+  `finally` path. Thrown token/API cycle errors record one Huawei failure;
+  explicit inventory failure deltas and known per-asset failures are combined
+  without adding a duplicate cycle-level failure.
+- Schema upgrades delete unusable legacy nonce rows with a null or empty
+  `setup_token_hash`, then enforce `NOT NULL`, matching a fresh schema.
+
+### Follow-up TDD evidence
+
+Focused RED:
+
+```text
+docker run --rm -v <workspace>:/workspace \
+  -w /workspace/bios-multilevel-platform-services/fusionsolar \
+  node:22-alpine node --test \
+  test/inventory.test.js test/backfill.test.js test/scheduler.test.js
+```
+
+Result: exit 1; 34 tests, 28 passed and 6 failed. The failures reproduced all
+three runtime findings: HTTP-200 flow errors escaped backoff, non-empty and
+pre-request lower-bound cases did not complete, and inventory/thrown cycle
+failures were not counted.
+
+The PostgreSQL migration regression also failed before the schema fix: the
+legacy nonce remained after upgrade (`1 !== 0`).
+
+Focused GREEN: the same runtime command exited 0 with 34/34 tests passing.
+The PostgreSQL-focused `store.test.js` run exited 0 with 19/19 tests passing,
+including the legacy migration and `setup_token_hash` nullability assertion.
+
+### Follow-up final verification
+
+All commands ran through WSL Docker after the final code change.
+
+- FusionSolar image rebuilt successfully. Full PostgreSQL 16-backed suite:
+  exit 0; 111 tests passed, 0 failed, 0 skipped.
+- Dashboard: Deno test exit 0, 8 passed and 0 failed; Deno check exit 0.
+- Compose config: exit 0 using a temporary empty non-secret `.env`, deleted
+  immediately afterward.
+- CI environment round-trip: exit 0 with `CI_ENV_ROUND_TRIP_OK`.
+- `bash -n` passed for `forward-env.sh` and
+  `ci-env-injection.test.sh`.
+- Ruby/Psych parsed `.gitlab-ci.yml`, both Helm values files, and network
+  policies: exit 0.
+- Prediction regression: exit 0 with `prediction tests passed`.
+- Blockchain image rebuilt; regression exit 0 with
+  `blockchain tests passed`.
+- `git diff --check`: exit 0.
+
+Two initial verification wrappers failed before invoking their intended test:
+Windows-to-WSL quote stripping broke a Ruby `-e` expression and a BusyBox
+`sh -c` command. Both checks were rerun with argument-safe invocations and
+passed as recorded above; these were harness errors, not product failures.

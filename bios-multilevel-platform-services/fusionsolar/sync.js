@@ -52,6 +52,7 @@ function createSynchronizer({
       return {
         state: 'backoff',
         retryAt: timestampString(previous.backoffUntil),
+        huaweiFailureDelta: 0,
       };
     }
     try {
@@ -81,6 +82,7 @@ function createSynchronizer({
       return {
         state: 'backoff',
         retryAt: backoffUntil.toISOString(),
+        huaweiFailureDelta: 1,
       };
     }
   }
@@ -223,15 +225,17 @@ function createSynchronizer({
     } catch {
       throw new Error(`Huawei ${operation} returned invalid JSON`);
     }
+    const failCode = safeFailCode(payload);
     if (
       !payload
       || payload.success !== true
-      || Number(payload.failCode) !== 0
+      || failCode !== 0
     ) {
-      const failCode = Number.isInteger(Number(payload?.failCode))
-        ? ` (code ${Number(payload.failCode)})`
-        : '';
-      throw new Error(`Huawei ${operation} request failed${failCode}`);
+      throw new SyncApiError(`Huawei ${operation} request failed`, {
+        failCode,
+        retryAfterMs: parseRetryAfter(response, currentTime()),
+        transient: [407, 429, 20004].includes(failCode),
+      });
     }
     return payload;
   }
@@ -304,6 +308,7 @@ function createSynchronizer({
       return {
         state: 'backoff',
         retryAt: timestampString(persistedLiveBackoff),
+        huaweiFailureDelta: 0,
       };
     }
     if (await inventoryIsStale()) {
@@ -533,9 +538,29 @@ function createSynchronizer({
       'backfill checkpoint windowMs',
     );
     const lowerBound = authoritativeLowerBound(plant);
+    if (lowerBound !== null && before <= lowerBound) {
+      const completedAt = currentTime();
+      const completed = {
+        ...checkpoint,
+        before: lowerBound,
+        windowMs,
+        reachedBoundary: true,
+        backoffUntil: null,
+        failureAttempts: 0,
+      };
+      await store.setCheckpoint(key, completed, {
+        backoffUntil: null,
+        lastSuccessAt: completedAt,
+        lastError: null,
+      });
+      return backfillResult('complete', lowerBound, 0, true);
+    }
     const startTime = lowerBound === null
       ? before - windowMs
       : Math.max(lowerBound, before - windowMs);
+    if (startTime > before) {
+      throw new Error('historical request range is invalid');
+    }
     let response;
     try {
       response = await requestJson(
@@ -634,9 +659,7 @@ function createSynchronizer({
         skipped.push(invalidRecordDiagnostic(`device:${device.deviceId}`, { index }));
       }
     }
-    const reachedBoundary = payload.data.length === 0
-      && lowerBound !== null
-      && startTime <= lowerBound;
+    const reachedBoundary = lowerBound !== null && startTime <= lowerBound;
     const nextCheckpoint = {
       before: startTime,
       windowMs,

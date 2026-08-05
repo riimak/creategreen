@@ -458,6 +458,85 @@ test('grid connection timestamp is the authoritative lower boundary', async () =
   assert.equal(requestBody.startTime, connectedAt);
 });
 
+test('non-empty final lower-bound window completes once and is never requested again', async () => {
+  const now = Date.parse('2026-08-05T10:00:00Z');
+  const connectedAt = now - DAY_MS;
+  const store = createStore({
+    plants: [{
+      plantCode: 'NE=PLANT-1',
+      sourceKey: 'HUAWEI:NE=PLANT-1',
+      visible: true,
+      metadata: { gridConnectionDate: new Date(connectedAt).toISOString() },
+    }],
+  });
+  let requests = 0;
+  const synchronizer = createSynchronizer({
+    store,
+    now: () => new Date(now),
+    client: {
+      async request(_path, options) {
+        requests += 1;
+        const body = JSON.parse(options.body);
+        assert.equal(body.startTime, connectedAt);
+        assert.equal(body.endTime, now);
+        return jsonResponse(historyPayload(body, [{
+          collectTime: connectedAt,
+          dataItems: { active_power: 4 },
+        }]));
+      },
+    },
+  });
+
+  assert.deepEqual(await synchronizer.runBackfillStep(), {
+    state: 'complete',
+    nextBefore: connectedAt,
+    rows: 1,
+    reachedBoundary: true,
+  });
+  assert.equal(store.transactions[0].measurements[0].ts, new Date(connectedAt).toISOString());
+  assert.equal((await synchronizer.runBackfillStep()).state, 'complete');
+  assert.equal(requests, 1);
+});
+
+test('checkpoint at or before grid lower bound completes without an invalid request', async () => {
+  const connectedAt = Date.parse('2026-08-04T10:00:00Z');
+  const store = createStore({
+    plants: [{
+      plantCode: 'NE=PLANT-1',
+      sourceKey: 'HUAWEI:NE=PLANT-1',
+      visible: true,
+      metadata: { gridConnectionDate: new Date(connectedAt).toISOString() },
+    }],
+    checkpoints: new Map([[
+      'backfill:device:101',
+      {
+        before: connectedAt - 1,
+        windowMs: DAY_MS,
+        reachedBoundary: false,
+      },
+    ]]),
+  });
+  let requests = 0;
+  const synchronizer = createSynchronizer({
+    store,
+    client: {
+      async request() {
+        requests += 1;
+        throw new Error('must not request an inverted range');
+      },
+    },
+  });
+
+  assert.deepEqual(await synchronizer.runBackfillStep(), {
+    state: 'complete',
+    nextBefore: connectedAt,
+    rows: 0,
+    reachedBoundary: true,
+  });
+  assert.equal(store.checkpoints.get('backfill:device:101').reachedBoundary, true);
+  assert.equal(requests, 0);
+});
+
 test('backfill excludes invisible devices', async () => {
   const store = createStore({
     devices: [{

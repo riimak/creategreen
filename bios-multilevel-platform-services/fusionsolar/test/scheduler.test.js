@@ -155,7 +155,34 @@ test('scheduler waits for a persisted backoff retry time and skips backfill', as
 
   assert.equal(deps.calls.filter((call) => call === 'live').length, 1);
   assert.equal(deps.calls.includes('backfill'), false);
+  assert.equal(
+    deps.calls.includes(
+      'counters:{"cycles":1,"huaweiFailures":1,"rowsIngested":0,"skippedFields":0}',
+    ),
+    true,
+  );
   assert.equal(clock.pending()[0][1].delay, 120_000);
+});
+
+test('known per-asset failures are counted once without an extra cycle failure', async () => {
+  const clock = fakeClock();
+  const deps = dependencies({
+    live: async () => ({
+      measurements: 3,
+      skipped: 1,
+      failures: [{ scope: 'plant:1' }, { scope: 'device:2' }],
+    }),
+  });
+  const integration = createIntegration({ config: config(), clock, ...deps });
+
+  await integration.startScheduler();
+
+  assert.equal(
+    deps.calls.includes(
+      'counters:{"cycles":1,"huaweiFailures":2,"rowsIngested":3,"skippedFields":1}',
+    ),
+    true,
+  );
 });
 
 test('authorized scheduler continues polling after redeploy without a setup token', async () => {
@@ -223,6 +250,12 @@ test('scheduler neither overlaps cycles nor backfills after failed live work', a
 
   assert.equal(deps.calls.filter((call) => call === 'live').length, 1);
   assert.equal(deps.calls.includes('backfill'), false);
+  assert.equal(
+    deps.calls.includes(
+      'counters:{"cycles":1,"huaweiFailures":1,"rowsIngested":0,"skippedFields":0}',
+    ),
+    true,
+  );
   assert.equal(clock.pending().length, 1);
   assert.equal((await integration.status()).lastError.includes('secret-token-value'), false);
 });

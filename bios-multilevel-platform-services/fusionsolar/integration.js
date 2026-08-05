@@ -106,13 +106,23 @@ function createIntegration({
     nextCycleDelayMs = config.liveIntervalMs;
     const stored = await store.status();
     if (stored.state !== 'authorized') return;
-    const live = await synchronizer.runLiveCycle();
-    await recordCounters({
-      cycles: 1,
-      huaweiFailures: arrayLength(live?.failures),
-      rowsIngested: nonNegativeNumber(live?.measurements),
-      skippedFields: nonNegativeNumber(live?.skipped),
-    });
+    let live;
+    let liveError = null;
+    try {
+      live = await synchronizer.runLiveCycle();
+    } catch (error) {
+      liveError = error;
+      throw error;
+    } finally {
+      await recordCounters({
+        cycles: 1,
+        huaweiFailures: liveError
+          ? 1
+          : liveFailureDelta(live),
+        rowsIngested: nonNegativeNumber(live?.measurements),
+        skippedFields: nonNegativeNumber(live?.skipped),
+      });
+    }
     schedulerError = null;
     if (live?.state === 'backoff') {
       nextCycleDelayMs = retryDelayUntil(live.retryAt, timer.now(), config.liveIntervalMs);
@@ -265,6 +275,15 @@ function nonNegativeNumber(value) {
 
 function arrayLength(value) {
   return Array.isArray(value) ? value.length : 0;
+}
+
+function liveFailureDelta(live) {
+  const perAssetFailures = arrayLength(live?.failures);
+  const explicit = Number(live?.huaweiFailureDelta);
+  if (Number.isSafeInteger(explicit) && explicit >= 0) {
+    return perAssetFailures + explicit;
+  }
+  return perAssetFailures + (live?.state === 'backoff' ? 1 : 0);
 }
 
 function emptyCounters() {

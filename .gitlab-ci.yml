@@ -142,19 +142,8 @@ production-fusionsolar:
         FUSIONSOLAR_REDIRECT_URI FUSIONSOLAR_LIVE_INTERVAL_SECONDS \
         FUSIONSOLAR_INVENTORY_INTERVAL_SECONDS FUSIONSOLAR_REQUEST_TIMEOUT_SECONDS \
         FUSIONSOLAR_BACKFILL_ENABLED"
-      for name in $FUSIONSOLAR_FORWARD_ENVS; do
-        value="${!name:-}"
-        if [ -n "$value" ]; then
-          sed -i "/^  - name: ${name}$/,+1d" "$VALUES_FILE"
-          {
-            echo "  - name: $name"
-            echo "    value: \"$value\""
-          } >> "$VALUES_FILE"
-          echo "Forwarded CI variable $name"
-        else
-          echo "Skipped CI variable $name: not set"
-        fi
-      done
+      bash bios-multilevel-platform-services/fusionsolar/.gitlab/forward-env.sh \
+        "$VALUES_FILE" $FUSIONSOLAR_FORWARD_ENVS
   rules:
     - !reference [.production, rules]
     - when: on_success

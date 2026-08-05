@@ -5,10 +5,15 @@ function positiveInt(value, fallback, name) {
   return parsed;
 }
 
+const PRODUCTION_REDIRECT_URI = 'https://bios-multilevel.barrage.net/oauth/fusionsolar/callback';
+const CANONICAL_BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
 function encryptionKey(raw) {
   if (!raw) return null;
   const key = Buffer.from(raw, 'base64');
-  if (key.length !== 32) throw new Error('FUSIONSOLAR_TOKEN_ENCRYPTION_KEY must decode to 32 bytes');
+  if (!CANONICAL_BASE64.test(raw) || key.toString('base64') !== raw || key.length !== 32) {
+    throw new Error('FUSIONSOLAR_TOKEN_ENCRYPTION_KEY must be canonical base64 encoding of exactly 32 bytes');
+  }
   return key;
 }
 
@@ -31,7 +36,7 @@ function loadConfig(env = process.env) {
 }
 
 function configurationState(config) {
-  return config.clientId && config.clientSecret && config.redirectUri
+  return config.clientId && config.clientSecret && config.redirectUri === PRODUCTION_REDIRECT_URI
     && config.setupToken && config.tokenEncryptionKey
     && config.apiBaseUrl && config.databaseUrl
     ? 'configured'

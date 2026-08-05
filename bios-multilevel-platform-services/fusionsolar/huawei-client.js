@@ -134,6 +134,9 @@ function createHuaweiClient({
   }
 
   async function request(path, options = {}) {
+    if (!isReplayableBody(options.body)) {
+      throw new HuaweiClientError('Huawei API request body must be replayable', true);
+    }
     const url = apiUrl(path);
     let accessToken = await getAccessToken();
     let refreshedAfterUnauthorized = false;
@@ -301,11 +304,21 @@ function validateDependencies(config, store, fetchImpl, now, sleep) {
 }
 
 function isTransient(status) {
-  return status === 429 || status >= 500;
+  return status === 408 || status === 429 || status >= 500;
 }
 
 function isPermanentStatus(status) {
-  return status >= 400 && status < 500 && status !== 429;
+  return status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
+function isReplayableBody(body) {
+  return body == null
+    || typeof body === 'string'
+    || body instanceof URLSearchParams
+    || body instanceof ArrayBuffer
+    || ArrayBuffer.isView(body)
+    || body instanceof Blob
+    || body instanceof FormData;
 }
 
 function operationLabel(operation) {

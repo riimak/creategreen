@@ -231,6 +231,78 @@ test('honors Retry-After once before retrying a throttled API request', async ()
   assert.deepEqual(sleeps, [2000]);
 });
 
+test('retries API requests with supported replayable body types', async () => {
+  const form = new FormData();
+  form.set('field', 'value');
+  const arrayBuffer = Uint8Array.from([1, 2, 3]).buffer;
+  const bodies = [
+    undefined,
+    'string-body',
+    new URLSearchParams({ field: 'value' }),
+    Buffer.from('buffer-body'),
+    Uint8Array.from([4, 5, 6]),
+    arrayBuffer,
+    new DataView(arrayBuffer),
+    new Blob(['blob-body']),
+    form,
+  ];
+
+  for (const body of bodies) {
+    const seen = [];
+    const client = createHuaweiClient({
+      config: config(),
+      store: memoryStore(authorizedCredentials()),
+      fetchImpl: async (_url, options) => {
+        seen.push(options.body);
+        return new Response('', { status: seen.length === 1 ? 408 : 200 });
+      },
+      now: () => NOW,
+      sleep: async () => {},
+    });
+
+    assert.equal((await client.request('/rest/resource', { method: 'POST', body })).status, 200);
+    assert.equal(seen.length, 2);
+    assert.equal(seen[0], body);
+    assert.equal(seen[1], body);
+  }
+});
+
+test('rejects non-replayable request bodies before any external request', async () => {
+  const bodies = [
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue('stream-body-secret');
+        controller.close();
+      },
+    }),
+    (async function* bodyGenerator() {
+      yield 'generator-body-secret';
+    }()),
+  ];
+
+  for (const body of bodies) {
+    let called = false;
+    const client = createHuaweiClient({
+      config: config(),
+      store: memoryStore(authorizedCredentials()),
+      fetchImpl: async () => {
+        called = true;
+        return new Response('', { status: 200 });
+      },
+      now: () => NOW,
+    });
+
+    const error = await client.request('/rest/resource?query-secret=hidden', {
+      method: 'POST',
+      body,
+    }).catch((caught) => caught);
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /body.*replay/i);
+    assert.doesNotMatch(error.message, /stream-body-secret|generator-body-secret|query-secret|\?/);
+    assert.equal(called, false);
+  }
+});
+
 test('permanent refresh failures require reauthorization with a sanitized message', async () => {
   const secrets = [
     'stored-refresh',
@@ -256,6 +328,32 @@ test('permanent refresh failures require reauthorization with a sanitized messag
   for (const secret of secrets) {
     assert.doesNotMatch(store.states[0].message, new RegExp(secret));
   }
+});
+
+test('a 408 refresh response retries and remains a sanitized transient failure', async () => {
+  const store = memoryStore(authorizedCredentials({
+    accessExpiresAt: new Date('2026-08-05T09:00:00Z'),
+  }));
+  const sleeps = [];
+  let calls = 0;
+  const client = createHuaweiClient({
+    config: config(),
+    store,
+    fetchImpl: async () => {
+      calls += 1;
+      return new Response('response-body-secret', { status: 408 });
+    },
+    now: () => NOW,
+    sleep: async (milliseconds) => sleeps.push(milliseconds),
+  });
+
+  const error = await client.getAccessToken().catch((caught) => caught);
+  assert.ok(error instanceof Error);
+  assert.match(error.message, /status 408/i);
+  assert.doesNotMatch(error.message, /response-body-secret|stored-refresh|fixture-client-secret/);
+  assert.equal(calls, 2);
+  assert.deepEqual(sleeps, [1000]);
+  assert.deepEqual(store.states, []);
 });
 
 test('external request errors omit bodies, codes, tokens, client secrets, and URL queries', async () => {

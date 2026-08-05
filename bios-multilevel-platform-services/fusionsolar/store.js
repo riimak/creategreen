@@ -179,7 +179,40 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
     return { upserted: result };
   }
 
-  async function saveMeasurements(measurements) {
+  async function listPlants() {
+    const { rows } = await pool.query(
+      `SELECT plant_code, source_key, display_name, timezone, visible, metadata
+       FROM fusionsolar_plants
+       WHERE visible = TRUE
+       ORDER BY plant_code`,
+    );
+    return rows.map((row) => ({
+      plantCode: row.plant_code,
+      sourceKey: row.source_key,
+      displayName: row.display_name,
+      timezone: row.timezone,
+      visible: row.visible,
+      metadata: row.metadata || {},
+    }));
+  }
+
+  async function listDevices() {
+    const { rows } = await pool.query(
+      `SELECT device_id, plant_code, device_type, model, serial_number, metadata
+       FROM fusionsolar_devices
+       ORDER BY device_id`,
+    );
+    return rows.map((row) => ({
+      deviceId: row.device_id,
+      plantCode: row.plant_code,
+      deviceType: row.device_type,
+      model: row.model,
+      serialNumber: row.serial_number,
+      metadata: row.metadata || {},
+    }));
+  }
+
+  function normalizeMeasurements(measurements) {
     const normalized = (measurements || []).map((measurement) => ({
       ...measurement,
       ts: canonicalTimestamp(measurement.ts),
@@ -192,6 +225,11 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
         measurement.ts,
       ]),
     );
+    return rows;
+  }
+
+  async function saveMeasurementsWith(queryable, measurements) {
+    const rows = normalizeMeasurements(measurements);
     if (rows.length === 0) return { upserted: 0 };
 
     const result = await executeBatches(rows, 5, (batch) => {
@@ -216,8 +254,12 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
                   ingested_at = now()`,
         values,
       };
-    });
+    }, queryable);
     return { upserted: result };
+  }
+
+  async function saveMeasurements(measurements) {
+    return saveMeasurementsWith(pool, measurements);
   }
 
   async function getCheckpoint(syncKey) {
@@ -228,14 +270,31 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
     return rows[0]?.checkpoint ?? null;
   }
 
-  async function setCheckpoint(syncKey, checkpoint, options = {}) {
-    await pool.query(
+  async function getSyncState(syncKey) {
+    const { rows } = await pool.query(
+      `SELECT checkpoint, backoff_until, last_success_at, last_error
+       FROM fusionsolar_sync_state
+       WHERE sync_key = $1`,
+      [syncKey],
+    );
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      checkpoint: row.checkpoint,
+      backoffUntil: row.backoff_until,
+      lastSuccessAt: row.last_success_at,
+      lastError: row.last_error,
+    };
+  }
+
+  async function setCheckpointWith(queryable, syncKey, checkpoint, options = {}) {
+    await queryable.query(
       `INSERT INTO fusionsolar_sync_state
          (sync_key, checkpoint, backoff_until, last_success_at, last_error, updated_at)
        VALUES ($1, $2, $3, $4, $5, now())
        ON CONFLICT (sync_key) DO UPDATE SET
          checkpoint = EXCLUDED.checkpoint,
-         backoff_until = COALESCE(EXCLUDED.backoff_until, fusionsolar_sync_state.backoff_until),
+         backoff_until = EXCLUDED.backoff_until,
          last_success_at = COALESCE(EXCLUDED.last_success_at, fusionsolar_sync_state.last_success_at),
          last_error = EXCLUDED.last_error,
          updated_at = now()`,
@@ -247,6 +306,35 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
         options.lastError ?? null,
       ],
     );
+  }
+
+  async function setCheckpoint(syncKey, checkpoint, options = {}) {
+    return setCheckpointWith(pool, syncKey, checkpoint, options);
+  }
+
+  async function saveMeasurementsAndCheckpoint(
+    measurements,
+    syncKey,
+    checkpoint,
+    options = {},
+  ) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await saveMeasurementsWith(client, measurements);
+      await setCheckpointWith(client, syncKey, checkpoint, options);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // Preserve the original transactional failure.
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async function status() {
@@ -280,12 +368,12 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
     await pool.end();
   }
 
-  async function executeBatches(rows, parameterCount, buildQuery) {
+  async function executeBatches(rows, parameterCount, buildQuery, queryable = pool) {
     const batchSize = Math.floor(MAX_BIND_PARAMETERS / parameterCount);
     let affected = 0;
     for (let index = 0; index < rows.length; index += batchSize) {
       const { sql, values } = buildQuery(rows.slice(index, index + batchSize));
-      const result = await pool.query(sql, values);
+      const result = await queryable.query(sql, values);
       affected += result.rowCount || 0;
     }
     return affected;
@@ -300,8 +388,12 @@ function createFusionSolarStore({ databaseUrl, cipher, pool: injectedPool } = {}
     setAuthorizationState,
     upsertPlants,
     upsertDevices,
+    listPlants,
+    listDevices,
     saveMeasurements,
+    saveMeasurementsAndCheckpoint,
     getCheckpoint,
+    getSyncState,
     setCheckpoint,
     status,
     close,

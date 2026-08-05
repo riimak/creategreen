@@ -2,7 +2,6 @@ const AUTHORIZE_PATH = '/rest/dp/uidm/oauth2/v1/authorize';
 const TOKEN_PATH = '/rest/dp/uidm/oauth2/v1/token';
 const REQUIRED_SCOPE = 'pvms.openapi.basic';
 const REFRESH_EARLY_MS = 60_000;
-const MAX_RETRY_AFTER_MS = 60_000;
 
 function createHuaweiClient({
   config,
@@ -134,7 +133,12 @@ function createHuaweiClient({
   }
 
   async function request(path, options = {}) {
-    if (!isReplayableBody(options.body)) {
+    const {
+      retryTransient = true,
+      retryUnauthorized = true,
+      ...requestOptions
+    } = options;
+    if (!isReplayableBody(requestOptions.body)) {
       throw new HuaweiClientError('Huawei API request body must be replayable', true);
     }
     const url = apiUrl(path);
@@ -143,20 +147,20 @@ function createHuaweiClient({
     let retriedTransient = false;
 
     while (true) {
-      const headers = new Headers(options.headers);
+      const headers = new Headers(requestOptions.headers);
       headers.set('Authorization', `Bearer ${accessToken}`);
       if (!headers.has('Accept')) headers.set('Accept', 'application/json');
       const response = await externalFetch(url, {
-        ...options,
+        ...requestOptions,
         headers,
       }, 'API request');
 
-      if (response.status === 401 && !refreshedAfterUnauthorized) {
+      if (response.status === 401 && retryUnauthorized && !refreshedAfterUnauthorized) {
         refreshedAfterUnauthorized = true;
         accessToken = (await refresh(await store.loadCredentials(), accessToken)).accessToken;
         continue;
       }
-      if (isTransient(response.status) && !retriedTransient) {
+      if (isTransient(response.status) && retryTransient && !retriedTransient) {
         retriedTransient = true;
         await sleep(retryDelay(response));
         continue;
@@ -165,6 +169,10 @@ function createHuaweiClient({
         throw new HuaweiClientError(
           `Huawei API request failed with status ${response.status} at ${url.pathname}`,
           isPermanentStatus(response.status),
+          {
+            status: response.status,
+            retryAfterMs: isTransient(response.status) ? retryDelay(response) : null,
+          },
         );
       }
       return response;
@@ -210,12 +218,12 @@ function createHuaweiClient({
   function retryDelay(response) {
     const value = response.headers.get('retry-after');
     if (value && /^\d+$/.test(value.trim())) {
-      return Math.min(Number(value.trim()) * 1000, MAX_RETRY_AFTER_MS);
+      return Number(value.trim()) * 1000;
     }
     if (value) {
       const at = Date.parse(value);
       if (Number.isFinite(at)) {
-        return Math.min(Math.max(0, at - currentTime().getTime()), MAX_RETRY_AFTER_MS);
+        return Math.max(0, at - currentTime().getTime());
       }
     }
     return 1000;
@@ -230,10 +238,14 @@ function createHuaweiClient({
 }
 
 class HuaweiClientError extends Error {
-  constructor(message, permanent) {
+  constructor(message, permanent, { status, retryAfterMs } = {}) {
     super(message);
     this.name = 'HuaweiClientError';
     this.permanent = permanent;
+    if (status !== undefined) this.status = status;
+    if (retryAfterMs !== undefined && retryAfterMs !== null) {
+      this.retryAfterMs = retryAfterMs;
+    }
   }
 }
 

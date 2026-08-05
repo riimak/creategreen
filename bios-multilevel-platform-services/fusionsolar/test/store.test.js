@@ -362,6 +362,157 @@ test('checkpoints, status, schema initialization, and close use the injected poo
   assert.equal(pool.ended, true);
 });
 
+test('inventory and sync state reads expose only ingestion fields', async () => {
+  const pool = createFakePool(async (sql) => {
+    if (/FROM fusionsolar_plants/.test(sql)) {
+      return {
+        rows: [{
+          plant_code: 'plant-1',
+          source_key: 'HUAWEI:plant-1',
+          display_name: 'Plant one',
+          timezone: null,
+          visible: true,
+          metadata: { capacity: 1 },
+        }],
+        rowCount: 1,
+      };
+    }
+    if (/FROM fusionsolar_devices/.test(sql)) {
+      return {
+        rows: [{
+          device_id: 'device-1',
+          plant_code: 'plant-1',
+          device_type: '1',
+          model: 'SUN2000',
+          serial_number: 'sanitized',
+          metadata: { devDn: 'NE=DEVICE-1' },
+        }],
+        rowCount: 1,
+      };
+    }
+    if (/SELECT checkpoint, backoff_until/.test(sql)) {
+      return {
+        rows: [{
+          checkpoint: { before: 123 },
+          backoff_until: new Date('2026-08-05T10:01:00Z'),
+          last_success_at: new Date('2026-08-05T10:00:00Z'),
+          last_error: null,
+        }],
+        rowCount: 1,
+      };
+    }
+    return { rows: [], rowCount: 0 };
+  });
+  const store = createFusionSolarStore({ pool, cipher: fakeCipher() });
+
+  assert.deepEqual(await store.listPlants(), [{
+    plantCode: 'plant-1',
+    sourceKey: 'HUAWEI:plant-1',
+    displayName: 'Plant one',
+    timezone: null,
+    visible: true,
+    metadata: { capacity: 1 },
+  }]);
+  assert.deepEqual(await store.listDevices(), [{
+    deviceId: 'device-1',
+    plantCode: 'plant-1',
+    deviceType: '1',
+    model: 'SUN2000',
+    serialNumber: 'sanitized',
+    metadata: { devDn: 'NE=DEVICE-1' },
+  }]);
+  assert.deepEqual(await store.getSyncState('backfill:device:device-1'), {
+    checkpoint: { before: 123 },
+    backoffUntil: new Date('2026-08-05T10:01:00Z'),
+    lastSuccessAt: new Date('2026-08-05T10:00:00Z'),
+    lastError: null,
+  });
+});
+
+test('measurements and checkpoint commit in one database transaction', async () => {
+  const queries = [];
+  let released = false;
+  const client = {
+    async query(sql, values) {
+      queries.push({ sql, values });
+      return { rows: [], rowCount: /INSERT INTO raw_measurements/.test(sql) ? 1 : 0 };
+    },
+    release() {
+      released = true;
+    },
+  };
+  const pool = {
+    async connect() {
+      return client;
+    },
+    async query() {
+      throw new Error('transaction must use one checked-out client');
+    },
+    async end() {},
+  };
+  const store = createFusionSolarStore({ pool, cipher: fakeCipher() });
+
+  assert.deepEqual(await store.saveMeasurementsAndCheckpoint(
+    [{
+      source: 'HUAWEI:plant-1',
+      metric: 'huawei.plant.daily_yield_kwh',
+      ts: '2026-08-05T10:00:00Z',
+      value: 2,
+      isMissing: false,
+    }],
+    'live',
+    { collectedAt: 1785924000000 },
+    { lastSuccessAt: new Date('2026-08-05T10:00:00Z') },
+  ), { upserted: 1 });
+
+  assert.equal(queries[0].sql, 'BEGIN');
+  assert.match(queries[1].sql, /INSERT INTO raw_measurements/);
+  assert.match(queries[2].sql, /INSERT INTO fusionsolar_sync_state/);
+  assert.equal(queries[3].sql, 'COMMIT');
+  assert.equal(released, true);
+});
+
+test('measurement and checkpoint transaction rolls back on checkpoint failure', async () => {
+  const statements = [];
+  const client = {
+    async query(sql) {
+      statements.push(sql);
+      if (/INSERT INTO fusionsolar_sync_state/.test(sql)) {
+        throw new Error('checkpoint failed');
+      }
+      return { rows: [], rowCount: 1 };
+    },
+    release() {},
+  };
+  const pool = {
+    async connect() {
+      return client;
+    },
+    async query() {
+      throw new Error('unexpected pool query');
+    },
+    async end() {},
+  };
+  const store = createFusionSolarStore({ pool, cipher: fakeCipher() });
+
+  await assert.rejects(
+    store.saveMeasurementsAndCheckpoint(
+      [{
+        source: 'HUAWEI:plant-1',
+        metric: 'huawei.plant.daily_yield_kwh',
+        ts: '2026-08-05T10:00:00Z',
+        value: 2,
+        isMissing: false,
+      }],
+      'live',
+      { collectedAt: 1785924000000 },
+    ),
+    /checkpoint failed/,
+  );
+  assert.equal(statements.at(-1), 'ROLLBACK');
+  assert.equal(statements.includes('COMMIT'), false);
+});
+
 test('PostgreSQL integration preserves nonce and measurement idempotency', {
   skip: !process.env.TEST_DATABASE_URL,
 }, async () => {
@@ -429,8 +580,20 @@ test('PostgreSQL integration preserves nonce and measurement idempotency', {
       },
     ]), { upserted: 2 });
 
-    await store.setCheckpoint(syncKey, { cursor: 'complete' });
+    assert.deepEqual(await store.saveMeasurementsAndCheckpoint(
+      [{
+        ...measurement,
+        metric: 'huawei.plant.transactional_yield_kwh',
+        value: 22,
+      }],
+      syncKey,
+      { cursor: 'complete' },
+      { lastSuccessAt: new Date('2026-08-05T10:00:00Z') },
+    ), { upserted: 1 });
     assert.deepEqual(await store.getCheckpoint(syncKey), { cursor: 'complete' });
+    assert.equal((await store.getSyncState(syncKey)).lastError, null);
+    assert.equal((await store.listPlants()).some((plant) => plant.plantCode === plantCode), true);
+    assert.equal((await store.listDevices()).some((device) => device.deviceId === deviceId), true);
 
     const { rows } = await pool.query(
       `SELECT count(*)::integer AS count, max(value) AS value

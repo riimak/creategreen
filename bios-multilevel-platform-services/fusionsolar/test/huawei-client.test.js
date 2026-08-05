@@ -231,6 +231,56 @@ test('honors Retry-After once before retrying a throttled API request', async ()
   assert.deepEqual(sleeps, [2000]);
 });
 
+test('exposes sanitized retry metadata after repeated API throttling', async () => {
+  const client = createHuaweiClient({
+    config: config(),
+    store: memoryStore(authorizedCredentials()),
+    fetchImpl: async () => new Response('', {
+      status: 429,
+      headers: { 'Retry-After': '90' },
+    }),
+    now: () => NOW,
+    sleep: async () => {},
+  });
+
+  await assert.rejects(
+    client.request('/rest/openapi/pvms/nbi/v1/device/history'),
+    (error) => {
+      assert.equal(error.status, 429);
+      assert.equal(error.retryAfterMs, 90_000);
+      assert.equal(error.permanent, false);
+      assert.doesNotMatch(error.message, /access|refresh|secret/i);
+      return true;
+    },
+  );
+});
+
+test('can disable transient retries for one-call backfill steps', async () => {
+  let calls = 0;
+  const client = createHuaweiClient({
+    config: config(),
+    store: memoryStore(authorizedCredentials()),
+    fetchImpl: async () => {
+      calls += 1;
+      return new Response('', { status: 503 });
+    },
+    now: () => NOW,
+    sleep: async () => {
+      throw new Error('must not sleep');
+    },
+  });
+
+  await assert.rejects(
+    client.request('/rest/openapi/pvms/nbi/v1/device/history', {
+      method: 'POST',
+      body: '{}',
+      retryTransient: false,
+    }),
+    (error) => error.status === 503 && error.permanent === false,
+  );
+  assert.equal(calls, 1);
+});
+
 test('retries API requests with supported replayable body types', async () => {
   const form = new FormData();
   form.set('field', 'value');

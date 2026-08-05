@@ -40,6 +40,8 @@ production-dashboard:
       optional: true
     - job: production-blockchain
       optional: true
+    - job: production-fusionsolar
+      optional: true
   rules:
     - !reference [.production, rules]
     - when: on_success
@@ -101,6 +103,58 @@ production-prediction:
       if [ -z "${BIOS_USERNAME:-}" ] || [ -z "${BIOS_PASSWORD:-}" ]; then
         echo "WARN: BIOS_USERNAME/BIOS_PASSWORD not set as CI variables; Mars2 ingest will be OFF."
       fi
+  rules:
+    - !reference [.production, rules]
+    - when: on_success
+
+# ─── FusionSolar (Node API, internal only) ───
+build-fusionsolar:
+  extends: .build
+  variables:
+    TARGET_APP: fusionsolar
+    DOCKERFILE_PATH: bios-multilevel-platform-services/fusionsolar/Dockerfile
+    APPLICATION_IMAGE_NAME_TAG: fusionsolar
+  rules:
+    - !reference [.build, rules]
+    - when: on_success
+
+production-fusionsolar:
+  extends: .production
+  stage: deploy
+  resource_group: bios-multilevel-production
+  variables:
+    TARGET_APP: fusionsolar
+    APPLICATION_IMAGE_NAME_TAG: fusionsolar
+    HELM_RELEASE_PREFIX: bios-fusionsolar
+  environment:
+    name: production/fusionsolar
+  needs:
+    - job: build-fusionsolar
+      optional: true
+  before_script:
+    - |
+      set -e
+      VALUES_FILE="bios-multilevel-platform-services/fusionsolar/.gitlab/auto-deploy-values.yaml"
+      FUSIONSOLAR_FORWARD_ENVS="\
+        FUSIONSOLAR_CLIENT_ID FUSIONSOLAR_CLIENT_SECRET \
+        FUSIONSOLAR_SETUP_TOKEN FUSIONSOLAR_TOKEN_ENCRYPTION_KEY \
+        FUSIONSOLAR_API_BASE_URL FUSIONSOLAR_OAUTH_BASE_URL \
+        FUSIONSOLAR_REDIRECT_URI FUSIONSOLAR_LIVE_INTERVAL_SECONDS \
+        FUSIONSOLAR_INVENTORY_INTERVAL_SECONDS FUSIONSOLAR_REQUEST_TIMEOUT_SECONDS \
+        FUSIONSOLAR_BACKFILL_ENABLED"
+      for name in $FUSIONSOLAR_FORWARD_ENVS; do
+        value="${!name:-}"
+        if [ -n "$value" ]; then
+          sed -i "/^  - name: ${name}$/,+1d" "$VALUES_FILE"
+          {
+            echo "  - name: $name"
+            echo "    value: \"$value\""
+          } >> "$VALUES_FILE"
+          echo "Forwarded CI variable $name"
+        else
+          echo "Skipped CI variable $name: not set"
+        fi
+      done
   rules:
     - !reference [.production, rules]
     - when: on_success

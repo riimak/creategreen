@@ -1,5 +1,4 @@
-# Dashboard — Deno HTTP + ingress (operations UI).
-# See template: devops/ci-template monorepo (.gitlab per app under MONOREPO_TARGET_DIR).
+# FusionSolar service — internal ClusterIP only (no public ingress).
 replicaCount: 1
 strategyType: "RollingUpdate"
 
@@ -20,23 +19,16 @@ barrage:
 
 service:
   enabled: true
-  name: bios-mlevel
+  name: bios-fusionsolar
   type: ClusterIP
-  externalPort: 8000
-  internalPort: 8000
+  externalPort: 8093
+  internalPort: 8093
 
 ingress:
-  enabled: true
+  enabled: false
   path: "/"
-  # Required for cert-manager to create the TLS secret (avoids "failed to determine issuer" on the ingress).
-  # Must match a ClusterIssuer in the cluster: kubectl get clusterissuer
-  annotations:
-    cert-manager.io/cluster-issuer: barrage-prod
   tls:
-    enabled: true
-    acme: true
-    secretName: ""
-    useDefaultSecret: false
+    enabled: false
 
 livenessProbe:
   path: "/health"
@@ -44,7 +36,6 @@ livenessProbe:
   timeoutSeconds: 5
   scheme: "HTTP"
   probeType: "httpGet"
-  httpHeaders: []
 
 readinessProbe:
   path: "/health"
@@ -52,7 +43,6 @@ readinessProbe:
   timeoutSeconds: 5
   scheme: "HTTP"
   probeType: "httpGet"
-  httpHeaders: []
 
 startupProbe:
   enabled: true
@@ -63,14 +53,13 @@ startupProbe:
   periodSeconds: 5
   scheme: "HTTP"
   probeType: "httpGet"
-  httpHeaders: []
 
 resources:
   limits:
-    cpu: 200m
+    cpu: 500m
     memory: 256Mi
   requests:
-    cpu: 50m
+    cpu: 100m
     memory: 128Mi
 
 postgresql:
@@ -78,6 +67,16 @@ postgresql:
 
 persistence:
   enabled: false
+
+extraVolumes:
+  - name: pg-ca
+    secret:
+      secretName: bios-pg-ca
+      optional: true
+extraVolumeMounts:
+  - name: pg-ca
+    mountPath: /etc/ssl/pg
+    readOnly: true
 
 serviceAccount:
   name: bios-multilevel-sa
@@ -90,13 +89,22 @@ podDisruptionBudget:
 networkPolicy:
   enabled: false
 
-# Upstream APIs (same K8s namespace). Hostnames must match `kubectl get svc` (e.g. …-barrage-autodeploy).
 extraEnv:
-  - name: PREDICTION_SERVICE_URL
-    value: "http://bios-prediction-production-barrage-autodeploy:8091"
-  - name: BLOCKCHAIN_SERVICE_URL
-    value: "http://bios-blockchain-production-barrage-autodeploy:8092"
-  - name: FUSIONSOLAR_SERVICE_URL
-    value: "http://bios-fusionsolar-production-barrage-autodeploy:8093"
-  - name: DASHBOARD_EVENT_POLL_SECONDS
-    value: "3"
+  - name: FUSIONSOLAR_PORT
+    value: "8093"
+  - name: FUSIONSOLAR_OAUTH_BASE_URL
+    value: "https://oauth2.fusionsolar.huawei.com"
+  - name: FUSIONSOLAR_API_BASE_URL
+    value: ""
+  - name: FUSIONSOLAR_REDIRECT_URI
+    value: "https://bios-multilevel.barrage.net/oauth/fusionsolar/callback"
+  - name: FUSIONSOLAR_LIVE_INTERVAL_SECONDS
+    value: "300"
+  - name: FUSIONSOLAR_INVENTORY_INTERVAL_SECONDS
+    value: "3600"
+  - name: FUSIONSOLAR_REQUEST_TIMEOUT_SECONDS
+    value: "20"
+  - name: FUSIONSOLAR_BACKFILL_ENABLED
+    value: "true"
+  - name: DATABASE_CA_FILE
+    value: "/etc/ssl/pg/ca.crt"

@@ -231,6 +231,40 @@ test('honors Retry-After once before retrying a throttled API request', async ()
   assert.deepEqual(sleeps, [2000]);
 });
 
+test('uses documented sixty-second fallback for 429 without Retry-After', async () => {
+  const sleeps = [];
+  const client = createHuaweiClient({
+    config: config(),
+    store: memoryStore(authorizedCredentials()),
+    fetchImpl: async () => new Response('', { status: 429 }),
+    now: () => NOW,
+    sleep: async (milliseconds) => sleeps.push(milliseconds),
+  });
+
+  await assert.rejects(
+    client.request('/rest/openapi/pvms/v1/plants'),
+    (error) => error.status === 429 && error.retryAfterMs === 60_000,
+  );
+  assert.deepEqual(sleeps, [60_000]);
+});
+
+test('keeps the short fallback for 5xx without Retry-After', async () => {
+  const sleeps = [];
+  const client = createHuaweiClient({
+    config: config(),
+    store: memoryStore(authorizedCredentials()),
+    fetchImpl: async () => new Response('', { status: 503 }),
+    now: () => NOW,
+    sleep: async (milliseconds) => sleeps.push(milliseconds),
+  });
+
+  await assert.rejects(
+    client.request('/rest/openapi/pvms/v1/plants'),
+    (error) => error.status === 503 && error.retryAfterMs === 1000,
+  );
+  assert.deepEqual(sleeps, [1000]);
+});
+
 test('exposes sanitized retry metadata after repeated API throttling', async () => {
   const client = createHuaweiClient({
     config: config(),

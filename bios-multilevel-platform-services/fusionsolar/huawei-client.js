@@ -226,7 +226,7 @@ function createHuaweiClient({
         return Math.max(0, at - currentTime().getTime());
       }
     }
-    return 1000;
+    return response.status === 429 ? 60_000 : 1000;
   }
 
   return {

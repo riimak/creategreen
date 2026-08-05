@@ -15,13 +15,21 @@ function jsonResponse(payload, { status = 200, headers = {} } = {}) {
   });
 }
 
-function createStore({ checkpoints = new Map() } = {}) {
-  const devices = [{
+function createStore({
+  checkpoints = new Map(),
+  devices = [{
     deviceId: '101',
     plantCode: 'NE=PLANT-1',
     deviceType: '1',
     metadata: { devDn: 'NE=DEVICE-101' },
-  }];
+  }],
+  plants = [{
+    plantCode: 'NE=PLANT-1',
+    sourceKey: 'HUAWEI:NE=PLANT-1',
+    visible: true,
+  }],
+  getSyncState,
+} = {}) {
   const transactions = [];
   return {
     checkpoints,
@@ -29,11 +37,7 @@ function createStore({ checkpoints = new Map() } = {}) {
     async upsertPlants() {},
     async upsertDevices() {},
     async listPlants() {
-      return [{
-        plantCode: 'NE=PLANT-1',
-        sourceKey: 'HUAWEI:NE=PLANT-1',
-        visible: true,
-      }];
+      return structuredClone(plants);
     },
     async listDevices() {
       return structuredClone(devices);
@@ -42,6 +46,7 @@ function createStore({ checkpoints = new Map() } = {}) {
       return structuredClone(checkpoints.get(key) || null);
     },
     async getSyncState(key) {
+      if (getSyncState) return getSyncState(key);
       const checkpoint = checkpoints.get(key);
       return checkpoint ? { checkpoint: structuredClone(checkpoint), backoffUntil: null } : null;
     },
@@ -232,7 +237,106 @@ test('flow control honors Retry-After, persists backoff, and survives restart', 
   });
   const skipped = await restarted.runBackfillStep();
   assert.equal(skipped.state, 'backoff');
+  assert.equal(skipped.retryAt, '2026-08-05T10:01:30.000Z');
   assert.equal(requests, 1);
+});
+
+test('candidate selection skips backed-off devices and chooses another unfinished device', async () => {
+  const now = Date.parse('2026-08-05T10:00:00Z');
+  const devices = [
+    {
+      deviceId: '101',
+      plantCode: 'NE=PLANT-1',
+      deviceType: '1',
+      metadata: { devDn: 'NE=DEVICE-101' },
+    },
+    {
+      deviceId: '202',
+      plantCode: 'NE=PLANT-1',
+      deviceType: '1',
+      metadata: { devDn: 'NE=DEVICE-202' },
+    },
+  ];
+  const store = createStore({
+    devices,
+    checkpoints: new Map([
+      ['backfill:device:101', {
+        before: now,
+        reachedBoundary: false,
+        backoffUntil: '2026-08-05T10:05:00.000Z',
+      }],
+      ['backfill:device:202', { before: now, reachedBoundary: false }],
+    ]),
+  });
+  let requestedDevice;
+  const synchronizer = createSynchronizer({
+    store,
+    now: () => new Date(now),
+    client: {
+      async request(_path, options) {
+        requestedDevice = JSON.parse(options.body).devDn;
+        return jsonResponse(historyPayload({ devDn: requestedDevice }, []));
+      },
+    },
+  });
+
+  const result = await synchronizer.runBackfillStep();
+
+  assert.equal(requestedDevice, 'NE=DEVICE-202');
+  assert.equal(result.state, 'complete');
+});
+
+test('all backed-off candidates return the earliest retry time without HTTP', async () => {
+  const now = Date.parse('2026-08-05T10:00:00Z');
+  const devices = [
+    {
+      deviceId: '101',
+      plantCode: 'NE=PLANT-1',
+      deviceType: '1',
+      metadata: { devDn: 'NE=DEVICE-101' },
+    },
+    {
+      deviceId: '202',
+      plantCode: 'NE=PLANT-1',
+      deviceType: '1',
+      metadata: { devDn: 'NE=DEVICE-202' },
+    },
+  ];
+  const store = createStore({
+    devices,
+    checkpoints: new Map([
+      ['backfill:device:101', {
+        before: now,
+        reachedBoundary: false,
+        backoffUntil: '2026-08-05T10:05:00.000Z',
+      }],
+      ['backfill:device:202', {
+        before: now,
+        reachedBoundary: false,
+        backoffUntil: '2026-08-05T10:02:00.000Z',
+      }],
+    ]),
+  });
+  let requests = 0;
+  const synchronizer = createSynchronizer({
+    store,
+    now: () => new Date(now),
+    client: {
+      async request() {
+        requests += 1;
+        throw new Error('must not request history');
+      },
+    },
+  });
+
+  assert.deepEqual(await synchronizer.runBackfillStep(), {
+    state: 'backoff',
+    nextBefore: null,
+    rows: 0,
+    reachedBoundary: false,
+    retryAt: '2026-08-05T10:02:00.000Z',
+  });
+  assert.equal(requests, 0);
 });
 
 test('backfill has no fixed cutoff and live work preempts it', async () => {
@@ -312,4 +416,137 @@ test('backfill has no fixed cutoff and live work preempts it', async () => {
   const oldHistory = await synchronizer.runBackfillStep();
   assert.equal(historyCalls, 1);
   assert.equal(oldHistory.reachedBoundary, true);
+});
+
+test('live preempts backfill while candidate checkpoint work is pending', async () => {
+  const now = Date.parse('2026-08-05T10:00:00Z');
+  let releaseCandidate;
+  let candidateStarted;
+  const candidatePending = new Promise((resolve) => { releaseCandidate = resolve; });
+  const candidateStart = new Promise((resolve) => { candidateStarted = resolve; });
+  const store = createStore({
+    checkpoints: new Map([[
+      'inventory',
+      {
+        refreshedAt: '2026-08-05T09:30:00.000Z',
+        plants: [{
+          plantCode: 'NE=PLANT-1',
+          sourceKey: 'HUAWEI:NE=PLANT-1',
+          visible: true,
+        }],
+      },
+    ]]),
+    async getSyncState() {
+      candidateStarted();
+      await candidatePending;
+      return null;
+    },
+  });
+  let historyCalls = 0;
+  const client = {
+    async request(path, options) {
+      if (path === PLANT_REALTIME_PATH) {
+        return jsonResponse({
+          success: true,
+          failCode: 0,
+          params: { currentTime: now },
+          data: [{
+            stationCode: 'NE=PLANT-1',
+            dataItemMap: { day_power: 1 },
+          }],
+        });
+      }
+      if (path === '/thirdData/getDevRealKpi') {
+        return jsonResponse({
+          success: true,
+          failCode: 0,
+          params: { currentTime: now },
+          data: [{ devId: 101, dataItemMap: { active_power: 2 } }],
+        });
+      }
+      historyCalls += 1;
+      return jsonResponse(historyPayload(JSON.parse(options.body), []));
+    },
+  };
+  const synchronizer = createSynchronizer({
+    client,
+    store,
+    config: { inventoryIntervalMs: DAY_MS },
+    now: () => new Date(now),
+  });
+
+  const backfill = synchronizer.runBackfillStep();
+  await candidateStart;
+  await synchronizer.runLiveCycle();
+  releaseCandidate();
+
+  assert.equal((await backfill).state, 'live_pending');
+  assert.equal(historyCalls, 0);
+});
+
+test('HTTP 429 without Retry-After backs off for sixty seconds but 503 uses short fallback', async () => {
+  const now = Date.parse('2026-08-05T10:00:00Z');
+  for (const [status, expectedBackoff] of [
+    [429, '2026-08-05T10:01:00.000Z'],
+    [503, '2026-08-05T10:00:01.000Z'],
+  ]) {
+    const store = createStore();
+    const synchronizer = createSynchronizer({
+      store,
+      now: () => new Date(now),
+      client: {
+        async request() {
+          return jsonResponse({}, { status });
+        },
+      },
+    });
+
+    assert.equal((await synchronizer.runBackfillStep()).state, 'backoff');
+    assert.equal(
+      store.checkpoints.get('backfill:device:101').backoffUntil,
+      expectedBackoff,
+    );
+  }
+});
+
+test('malformed historical records return sanitized skipped diagnostics and advance', async () => {
+  const now = Date.parse('2026-08-05T10:00:00Z');
+  const rawSecret = 'raw-history-secret';
+  const store = createStore();
+  const synchronizer = createSynchronizer({
+    store,
+    now: () => new Date(now),
+    client: {
+      async request(_path, options) {
+        const body = JSON.parse(options.body);
+        return jsonResponse({
+          success: true,
+          failCode: 0,
+          data: [
+            {
+              devDn: body.devDn,
+              collectTime: body.startTime,
+              dataItems: null,
+              raw: rawSecret,
+            },
+            {
+              devDn: body.devDn,
+              collectTime: 9e15,
+              dataItems: { active_power: 1, raw: rawSecret },
+            },
+          ],
+        });
+      },
+    },
+  });
+
+  const result = await synchronizer.runBackfillStep();
+
+  assert.equal(result.state, 'progress');
+  assert.equal(result.nextBefore, now - DAY_MS);
+  assert.deepEqual(result.skipped, [
+    { scope: 'device:101', index: 0, reason: 'invalid_record' },
+    { scope: 'device:101', index: 1, reason: 'invalid_record' },
+  ]);
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(rawSecret));
 });

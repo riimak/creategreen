@@ -75,6 +75,14 @@ const REGISTRY = Object.freeze({
       'daily_use_energy',
       'huawei.plant.daily_consumption_kwh',
     ),
+    day_on_grid_energy: plantEntry(
+      'day_on_grid_energy',
+      'huawei.plant.daily_on_grid_energy_kwh',
+    ),
+    day_use_energy: plantEntry(
+      'day_use_energy',
+      'huawei.plant.daily_consumption_kwh',
+    ),
   }),
   '1': Object.freeze({
     active_power: inverterEntry(
@@ -237,6 +245,7 @@ function normalizeKpis({
   const measurements = [];
   const skipped = [];
   for (const [field, rawValue] of Object.entries(payload)) {
+    if (shadowedPlantAlias(deviceType, field, payload)) continue;
     const mapping = mappings[field];
     const numericValue = finiteNumber(rawValue);
     if (!mapping || numericValue == null) {
@@ -257,6 +266,17 @@ function normalizeKpis({
     });
   }
   return { measurements, skipped };
+}
+
+function shadowedPlantAlias(deviceType, field, payload) {
+  if (String(deviceType) !== 'plant') return false;
+  const preferred = {
+    day_on_grid_energy: 'daily_on_grid_energy',
+    day_use_energy: 'daily_use_energy',
+  }[field];
+  return preferred
+    ? Object.prototype.hasOwnProperty.call(payload, preferred)
+    : false;
 }
 
 function finiteNumber(value) {

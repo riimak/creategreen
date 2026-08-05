@@ -84,7 +84,32 @@ test('maps only documented Huawei 26.1 plant yield fields', () => {
   assert.equal(REGISTRY.plant.day_power.verified, true);
 });
 
-test('maps exact Huawei 26.1 daily grid and use energy fields in kWh', () => {
+test('maps both documented Huawei 26.1 plant energy aliases in kWh', () => {
+  for (const prefix of ['daily', 'day']) {
+    const result = normalizeKpis({
+      source: 'HUAWEI:NE=12345678',
+      deviceType: 'plant',
+      timestamp: 1785924000000,
+      payload: {
+        [`${prefix}_on_grid_energy`]: '9500.12',
+        [`${prefix}_use_energy`]: 500.41,
+      },
+    });
+
+    assert.deepEqual(
+      result.measurements.map(({ metric, value }) => ({ metric, value })),
+      [
+        { metric: 'huawei.plant.daily_on_grid_energy_kwh', value: 9500.12 },
+        { metric: 'huawei.plant.daily_consumption_kwh', value: 500.41 },
+      ],
+    );
+    assert.deepEqual(result.skipped, []);
+  }
+  assert.equal(REGISTRY.plant.day_on_grid_energy.sourceUnit, 'kWh');
+  assert.equal(REGISTRY.plant.day_use_energy.destinationUnit, 'kWh');
+});
+
+test('daily plant energy fields deterministically take precedence over day aliases', () => {
   const result = normalizeKpis({
     source: 'HUAWEI:NE=12345678',
     deviceType: 'plant',
@@ -113,15 +138,13 @@ test('maps exact Huawei 26.1 daily grid and use energy fields in kWh', () => {
       isMissing: false,
     },
   ]);
-  assert.deepEqual(result.skipped, ['day_on_grid_energy', 'day_use_energy']);
+  assert.deepEqual(result.skipped, []);
   assert.equal(REGISTRY.plant.daily_on_grid_energy.field, 'daily_on_grid_energy');
   assert.equal(REGISTRY.plant.daily_on_grid_energy.sourceUnit, 'kWh');
   assert.equal(REGISTRY.plant.daily_on_grid_energy.destinationUnit, 'kWh');
   assert.equal(REGISTRY.plant.daily_use_energy.field, 'daily_use_energy');
   assert.equal(REGISTRY.plant.daily_use_energy.sourceUnit, 'kWh');
   assert.equal(REGISTRY.plant.daily_use_energy.destinationUnit, 'kWh');
-  assert.equal(REGISTRY.plant.day_on_grid_energy, undefined);
-  assert.equal(REGISTRY.plant.day_use_energy, undefined);
 });
 
 test('converts documented meter watts to kW without coercing invalid values', () => {

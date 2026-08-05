@@ -18,7 +18,8 @@ const DEFAULT_INVENTORY_PAGE_CAP = 1000;
 const DEFAULT_INVENTORY_INTERVAL_MS = 60 * 60_000;
 const DEFAULT_BACKFILL_WINDOW_MS = 24 * 60 * 60_000;
 const MIN_BACKFILL_WINDOW_MS = 5 * 60_000;
-const DEFAULT_TRANSIENT_BACKOFF_MS = 60_000;
+const DEFAULT_TRANSIENT_BACKOFF_MS = 1000;
+const DEFAULT_THROTTLE_BACKOFF_MS = 60_000;
 
 function createSynchronizer({
   client,
@@ -400,17 +401,32 @@ function createSynchronizer({
 
   function runBackfillStep() {
     if (backfillRun) return backfillRun;
-    backfillRun = doBackfillStep().finally(() => {
+    const controller = new AbortController();
+    backfillAbort = controller;
+    backfillRun = doBackfillStep(controller).finally(() => {
+      if (backfillAbort === controller) backfillAbort = null;
       backfillRun = null;
     });
     return backfillRun;
   }
 
-  async function doBackfillStep() {
+  async function doBackfillStep(controller) {
     requireIngestionStore(store);
     const devices = await eligibleBackfillDevices(store);
-    const candidate = await nextBackfillCandidate(devices);
+    if (controller.signal.aborted) {
+      return backfillResult('live_pending', null, 0, false);
+    }
+    const selection = await nextBackfillCandidate(devices);
+    if (controller.signal.aborted) {
+      return backfillResult('live_pending', null, 0, false);
+    }
+    const { candidate } = selection;
     if (!candidate) {
+      if (selection.retryAt) {
+        return backfillResult('backoff', null, 0, false, {
+          retryAt: selection.retryAt,
+        });
+      }
       return backfillResult('complete', null, 0, true);
     }
     const { device, plant, key, checkpoint } = candidate;
@@ -431,8 +447,6 @@ function createSynchronizer({
       'backfill checkpoint windowMs',
     );
     const startTime = before - windowMs;
-    const controller = new AbortController();
-    backfillAbort = controller;
     let response;
     try {
       response = await requestJson(
@@ -487,8 +501,6 @@ function createSynchronizer({
         reachedBoundary: false,
       }, { lastError: 'historical request failed' });
       return backfillResult('error', before, 0, false);
-    } finally {
-      if (backfillAbort === controller) backfillAbort = null;
     }
 
     const { payload } = response;
@@ -503,7 +515,9 @@ function createSynchronizer({
     }
 
     const measurements = [];
-    for (const record of payload.data) {
+    const skipped = [];
+    for (let index = 0; index < payload.data.length; index += 1) {
+      const record = payload.data[index];
       if (
         record?.devDn !== device.metadata.devDn
         || !Number.isFinite(Number(record.collectTime))
@@ -511,6 +525,7 @@ function createSynchronizer({
         || typeof record.dataItems !== 'object'
         || Array.isArray(record.dataItems)
       ) {
+        skipped.push(invalidRecordDiagnostic(`device:${device.deviceId}`, { index }));
         continue;
       }
       try {
@@ -521,7 +536,7 @@ function createSynchronizer({
           payload: record.dataItems,
         }).measurements);
       } catch {
-        // A malformed historical sample does not discard valid samples.
+        skipped.push(invalidRecordDiagnostic(`device:${device.deviceId}`, { index }));
       }
     }
     const reachedBoundary = payload.data.length === 0;
@@ -547,6 +562,7 @@ function createSynchronizer({
       startTime,
       measurements.length,
       reachedBoundary,
+      skipped.length > 0 ? { skipped } : undefined,
     );
   }
 
@@ -558,6 +574,8 @@ function createSynchronizer({
   }
 
   async function nextBackfillCandidate(devices) {
+    let retryAt = null;
+    let retryAtMs = Infinity;
     for (const { device, plant } of devices) {
       const key = `backfill:device:${device.deviceId}`;
       const state = typeof store.getSyncState === 'function'
@@ -565,19 +583,29 @@ function createSynchronizer({
         : null;
       const checkpoint = state?.checkpoint || await store.getCheckpoint(key) || {};
       if (!checkpoint.reachedBoundary) {
-        return {
+        const candidateCheckpoint = {
+          ...checkpoint,
+          backoffUntil: checkpoint.backoffUntil
+            || timestampString(state?.backoffUntil),
+        };
+        if (isBackoffActive(candidateCheckpoint.backoffUntil, currentTime())) {
+          const candidateRetryAt = timestampString(candidateCheckpoint.backoffUntil);
+          const candidateRetryAtMs = Date.parse(candidateRetryAt);
+          if (candidateRetryAtMs < retryAtMs) {
+            retryAt = candidateRetryAt;
+            retryAtMs = candidateRetryAtMs;
+          }
+          continue;
+        }
+        return { candidate: {
           device,
           plant,
           key,
-          checkpoint: {
-            ...checkpoint,
-            backoffUntil: checkpoint.backoffUntil
-              || timestampString(state?.backoffUntil),
-          },
-        };
+          checkpoint: candidateCheckpoint,
+        }, retryAt: null };
       }
     }
-    return null;
+    return { candidate: null, retryAt };
   }
 
   async function status() {
@@ -718,7 +746,11 @@ function retryDelayMs(error) {
   if (Number.isFinite(error?.retryAfterMs) && error.retryAfterMs >= 0) {
     return error.retryAfterMs;
   }
-  return error?.failCode === 407 ? 5 * 60_000 : DEFAULT_TRANSIENT_BACKOFF_MS;
+  if (error?.failCode === 407) return 5 * 60_000;
+  if (error?.failCode === 429 || error?.status === 429) {
+    return DEFAULT_THROTTLE_BACKOFF_MS;
+  }
+  return DEFAULT_TRANSIENT_BACKOFF_MS;
 }
 
 function liveFailure(error, scope, now) {
@@ -755,8 +787,14 @@ function isBackoffActive(value, now) {
   return Number.isFinite(timestamp) && timestamp > now.getTime();
 }
 
-function backfillResult(state, nextBefore, rows, reachedBoundary) {
-  return { state, nextBefore, rows, reachedBoundary };
+function backfillResult(state, nextBefore, rows, reachedBoundary, details) {
+  return {
+    state,
+    nextBefore,
+    rows,
+    reachedBoundary,
+    ...(details || {}),
+  };
 }
 
 async function eligibleBackfillDevices(store) {

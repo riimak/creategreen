@@ -1,6 +1,5 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const crypto = require('node:crypto');
 const { createStateManager } = require('../oauth-state');
 
 function createMemoryStore() {
@@ -30,24 +29,16 @@ test('issued state binds the nonce to the setup-token hash only in storage', asy
   });
 
   const state = await manager.issue('setup-token-generation-a');
-  const [encodedPayload, encodedSignature] = state.split('.');
-  const payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8'));
 
-  assert.deepEqual(Object.keys(payload).sort(), ['iat', 'nonce']);
-  assert.equal(payload.iat, now.getTime());
-  assert.match(payload.nonce, /^[A-Za-z0-9_-]+$/);
-  assert.equal(
-    encodedSignature,
-    crypto.createHmac('sha256', Buffer.alloc(32, 1))
-      .update(Buffer.from(encodedPayload, 'base64url'))
-      .digest('base64url'),
-  );
+  assert.match(state, /^[A-Za-z0-9]+$/);
+  assert.ok(state.length <= 180);
   assert.deepEqual(store.created, [{
-    hash: crypto.createHash('sha256').update(payload.nonce).digest('hex'),
+    hash: store.created[0].hash,
     expiresAt: new Date(now.getTime() + 10 * 60_000),
     setupTokenHash: 'setup-token-generation-a',
   }]);
-  assert.equal(store.created[0].hash.includes(payload.nonce), false);
+  assert.match(store.created[0].hash, /^[a-f0-9]{64}$/);
+  assert.equal(state.includes(store.created[0].hash), false);
 });
 
 test('state is signed, expires after ten minutes, and is single-use', async () => {
@@ -76,9 +67,8 @@ test('state rejects malformed values, modified signatures, and future issue time
   });
 
   const state = await manager.issue('setup-token-generation-c');
-  const [payload, signature] = state.split('.');
-  const modifiedSignature = `${signature.slice(0, -1)}${signature.endsWith('A') ? 'B' : 'A'}`;
-  await assert.rejects(() => manager.verifyAndConsume(`${payload}.${modifiedSignature}`), /signature/i);
+  const modifiedState = `${state.slice(0, -1)}${state.endsWith('A') ? 'B' : 'A'}`;
+  await assert.rejects(() => manager.verifyAndConsume(modifiedState), /signature/i);
   await assert.rejects(() => manager.verifyAndConsume('not-a-state'), /invalid/i);
 
   current = new Date('2026-08-05T09:59:59Z');

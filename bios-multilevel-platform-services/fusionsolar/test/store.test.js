@@ -792,7 +792,6 @@ test('PostgreSQL allows only one completion from two valid pre-issued OAuth stat
   });
   const setupToken = `concurrent-setup-${process.pid}-${Date.now()}`;
   const setupTokenHash = crypto.createHash('sha256').update(setupToken).digest('hex');
-  const nonceHashes = [];
   let arrivals = 0;
   let releaseExchanges;
   const exchangesReady = new Promise((resolve) => {
@@ -850,10 +849,6 @@ test('PostgreSQL allows only one completion from two valid pre-issued OAuth stat
       stateManager.issue(setupTokenHash),
       stateManager.issue(setupTokenHash),
     ]);
-    for (const state of states) {
-      const payload = JSON.parse(Buffer.from(state.split('.')[0], 'base64url').toString('utf8'));
-      nonceHashes.push(crypto.createHash('sha256').update(payload.nonce).digest('hex'));
-    }
 
     const results = await Promise.all([
       integration.completeCallback(new URLSearchParams({ state: states[0], code: 'code-a' })),
@@ -874,12 +869,10 @@ test('PostgreSQL allows only one completion from two valid pre-issued OAuth stat
       'DELETE FROM fusionsolar_setup_tokens WHERE token_hash = $1',
       [setupTokenHash],
     );
-    if (nonceHashes.length > 0) {
-      await pool.query(
-        'DELETE FROM fusionsolar_oauth_nonces WHERE nonce_hash = ANY($1)',
-        [nonceHashes],
-      );
-    }
+    await pool.query(
+      'DELETE FROM fusionsolar_oauth_nonces WHERE setup_token_hash = $1',
+      [setupTokenHash],
+    );
     await store.close();
   }
 });

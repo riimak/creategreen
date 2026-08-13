@@ -218,6 +218,32 @@ main{
   0%   { transform:translateX(-100%); }
   100% { transform:translateX(380%);  }
 }
+[data-load-panel]{position:relative}
+.panel-load-status{
+  position:absolute;inset:0;z-index:3;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:8px;padding:14px;
+  color:var(--muted);background:var(--card);text-align:center;
+  font-size:12px;line-height:1.4;
+}
+.tile .panel-load-status{background:var(--inset);border-radius:9px}
+.panel-load-status[hidden]{display:none}
+.panel-load-skeleton{
+  width:min(128px,60%);height:7px;border-radius:999px;background:var(--border);
+  animation:panel-loading-pulse 1.4s var(--ease) infinite;
+}
+.panel-load-status[data-state="error"]{color:var(--red)}
+.panel-load-status[data-state="error"] .panel-load-skeleton{display:none}
+.panel-load-retry{
+  border:1px solid var(--border);border-radius:7px;padding:5px 9px;
+  background:var(--inset);color:var(--accent);font:600 11px/1.2 'Inter',sans-serif;
+  cursor:pointer;
+}
+.panel-load-retry:hover{border-color:var(--accent);background:var(--card)}
+.panel-load-retry:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@keyframes panel-loading-pulse{
+  0%,100%{opacity:.45;transform:scaleX(.94)}
+  50%{opacity:1;transform:scaleX(1)}
+}
 .card .head{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;min-height:20px}
 .card h2{font-size:13.5px;font-weight:600;letter-spacing:-0.005em}
 .card h3{font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--subtle);margin-bottom:6px}
@@ -584,6 +610,7 @@ main{
 @media(prefers-reduced-motion:reduce){
   .card.changed{transition-duration:.01ms}
   .card.loading::after{animation:none;opacity:.4}
+  .panel-load-skeleton{animation:none;opacity:.65}
   header.app .live .dot.on,.pill.ok::before{animation:none!important}
 }
 
@@ -816,16 +843,21 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
       <div class="meta meta-1" id="gridMeta1"><span class="skeleton" data-i18n="skeleton.awaiting_data">awaiting data</span></div>
       <div class="meta meta-2" id="gridMeta2"></div>
     </article>
-    <article class="tile" id="tileHealth">
+    <article class="tile" id="tileHealth" data-load-panel="health" aria-busy="true">
       <span class="label" data-i18n="tile.health.label">System health</span>
       <div class="head"><span class="name" data-i18n="tile.health.name">Services</span><span id="healthPill" class="pill" data-i18n="pill.checking">checking</span></div>
       <div class="meta meta-1" id="healthMeta1"><span class="skeleton" data-i18n="skeleton.first_cycle">awaiting first cycle</span></div>
       <div class="meta meta-2" id="healthMeta2"></div>
+      <div class="panel-load-status" id="healthLoadStatus" role="status" aria-live="polite" data-state="loading">
+        <span class="panel-load-skeleton" aria-hidden="true"></span>
+        <span class="panel-load-copy" data-i18n="loading.health">Loading service health…</span>
+        <button class="panel-load-retry" type="button" data-panel-retry="health" data-i18n="loading.retry" hidden>Retry</button>
+      </div>
     </article>
   </section>
 
   <!-- -- Energy hero card ---------------------------------- -->
-  <section class="card energy-card" id="cardEnergy" aria-label="Energy now">
+  <section class="card energy-card" id="cardEnergy" data-load-panel="energy" aria-busy="true" aria-label="Energy now">
     <div class="hero">
       <span class="hero-label" data-i18n="card.energy.label">Current production</span>
       <span class="hero-value" id="heroValue">--</span>
@@ -840,6 +872,11 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
     </div>
     <div class="sparkline-wrap"><canvas id="sparklineChart" aria-label="24h power sparkline"></canvas></div>
     <div class="plant-breakdown" id="plantBreakdown"></div>
+    <div class="panel-load-status" id="energyLoadStatus" role="status" aria-live="polite" data-state="loading">
+      <span class="panel-load-skeleton" aria-hidden="true"></span>
+      <span class="panel-load-copy" data-i18n="loading.energy">Loading latest production…</span>
+      <button class="panel-load-retry" type="button" data-panel-retry="energy" data-i18n="loading.retry" hidden>Retry</button>
+    </div>
   </section>
 
   <!-- ── Environment row (meteo context — always visible) ── -->
@@ -853,7 +890,7 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
   </section>
 
   <!-- -- Power chart card ---------------------------------- -->
-  <section class="card power-card" id="cardPower" aria-label="Power chart">
+  <section class="card power-card" id="cardPower" data-load-panel="power" aria-busy="true" aria-label="Power chart">
     <div class="head">
       <h2 data-i18n="card.power.title">Power (24h)</h2>
       <div class="meta" id="powerMeta"></div>
@@ -862,11 +899,16 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
       <div id="powerEmpty" class="chart-empty" hidden data-i18n="card.power.empty">nema mjerenja snage u zadnja 24h</div>
       <canvas id="powerChart" role="img" aria-label="Power chart"></canvas>
     </div>
+    <div class="panel-load-status" id="powerLoadStatus" role="status" aria-live="polite" data-state="loading">
+      <span class="panel-load-skeleton" aria-hidden="true"></span>
+      <span class="panel-load-copy" data-i18n="loading.power">Loading 24h power…</span>
+      <button class="panel-load-retry" type="button" data-panel-retry="power" data-i18n="loading.retry" hidden>Retry</button>
+    </div>
   </section>
 
   <!-- -- Side panel: compact forecast + ledger summary + alerts -- -->
   <div class="side">
-    <section class="card signal-compact" id="cardForecastCompact" aria-label="Forecast">
+    <section class="card signal-compact" id="cardForecastCompact" data-load-panel="forecast" aria-busy="true" aria-label="Forecast">
       <div class="head">
         <h2 data-i18n="card.forecast.title">Forecast</h2>
         <span id="predPill" class="pill" data-i18n="pill.checking">checking</span>
@@ -877,9 +919,14 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
         <canvas id="forecastChart" role="img" aria-label="Forecast chart"></canvas>
       </div>
       <div class="list" id="forecastMeta" style="margin-top:6px;font-size:11.5px"></div>
+      <div class="panel-load-status" id="forecastLoadStatus" role="status" aria-live="polite" data-state="loading">
+        <span class="panel-load-skeleton" aria-hidden="true"></span>
+        <span class="panel-load-copy" data-i18n="loading.forecast">Loading forecast…</span>
+        <button class="panel-load-retry" type="button" data-panel-retry="forecast" data-i18n="loading.retry" hidden>Retry</button>
+      </div>
     </section>
 
-    <section class="card" id="cardLedgerSummary" aria-label="Audit summary">
+    <section class="card" id="cardLedgerSummary" data-load-panel="ledger" aria-busy="true" aria-label="Audit summary">
       <div class="head"><h2 data-i18n="card.ledger_summary.title">Audit</h2><span id="bcPill" class="pill" data-i18n="pill.checking">checking</span></div>
       <div class="list" id="ledgerSummaryList">
         <div class="row"><span class="k" data-i18n="ledger.anchored_24h">Anchored 24h</span><span class="v" id="ledgerAnchored24">--</span></div>
@@ -887,11 +934,21 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
         <div class="row"><span class="k" data-i18n="ledger.relay_status">Relay</span><span class="v" id="ledgerRelayStatus">--</span></div>
       </div>
       <a href="#" id="openChainTab" style="font-size:11.5px;color:var(--accent);margin-top:6px;display:inline-block" data-i18n="ledger.open_full">Open full audit →</a>
+      <div class="panel-load-status" id="ledgerLoadStatus" role="status" aria-live="polite" data-state="loading">
+        <span class="panel-load-skeleton" aria-hidden="true"></span>
+        <span class="panel-load-copy" data-i18n="loading.ledger">Loading chain status…</span>
+        <button class="panel-load-retry" type="button" data-panel-retry="ledger" data-i18n="loading.retry" hidden>Retry</button>
+      </div>
     </section>
 
-    <section class="card" id="cardAlerts" aria-label="Alerts">
+    <section class="card" id="cardAlerts" data-load-panel="alerts" aria-busy="true" aria-label="Alerts">
       <div class="head"><h2 data-i18n="card.alerts.title">Alerts</h2><span id="alertPill" class="pill" data-i18n="pill.checking">checking</span></div>
       <div class="list" id="alertList"><div class="skeleton" data-i18n="skeleton.first_scan">awaiting first scan</div></div>
+      <div class="panel-load-status" id="alertsLoadStatus" role="status" aria-live="polite" data-state="loading">
+        <span class="panel-load-skeleton" aria-hidden="true"></span>
+        <span class="panel-load-copy" data-i18n="loading.alerts">Checking alerts…</span>
+        <button class="panel-load-retry" type="button" data-panel-retry="alerts" data-i18n="loading.retry" hidden>Retry</button>
+      </div>
     </section>
 
     <section class="card" id="cardLegend" aria-label="Legend">
@@ -1153,6 +1210,15 @@ const I18N = {
     'live.last_update':     'uživo · ažurirano u {clock}',
     'live.disconnected':    'prekinuto u {time}, ponovni pokušaj',
     'lang.label':           'Jezik',
+    'loading.energy':       'Učitavam posljednju proizvodnju…',
+    'loading.power':        'Učitavam snagu za zadnja 24 h…',
+    'loading.forecast':     'Učitavam predikciju…',
+    'loading.health':       'Provjeravam stanje servisa…',
+    'loading.ledger':       'Učitavam stanje lanca…',
+    'loading.alerts':       'Provjeravam upozorenja…',
+    'loading.timed_out':    'Učitavanje traje dulje od očekivanog.',
+    'loading.failed':       'Podaci trenutačno nisu dostupni.',
+    'loading.retry':        'Pokušaj ponovno',
 
     // EU funding visibility (edit PROGRAMME_NAME / PROJECT_CODE in the HTML strip)
     'eu.lead':              'Sufinancirala Europska unija',
@@ -1542,6 +1608,15 @@ const I18N = {
     'live.last_update':     'live · last update {clock}',
     'live.disconnected':    'disconnected at {time}, retrying',
     'lang.label':           'Language',
+    'loading.energy':       'Loading latest production…',
+    'loading.power':        'Loading the last 24h of power…',
+    'loading.forecast':     'Loading forecast…',
+    'loading.health':       'Checking service health…',
+    'loading.ledger':       'Loading chain status…',
+    'loading.alerts':       'Checking alerts…',
+    'loading.timed_out':    'Loading is taking longer than expected.',
+    'loading.failed':       'Data is temporarily unavailable.',
+    'loading.retry':        'Retry',
 
     // EU funding visibility (edit PROGRAMME_NAME / PROJECT_CODE in the HTML strip)
     'eu.lead':              'Co-funded by the European Union',
@@ -2385,6 +2460,7 @@ function renderGridTile(){
 }
 
 function renderHealthTile(predStatus, bcStatus, chainStatus, quality, sla){
+  if (!predStatus || (!quality && !sla) || (!bcStatus && !chainStatus)) return;
   const ageMin = quality?.input?.dataAgeMinutes;
   const slaMin = slaWindowMinutes(sla);
   const dataOk = ageMin != null && ageMin <= slaMin;
@@ -2403,6 +2479,7 @@ function renderHealthTile(predStatus, bcStatus, chainStatus, quality, sla){
   m1.push(`<span>${t('tile.health.chain')}: ${chainOk ? '\u2713' : '\u2717'}</span>`);
   setHtml('healthMeta1', m1.join(' '));
   setHtml('healthMeta2', '');
+  setPanelState('health', 'ready');
 }
 
 /* -- live energy data loading (multi-plant) ----------------- */
@@ -2511,20 +2588,34 @@ function isMeteoData(metrics) {
 }
 
 async function loadLiveEnergy(){
+  setPanelState('energy', 'loading', 'loading.energy');
+  setPanelState('power', 'loading', 'loading.power');
   try {
     const metaRes = await fetch('/prediction/measurements/meta');
-    if (!metaRes.ok) return;
+    if (!metaRes.ok) throw new Error(`HTTP ${metaRes.status}`);
     const meta = await metaRes.json();
     const allStations = meta?.stations || [];
-    if (!allStations.length) return;
+    if (!allStations.length) {
+      renderEnergyHero();
+      renderPowerChart({});
+      setPanelState('energy', 'empty', 'cpill.awaiting_data');
+      setPanelState('power', 'empty', 'card.power.empty');
+      return;
+    }
 
     const results = await Promise.allSettled(
       allStations.map(src =>
         fetch(`/prediction/measurements?source=${encodeURIComponent(src)}&hours=24&limit=5000&sort=timestamp&sortDir=asc`)
-          .then(r => r.json())
+          .then(r => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+          })
           .then(p => ({ source: src, data: p.data || [] }))
       )
     );
+    if (!results.some(result => result.status === 'fulfilled')) {
+      throw new Error('all measurement requests failed');
+    }
 
     const solarPlants = [];
     const meteoStations = [];
@@ -2648,7 +2739,15 @@ async function loadLiveEnergy(){
     renderEnvironment();
     renderPlantBreakdown();
     rerenderTiles();
-  } catch (e) { console.warn('loadLiveEnergy failed:', e); }
+    const hasPower = (mergedPowerSeries['Inverter_AC_power_total']?.length || 0)
+      + (mergedPowerSeries['Grid_power_total']?.length || 0) > 0;
+    setPanelState('energy', solarPlants.length ? 'ready' : 'empty', 'cpill.awaiting_data');
+    setPanelState('power', hasPower ? 'ready' : 'empty', 'card.power.empty');
+  } catch (e) {
+    console.warn('loadLiveEnergy failed:', e);
+    setPanelState('energy', 'error', 'loading.failed');
+    setPanelState('power', 'error', 'loading.failed');
+  }
 }
 
 function renderEnergyHero(){
@@ -2826,6 +2925,7 @@ function renderCompactForecastMeta(forecast, status){
 
 /* -- ledger summary (side panel) ------------------------ */
 function renderLedgerSummary(txPayload, chainStatus, bcStatus){
+  if (!txPayload && !chainStatus && !bcStatus) return;
   const c = txPayload?.counts || { total: 0 };
   setText('ledgerAnchored24', String(c.total ?? 0));
   const height = chainStatus?.latestBlock?.height;
@@ -2847,6 +2947,7 @@ function renderLedgerSummary(txPayload, chainStatus, bcStatus){
   else if (relayStarting) setPill('bcPill', t('cpill.relay_starting'), 'warn');
   else if (relayLc === 'failed' || relayLc === 'degraded') setPill('bcPill', t('cpill.relay_offline'), 'err');
   else setPill('bcPill', t('cpill.relay_offline'), 'err');
+  setPanelState('ledger', 'ready');
 }
 
 /* -- status legend card ----------------------------------- */
@@ -2880,6 +2981,7 @@ function renderLegend(){
 
 /* -- alerts feed (unified) ------------------------------- */
 function renderAlerts(anomalies, quality, sla, bcStatus){
+  if (!anomalies && !quality && !sla && !bcStatus) return;
   const items = [];
   if (anomalies?.length) {
     for (const a of anomalies.slice(0, 5)) {
@@ -2900,6 +3002,7 @@ function renderAlerts(anomalies, quality, sla, bcStatus){
   if (!items.length) {
     setPill('alertPill', t('cpill.no_alerts'), 'ok');
     el.innerHTML = `<div class="row" style="color:var(--muted)">${t('alert.none')}</div>`;
+    setPanelState('alerts', 'ready');
     return;
   }
   setPill('alertPill', t('cpill.n_alerts', { n: items.length }), items.some(i => i.severity === 'err') ? 'err' : 'warn');
@@ -2908,6 +3011,7 @@ function renderAlerts(anomalies, quality, sla, bcStatus){
     const kindCls = i.kind === 'anomaly' ? 'warn' : i.kind === 'relay' ? 'relay' : 'err';
     return `<div class="row">${ts}<span class="pill ${kindCls}" style="font-size:10px;padding:1px 5px">${escapeHtml(i.kind)}</span><span class="v" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(i.msg)}</span></div>`;
   }).join('');
+  setPanelState('alerts', 'ready');
 }
 
 /* -- forecast chart + rationale -------------------------- */
@@ -2932,9 +3036,13 @@ function renderForecast(forecast){
       else if (forecast?.computedAt) emptyEl.textContent = t('chart.forecast_placeholder');
       else emptyEl.textContent = t('chart.forecast_waiting');
     }
+    setPanelState('forecast', 'empty', forecast?.status === 'insufficient_data'
+      ? 'chart.forecast_unavailable'
+      : 'chart.forecast_waiting');
     return;
   }
   if (emptyEl) emptyEl.hidden = true;
+  setPanelState('forecast', 'ready');
 
   const datasets = [
     { label: 'Forecast', data: points.map(p => ({ x: new Date(p.timestamp * 1000), y: p.value })),
@@ -3420,6 +3528,84 @@ const snap = {
   eventLatest: null,
 };
 
+const PANEL_STATES = new Set(['loading', 'ready', 'empty', 'error']);
+const INITIAL_LOADING_TIMEOUT_MS = 10_000;
+const PANEL_LOADING_KEYS = {
+  energy: 'loading.energy',
+  power: 'loading.power',
+  forecast: 'loading.forecast',
+  health: 'loading.health',
+  ledger: 'loading.ledger',
+  alerts: 'loading.alerts',
+};
+const panelLoadTimers = new Map();
+const settledPanels = new Set();
+
+function setPanelState(panelId, state, messageKey){
+  if (!PANEL_STATES.has(state)) return;
+  const panel = document.querySelector(`[data-load-panel="${panelId}"]`);
+  const status = $(`${panelId}LoadStatus`);
+  if (!panel || !status) return;
+
+  if (settledPanels.has(panelId) && state === 'error') {
+    panel.classList.remove('loading');
+    panel.setAttribute('aria-busy', 'false');
+    return;
+  }
+
+  const initialLoading = state === 'loading' && !settledPanels.has(panelId);
+  panel.dataset.loadState = state;
+  panel.classList.toggle('loading', state === 'loading');
+  panel.setAttribute('aria-busy', String(state === 'loading'));
+
+  if (state === 'ready' || (state === 'loading' && !initialLoading)) {
+    status.hidden = true;
+  } else {
+    status.hidden = false;
+    status.dataset.state = state;
+    const copy = status.querySelector('.panel-load-copy');
+    const key = messageKey || PANEL_LOADING_KEYS[panelId] || 'loading.failed';
+    if (copy) {
+      copy.dataset.i18n = key;
+      copy.textContent = t(key);
+    }
+    const retry = status.querySelector('[data-panel-retry]');
+    if (retry) retry.hidden = state !== 'error';
+  }
+
+  const existingTimer = panelLoadTimers.get(panelId);
+  if (existingTimer) clearTimeout(existingTimer);
+  panelLoadTimers.delete(panelId);
+
+  if (initialLoading) {
+    panelLoadTimers.set(panelId, setTimeout(() => {
+      setPanelState(panelId, 'error', 'loading.timed_out');
+    }, INITIAL_LOADING_TIMEOUT_MS));
+  } else if (state === 'ready' || state === 'empty') {
+    settledPanels.add(panelId);
+  }
+}
+
+function startInitialPanelLoading(){
+  Object.entries(PANEL_LOADING_KEYS).forEach(([panelId, messageKey]) => {
+    setPanelState(panelId, 'loading', messageKey);
+  });
+}
+
+document.addEventListener('click', event => {
+  const retry = event.target.closest('[data-panel-retry]');
+  if (!retry) return;
+  const panelId = retry.dataset.panelRetry;
+  setPanelState(panelId, 'loading', PANEL_LOADING_KEYS[panelId]);
+  if (panelId === 'energy' || panelId === 'power') {
+    loadLiveEnergy();
+  } else if (panelId === 'forecast' && activeTarget) {
+    fetchMetricForecast(activeTarget.source, activeTarget.metric);
+  } else {
+    fallbackPoll();
+  }
+});
+
 let pickerListenerBound = false;
 function buildPicker(targets){
   if (pickerBuilt || !targets?.length) return;
@@ -3472,13 +3658,15 @@ function buildPicker(targets){
 }
 
 function setMetricLoading(on){
-  $('cardForecastCompact')?.classList.toggle('loading', on);
+  if (on) setPanelState('forecast', 'loading', 'loading.forecast');
+  else $('cardForecastCompact')?.classList.remove('loading');
   $('cardQuality')?.classList.toggle('loading', on);
 }
 
 async function fetchMetricForecast(source, metric){
   const params = `source=${encodeURIComponent(source)}&metric=${encodeURIComponent(metric)}`;
   setMetricLoading(true);
+  let forecastLoaded = false;
   try {
     const forecast = await getJson(`/prediction/forecasts/latest?${params}`);
     // Guard against late-arriving fetch when user clicked a different metric.
@@ -3486,7 +3674,10 @@ async function fetchMetricForecast(source, metric){
     snap.forecast = forecast;
     rerenderSignal();
     rerenderTiles();
-  } catch {}
+    forecastLoaded = true;
+  } catch {
+    setPanelState('forecast', 'error', 'loading.failed');
+  }
   try {
     const quality = await getJson(`/prediction/data-quality/latest?${params}`);
     if (activeTarget && (activeTarget.source !== source || activeTarget.metric !== metric)) return;
@@ -3495,6 +3686,7 @@ async function fetchMetricForecast(source, metric){
     rerenderTiles();
   } catch {}
   setMetricLoading(false);
+  if (!forecastLoaded && !snap.forecast) setPanelState('forecast', 'error', 'loading.failed');
 }
 
 function rerenderTiles(){
@@ -3766,19 +3958,43 @@ async function fetchJsonWithRetry(path, { retries = 1, backoffMs = 1500 } = {}){
 }
 
 async function fallbackPoll(){
-  try { ingest('prediction.status', { payload: await getJson('/prediction/status') }); } catch {}
+  let alertsLoaded = false;
+  let ledgerLoaded = false;
+  try {
+    ingest('prediction.status', { payload: await getJson('/prediction/status') });
+  } catch {}
   try {
     const target = activeTarget || { source: 'OS2BIOS', metric: 'PM2_5' };
     const params = `source=${encodeURIComponent(target.source)}&metric=${encodeURIComponent(target.metric)}`;
     ingest('prediction.forecast', { payload: await getJson(`/prediction/forecasts/latest?${params}`) });
     ingest('prediction.data_quality', { payload: await getJson(`/prediction/data-quality/latest?${params}`) });
+    alertsLoaded = true;
   } catch {}
-  try { ingest('prediction.sla', { payload: await getJson('/prediction/sla?window=24h') }); } catch {}
-  try { ingest('prediction.anomaly', { payload: await getJson('/prediction/anomalies?limit=5') }); } catch {}
-  try { ingest('blockchain.status', { payload: await getJson('/blockchain/status') }); } catch {}
-  try { ingest('blockchain.tx', { payload: await getJson('/blockchain/chain/transactions?limit=100') }); } catch {}
-  try { ingest('blockchain.chain_status', { payload: await getJson('/blockchain/chain/status') }); } catch {}
-  try { ingest('blockchain.event', { payload: await getJson('/blockchain/events?status=confirmed&limit=100') }); } catch {}
+  try {
+    ingest('prediction.sla', { payload: await getJson('/prediction/sla?window=24h') });
+    alertsLoaded = true;
+  } catch {}
+  try {
+    ingest('prediction.anomaly', { payload: await getJson('/prediction/anomalies?limit=5') });
+    alertsLoaded = true;
+  } catch {}
+  try {
+    ingest('blockchain.status', { payload: await getJson('/blockchain/status') });
+    alertsLoaded = true;
+    ledgerLoaded = true;
+  } catch {}
+  try {
+    ingest('blockchain.tx', { payload: await getJson('/blockchain/chain/transactions?limit=100') });
+    ledgerLoaded = true;
+  } catch {}
+  try {
+    ingest('blockchain.chain_status', { payload: await getJson('/blockchain/chain/status') });
+    ledgerLoaded = true;
+  } catch {}
+  try {
+    ingest('blockchain.event', { payload: await getJson('/blockchain/events?status=confirmed&limit=100') });
+    ledgerLoaded = true;
+  } catch {}
   try {
     const latest = await getJson('/blockchain/events/latest');
     snap.eventLatest = latest;
@@ -3786,7 +4002,11 @@ async function fallbackPoll(){
       try { ingest('blockchain.decode', { payload: await getJson(`/blockchain/decode?payload=${encodeURIComponent(latest.payloadHex)}`) }); } catch {}
     }
     rerenderLedger();
+    ledgerLoaded = true;
   } catch {}
+  if (!settledPanels.has('health')) setPanelState('health', 'error', 'loading.failed');
+  if (!alertsLoaded) setPanelState('alerts', 'error', 'loading.failed');
+  if (!ledgerLoaded) setPanelState('ledger', 'error', 'loading.failed');
 }
 
 /* refresh relative timestamps once a minute, no DOM thrash on the rest */
@@ -4459,6 +4679,7 @@ document.querySelectorAll('[data-lang]').forEach(btn => {
   btn.addEventListener('click', () => setLanguage(btn.dataset.lang));
 });
 
+startInitialPanelLoading();
 startRealtime();
 fallbackPoll();
 refreshSoiling();

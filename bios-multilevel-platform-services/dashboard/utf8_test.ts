@@ -4,24 +4,42 @@ function isUrlQueryDelimiter(source: string, questionIndex: number): boolean {
   const lineStart = source.lastIndexOf("\n", questionIndex) + 1;
   const nextLine = source.indexOf("\n", questionIndex);
   const lineEnd = nextLine === -1 ? source.length : nextLine;
+  const line = source.slice(lineStart, lineEnd);
+  const relativeQuestionIndex = questionIndex - lineStart;
 
+  let quote: "'" | '"' | "`" | undefined;
   let openingQuote = -1;
-  for (const quote of ["'", '"', "`"]) {
-    const candidate = source.lastIndexOf(quote, questionIndex - 1);
-    const closingQuote = source.indexOf(quote, questionIndex + 1);
-    if (
-      candidate >= lineStart &&
-      candidate > openingQuote &&
-      closingQuote !== -1 &&
-      closingQuote < lineEnd
-    ) {
-      openingQuote = candidate;
+  let escaped = false;
+
+  for (let index = 0; index < line.length; index++) {
+    const character = line[index];
+    if (quote === undefined) {
+      if (character === "'" || character === '"' || character === "`") {
+        quote = character;
+        openingQuote = index;
+      }
+      continue;
+    }
+
+    if (escaped) {
+      escaped = false;
+    } else if (character === "\\") {
+      escaped = true;
+    } else if (character === quote) {
+      if (
+        openingQuote < relativeQuestionIndex && relativeQuestionIndex < index
+      ) {
+        const contentStart = openingQuote + 1;
+        return line.slice(contentStart, relativeQuestionIndex).trimStart()
+          .startsWith("/") &&
+          line.indexOf("?", contentStart) === relativeQuestionIndex;
+      }
+      quote = undefined;
+      openingQuote = -1;
     }
   }
 
-  return openingQuote >= 0 &&
-    source.slice(openingQuote + 1, questionIndex).trimStart().startsWith("/") &&
-    source.indexOf("?", openingQuote + 1) === questionIndex;
+  return false;
 }
 
 function assertNoUnexpectedEmbeddedQuestionMarks(source: string): void {
@@ -62,27 +80,51 @@ Deno.test("dashboard preserves Croatian text and rendered Unicode", () => {
     assertStringIncludes(dashboard, text);
   }
 
+  assertNoUnexpectedEmbeddedQuestionMarks(dashboard);
+});
+
+Deno.test("translation dictionaries reject question-mark corruption", () => {
   const hrStart = dashboard.indexOf("  hr: {");
   const enStart = dashboard.indexOf("  en: {", hrStart);
+  const enEnd = dashboard.indexOf("\n};", enStart);
   assert(hrStart >= 0, "Croatian translation block is missing");
   assert(enStart > hrStart, "English translation block is missing");
+  assert(enEnd > enStart, "English translation block end is missing");
 
   const hrTranslations = dashboard.slice(hrStart, enStart);
+  const enTranslations = dashboard.slice(enStart, enEnd);
   assert(
     !hrTranslations.includes("?"),
     "Croatian translation block contains literal question marks",
   );
-
-  assertNoUnexpectedEmbeddedQuestionMarks(dashboard);
+  for (
+    const [language, translations] of [
+      ["Croatian", hrTranslations],
+      ["English", enTranslations],
+    ]
+  ) {
+    assert(
+      !translations.includes(" ? "),
+      `${language} translation block contains spaced question-mark corruption`,
+    );
+  }
 });
 
 Deno.test("embedded question mark check only allows URL query delimiters", () => {
   assertNoUnexpectedEmbeddedQuestionMarks(
     "fetch(`/prediction/measurements?source=station`)",
   );
+  assertNoUnexpectedEmbeddedQuestionMarks(
+    'fetch("/api/\\"quoted\\"?key=value")',
+  );
   assertThrows(() => assertNoUnexpectedEmbeddedQuestionMarks("'a?foo='"));
   assertThrows(() => assertNoUnexpectedEmbeddedQuestionMarks("`a?${value}`"));
   assertThrows(() =>
     assertNoUnexpectedEmbeddedQuestionMarks('"/api?key=a?foo"')
+  );
+  assertThrows(() =>
+    assertNoUnexpectedEmbeddedQuestionMarks(
+      '<div title="done"/><span>a?foo</span><div title="x">',
+    )
   );
 });

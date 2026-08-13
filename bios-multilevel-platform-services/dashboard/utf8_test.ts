@@ -1,4 +1,46 @@
-import { assert, assertNotMatch, assertStringIncludes } from "jsr:@std/assert";
+import { assert, assertStringIncludes, assertThrows } from "jsr:@std/assert";
+
+function isUrlQueryDelimiter(source: string, questionIndex: number): boolean {
+  const lineStart = source.lastIndexOf("\n", questionIndex) + 1;
+  const nextLine = source.indexOf("\n", questionIndex);
+  const lineEnd = nextLine === -1 ? source.length : nextLine;
+
+  let openingQuote = -1;
+  for (const quote of ["'", '"', "`"]) {
+    const candidate = source.lastIndexOf(quote, questionIndex - 1);
+    const closingQuote = source.indexOf(quote, questionIndex + 1);
+    if (
+      candidate >= lineStart &&
+      candidate > openingQuote &&
+      closingQuote !== -1 &&
+      closingQuote < lineEnd
+    ) {
+      openingQuote = candidate;
+    }
+  }
+
+  return openingQuote >= 0 &&
+    source.slice(openingQuote + 1, questionIndex).trimStart().startsWith("/");
+}
+
+function assertNoUnexpectedEmbeddedQuestionMarks(source: string): void {
+  const suspiciousPatterns = [
+    /[\p{L}]\?[\p{L}]/gu,
+    /[\p{L}]\?\$\{/gu,
+  ];
+
+  for (const pattern of suspiciousPatterns) {
+    for (const match of source.matchAll(pattern)) {
+      const questionIndex = match.index + match[0].indexOf("?");
+      assert(
+        isUrlQueryDelimiter(source, questionIndex),
+        `unexpected embedded question mark near ${
+          JSON.stringify(source.slice(questionIndex - 30, questionIndex + 31))
+        }`,
+      );
+    }
+  }
+}
 
 const dashboard = await Deno.readTextFile(
   new URL("./index.html", import.meta.url),
@@ -30,13 +72,13 @@ Deno.test("dashboard preserves Croatian text and rendered Unicode", () => {
     "Croatian translation block contains literal question marks",
   );
 
-  const renderedContent = dashboard.replaceAll(
-    /\?(?=[A-Za-z][A-Za-z0-9_]*=|\$\{)/g,
-    "",
+  assertNoUnexpectedEmbeddedQuestionMarks(dashboard);
+});
+
+Deno.test("embedded question mark check only allows URL query delimiters", () => {
+  assertNoUnexpectedEmbeddedQuestionMarks(
+    "fetch(`/prediction/measurements?source=station`)",
   );
-  assertNotMatch(
-    renderedContent,
-    /[\p{L}]\?[\p{L}]/u,
-    "dashboard contains a question mark embedded in a rendered word",
-  );
+  assertThrows(() => assertNoUnexpectedEmbeddedQuestionMarks("'a?foo='"));
+  assertThrows(() => assertNoUnexpectedEmbeddedQuestionMarks("`a?${value}`"));
 });

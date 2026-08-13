@@ -19,7 +19,8 @@ barrage:
 
 service:
   enabled: true
-  name: bios-fusionsolar
+  # The chart also uses this as the container port name (Kubernetes max: 15 chars).
+  name: fusionsolar
   type: ClusterIP
   externalPort: 8093
   internalPort: 8093

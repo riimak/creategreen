@@ -38,8 +38,8 @@
 
 /* -- viewport contract -------------------------------------
    The dashboard is a single-screen control surface. It must
-   fit a 1366?768 laptop, a 1920?1080 desktop, and a 4K TV
-   (3840?2160) without page-level scrolling. Internal panels
+   fit a 1366×768 laptop, a 1920×1080 desktop, and a 4K TV
+   (3840×2160) without page-level scrolling. Internal panels
    fit without page-level or panel-level scrolling.
    -------------------------------------------------------- */
 html,body{height:100vh;overflow:hidden;background:var(--bg);color:var(--text)}
@@ -329,7 +329,7 @@ main{
 
 /* -- ledger (now lives inside #viewChain, not overview) -- */
 .ledger{display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:0;padding:0;overflow:hidden}
-/* Match forecast header rhythm: title block, then counts, then chip rows ? JS syncs min-height with #cardSignal > header. */
+/* Match forecast header rhythm: title block, then counts, then chip rows — JS syncs min-height with #cardSignal > header. */
 .ledger>.head{
   padding:14px 16px 10px;border-bottom:1px solid var(--border);
   display:flex;flex-direction:column;gap:8px;align-items:stretch;min-width:0;box-sizing:border-box;
@@ -399,7 +399,7 @@ main{
 /* -- responsive budgets -------------------------------------
    No-scroll constraint: every breakpoint must fit 100vh.
    All content must fit without scrolling. Type and spacing scale with viewport
-   so 4K TVs and 1366?768 laptops are both legible.
+   so 4K TVs and 1366×768 laptops are both legible.
    --------------------------------------------------------- */
 
 /* tight rationale at narrow desktops */
@@ -407,9 +407,9 @@ main{
   .signal{grid-template-columns:minmax(0,1.5fr) minmax(210px,240px)}
 }
 
-/* compact laptop (1101?1500) ? too wide for the single-column fallback but
+/* compact laptop (1101—1500) — too wide for the single-column fallback but
    too narrow to comfortably fit brand + partners + 4 tabs + lang + verbose
-   "live ? last update HH:MM:SS ? 40s" timestamp on one row at full size.
+   "live · last update HH:MM:SS · 40s" timestamp on one row at full size.
    Trim the header so it eats less vertical space and the right-cluster fits. */
 @media(max-width:1500px){
   header.app{padding:6px 18px;gap:1rem}
@@ -421,12 +421,12 @@ main{
   nav.tabs{padding:2px}
   nav.tabs .tab{padding:5px 10px;font-size:12px}
   header.app .lang-switch button{padding:3px 8px;font-size:10.5px}
-  /* Drop the wordy "a?urirano u 09:04:19" middle ? keep the "u?ivo" label
+  /* Drop the wordy "ažurirano u 09:04:19" middle — keep the "uživo" label
      and the live age digits, which is enough at-a-glance signal. */
   header.app .live .live-clock{display:none}
 }
 
-/* very narrow laptop (=1280) ? also drop the partner wordmark; the logo
+/* very narrow laptop (≤1280) — also drop the partner wordmark; the logo
    alone is recognizable enough and the row is otherwise tight. */
 @media(max-width:1280px){
   header.app{padding:5px 16px}
@@ -434,7 +434,7 @@ main{
   header.app .partner-labeled{gap:0}
 }
 
-/* narrow laptop (< 1366?768) ? tighten paddings, keep no-scroll. Ordered AFTER
+/* narrow laptop (< 1366×768) — tighten paddings, keep no-scroll. Ordered AFTER
    the width-only rules above so the height-constrained tightest values win the
    cascade on actual small no-scroll laptops. */
 @media(max-width:1366px) and (max-height:820px){
@@ -457,9 +457,9 @@ main{
   .proof .grid{gap:3px 10px}
 }
 
-/* desktop default ? already covered above */
+/* desktop default — already covered above */
 
-/* large desktop (~1600?1899) ? a touch more air */
+/* large desktop (~1600—1899) — a touch more air */
 @media(min-width:1600px){
   body{font-size:14.5px}
   main{padding:14px 28px 18px;gap:14px}
@@ -469,7 +469,7 @@ main{
   .ledger .tx-list li{padding:10px 18px;font-size:13px}
 }
 
-/* TV / wallboard (=1900) ? readable from a step back */
+/* TV / wallboard (≥1900) — readable from a step back */
 @media(min-width:1900px){
   body{font-size:15.5px}
   main{padding:18px 32px 22px;gap:16px}
@@ -510,7 +510,7 @@ main{
   .list .row .k{font-size:13px}
 }
 
-/* 4K TV (=2600) ? generous, designed to be read across a room */
+/* 4K TV (≥2600) — generous, designed to be read across a room */
 @media(min-width:2600px){
   body{font-size:18px}
   main{padding:24px 44px 28px;gap:22px}
@@ -551,7 +551,7 @@ main{
   .list .row .k{font-size:15px}
 }
 
-/* tablet / single-column fallback (<1100) ? scrolling allowed,
+/* tablet / single-column fallback (<1100) — scrolling allowed,
    the no-scroll contract only applies to laptop+ widths */
 @media(max-width:1100px){
   html,body{height:auto;overflow:auto}
@@ -572,7 +572,7 @@ main{
   .strip{grid-template-columns:1fr 1fr}
   .side{grid-template-columns:1fr}
 }
-/* Soft halo pulse on ?live? green dots (header + .pill.ok). */
+/* Soft halo pulse on “live” green dots (header + .pill.ok). */
 @keyframes live-dot-pulse-header{
   0%,100%{box-shadow:0 0 0 3px oklch(56% .16 150 / .18)}
   50%{box-shadow:0 0 0 8px oklch(56% .16 150 / .1)}
@@ -738,7 +738,7 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
 }
 .meas-chart-body .chart-empty[hidden]{display:none}
 
-/* Toolbar tool buttons (graph/export) ? subtle icon+label */
+/* Toolbar tool buttons (graph/export) — subtle icon+label */
 /* -- status legend (shown in alerts card when no alerts) -- */
 .status-legend{
   display:grid;grid-template-columns:1fr 1fr;gap:2px 16px;font-size:10.5px;color:var(--muted);
@@ -784,7 +784,7 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
       <button type="button" class="tab" data-tab="measurements" data-i18n="tab.measurements">Mjerenja</button>
       <button type="button" class="tab" data-tab="predictions" data-i18n="tab.predictions">Predikcije</button>
       <button type="button" class="tab" data-tab="chain" data-i18n="tab.chain">Lanac</button>
-      <a href="/eu-visibility.html" class="tab" style="text-decoration:none;color:var(--muted);font-size:11px;display:inline-flex;align-items:center;gap:5px" title="CREATEGREEN ? Interreg IPA HR-RS ? HR-RS00158" data-i18n="tab.eu"><svg class="eu-emblem" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="12" fill="#003399"/><g fill="#FFCC00"><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(12 4.5)"/><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(15.75 5.51)"/><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(18.5 8.25)"/><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(19.5 12)"/><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(18.5 15.75)"/><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(15.75 18.49)"/><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(12 19.5)"/><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(8.25 18.49)"/><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(5.5 15.75)"/><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(4.5 12)"/><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(5.5 8.25)"/><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(8.25 5.51)"/></g></svg>EU</a>
+      <a href="/eu-visibility.html" class="tab" style="text-decoration:none;color:var(--muted);font-size:11px;display:inline-flex;align-items:center;gap:5px" title="CREATEGREEN · Interreg IPA HR-RS · HR-RS00158" data-i18n="tab.eu"><svg class="eu-emblem" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="12" fill="#003399"/><g fill="#FFCC00"><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(12 4.5)"/><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(15.75 5.51)"/><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(18.5 8.25)"/><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(19.5 12)"/><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(18.5 15.75)"/><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(15.75 18.49)"/><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(12 19.5)"/><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(8.25 18.49)"/><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(5.5 15.75)"/><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(4.5 12)"/><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(5.5 8.25)"/><polygon points="0,-1.6 0.359,-0.494 1.522,-0.494 0.581,0.189 0.94,1.294 0,0.611 -0.94,1.294 -0.581,0.189 -1.522,-0.494 -0.359,-0.494" transform="translate(8.25 5.51)"/></g></svg>EU</a>
     </nav>
     <div class="lang-switch" role="group" aria-label="Language">
       <button type="button" data-lang="hr">HR</button>
@@ -842,12 +842,12 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
     <div class="plant-breakdown" id="plantBreakdown"></div>
   </section>
 
-  <!-- -- Environment row (meteo context ? always visible) -- -->
+  <!-- ── Environment row (meteo context — always visible) ── -->
   <section class="card env-row" id="cardEnvironment" aria-label="Environment">
     <div class="env-stats" id="envStats">
       <div class="env-stat"><span class="env-value">--</span><span class="env-label">Temperatura</span></div>
-      <div class="env-stat"><span class="env-value">--</span><span class="env-label">Zracenje</span></div>
-      <div class="env-stat"><span class="env-value">--</span><span class="env-label">Vla?nost</span></div>
+      <div class="env-stat"><span class="env-value">--</span><span class="env-label">Zračenje</span></div>
+      <div class="env-stat"><span class="env-value">--</span><span class="env-label">Vlažnost</span></div>
       <div class="env-stat"><span class="env-value">--</span><span class="env-label">Kvaliteta zraka</span></div>
     </div>
   </section>
@@ -886,7 +886,7 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
         <div class="row"><span class="k" data-i18n="ledger.block_height">Block height</span><span class="v" id="ledgerBlockHeight">--</span></div>
         <div class="row"><span class="k" data-i18n="ledger.relay_status">Relay</span><span class="v" id="ledgerRelayStatus">--</span></div>
       </div>
-      <a href="#" id="openChainTab" style="font-size:11.5px;color:var(--accent);margin-top:6px;display:inline-block" data-i18n="ledger.open_full">Open full audit ?</a>
+      <a href="#" id="openChainTab" style="font-size:11.5px;color:var(--accent);margin-top:6px;display:inline-block" data-i18n="ledger.open_full">Open full audit →</a>
     </section>
 
     <section class="card" id="cardAlerts" aria-label="Alerts">
@@ -905,10 +905,10 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
   <header class="toolbar">
     <div>
       <h2 data-i18n="meas.title">Sirovi podaci s Mars2 API-ja</h2>
-      <div class="meta" id="measMeta" data-i18n="meas.loading">ucitavanje?</div>
+      <div class="meta" id="measMeta" data-i18n="meas.loading">učitavanje…</div>
     </div>
     <div class="meas-tools">
-      <button type="button" id="measChart" class="tool-btn" data-i18n-title="meas.show_chart" title="prika?i graf" aria-label="Show chart">
+      <button type="button" id="measChart" class="tool-btn" data-i18n-title="meas.show_chart" title="prikaži graf" aria-label="Show chart">
         <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 13h12M3 11l3-4 3 2 4-6"/></svg>
         <span data-i18n="meas.show_chart_short">graf</span>
       </button>
@@ -938,27 +938,27 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
       </select>
     </label>
     <label data-i18n="meas.filter.value_min">min. vrijednost
-      <input type="number" step="any" id="measValueMin" placeholder="?">
+      <input type="number" step="any" id="measValueMin" placeholder="—">
     </label>
     <label data-i18n="meas.filter.value_max">maks. vrijednost
-      <input type="number" step="any" id="measValueMax" placeholder="?">
+      <input type="number" step="any" id="measValueMax" placeholder="—">
     </label>
     <label data-i18n="meas.filter.search">pretraga
       <input type="search" id="measSearch" placeholder="metrika ili stanica">
     </label>
-    <label class="checkbox"><input type="checkbox" id="measMissing"><span data-i18n="meas.filter.missing">samo s nedostajucim vrijednostima</span></label>
+    <label class="checkbox"><input type="checkbox" id="measMissing"><span data-i18n="meas.filter.missing">samo s nedostajućim vrijednostima</span></label>
     <div class="actions">
-      <button type="button" id="measRefresh" class="primary" data-i18n="meas.refresh">osvje?i</button>
-      <button type="button" id="measReset" data-i18n="meas.reset">poni?ti</button>
+      <button type="button" id="measRefresh" class="primary" data-i18n="meas.refresh">osvježi</button>
+      <button type="button" id="measReset" data-i18n="meas.reset">poništi</button>
     </div>
   </div>
 
-  <!-- Custom chart panel (hidden by default, toggled by 'prika?i graf') -->
+  <!-- Custom chart panel (hidden by default, toggled by 'prikaži graf') -->
   <div class="meas-chart-panel" id="measChartPanel" hidden>
     <div class="meas-chart-head">
       <span class="meas-chart-title" data-i18n="meas.chart_title">Graf trenutnih filtera</span>
       <span class="meas-chart-info" id="measChartInfo"></span>
-      <button type="button" id="measChartClose" class="meas-chart-close" aria-label="Close">?</button>
+      <button type="button" id="measChartClose" class="meas-chart-close" aria-label="Close">×</button>
     </div>
     <div class="meas-chart-body">
       <div id="measChartEmpty" class="chart-empty" hidden></div>
@@ -971,14 +971,14 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
     <table>
       <thead>
         <tr>
-          <th data-sort="timestamp" class="sorted"><span data-i18n="meas.col.time">vrijeme</span><span class="ind">?</span></th>
+          <th data-sort="timestamp" class="sorted"><span data-i18n="meas.col.time">vrijeme</span><span class="ind">↓</span></th>
           <th data-sort="source"><span data-i18n="meas.col.station">stanica</span><span class="ind"></span></th>
           <th data-sort="metric"><span data-i18n="meas.col.metric">metrika</span><span class="ind"></span></th>
           <th data-sort="value" style="text-align:right"><span data-i18n="meas.col.value">vrijednost</span><span class="ind"></span></th>
         </tr>
       </thead>
       <tbody id="measTbody">
-        <tr><td colspan="4" class="empty" data-i18n="meas.loading">ucitavanje?</td></tr>
+        <tr><td colspan="4" class="empty" data-i18n="meas.loading">učitavanje…</td></tr>
       </tbody>
     </table>
     </div>
@@ -1025,8 +1025,8 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
       <input type="search" id="predSearch" placeholder="metrika ili stanica">
     </label>
     <div class="actions">
-      <button type="button" id="predRefresh" class="primary" data-i18n="meas.refresh">osvje?i</button>
-      <button type="button" id="predReset" data-i18n="meas.reset">poni?ti</button>
+      <button type="button" id="predRefresh" class="primary" data-i18n="meas.refresh">osvježi</button>
+      <button type="button" id="predReset" data-i18n="meas.reset">poništi</button>
     </div>
   </div>
 
@@ -1035,7 +1035,7 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
     <table>
       <thead id="predThead"></thead>
       <tbody id="predTbody">
-        <tr><td colspan="6" class="empty" data-i18n="meas.loading">ucitavanje?</td></tr>
+        <tr><td colspan="6" class="empty" data-i18n="meas.loading">učitavanje…</td></tr>
       </tbody>
     </table>
     </div>
@@ -1083,8 +1083,8 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
       <input type="search" id="chainSearch" placeholder="event / source / tx">
     </label>
     <div class="actions">
-      <button type="button" id="chainRefresh" class="primary" data-i18n="meas.refresh">osvje?i</button>
-      <button type="button" id="chainReset" data-i18n="meas.reset">poni?ti</button>
+      <button type="button" id="chainRefresh" class="primary" data-i18n="meas.refresh">osvježi</button>
+      <button type="button" id="chainReset" data-i18n="meas.reset">poništi</button>
     </div>
   </div>
 
@@ -1094,8 +1094,8 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
       <thead>
         <tr>
           <th><span data-i18n="chain.col.created">kreirano</span></th>
-          <th><span data-i18n="chain.col.confirmed">potvrdeno</span></th>
-          <th><span data-i18n="chain.col.event">dogadaj</span></th>
+          <th><span data-i18n="chain.col.confirmed">potvrđeno</span></th>
+          <th><span data-i18n="chain.col.event">događaj</span></th>
           <th><span data-i18n="chain.col.source_kind">izvor</span></th>
           <th><span data-i18n="chain.col.status">status</span></th>
           <th><span data-i18n="chain.col.tx">tx</span></th>
@@ -1103,7 +1103,7 @@ main:has(.view.meas:not([hidden])) > .view.meas{grid-area:full;flex:1 1 0;min-he
         </tr>
       </thead>
       <tbody id="chainTbody">
-        <tr><td colspan="7" class="empty" data-i18n="meas.loading">ucitavanje?</td></tr>
+        <tr><td colspan="7" class="empty" data-i18n="meas.loading">učitavanje…</td></tr>
       </tbody>
     </table>
     </div>
@@ -1148,16 +1148,16 @@ const I18N = {
     // header / shell
     'partners.with':        'partneri',
     'live.connecting':      'spajanje',
-    'live.label':           'u?ivo',
-    'live.update_at':       '? a?urirano u {clock}',
-    'live.last_update':     'u?ivo ? a?urirano u {clock}',
-    'live.disconnected':    'prekinuto u {time}, ponovni poku?aj',
+    'live.label':           'uživo',
+    'live.update_at':       '· ažurirano u {clock}',
+    'live.last_update':     'uživo · ažurirano u {clock}',
+    'live.disconnected':    'prekinuto u {time}, ponovni pokušaj',
     'lang.label':           'Jezik',
 
     // EU funding visibility (edit PROGRAMME_NAME / PROJECT_CODE in the HTML strip)
     'eu.lead':              'Sufinancirala Europska unija',
-    'eu.project':           'Operativni program: PROGRAMME_NAME ? Projekt: PROJECT_CODE',
-    'eu.disclaimer':        'Izneseni stavovi i mi?ljenja su iskljucivo stavovi autora i ne odra?avaju nu?no slu?bena stajali?ta Europske unije. Europska unija ne mo?e se smatrati odgovornom za njih.',
+    'eu.project':           'Operativni program: PROGRAMME_NAME · Projekt: PROJECT_CODE',
+    'eu.disclaimer':        'Izneseni stavovi i mišljenja su isključivo stavovi autora i ne odražavaju nužno službena stajališta Europske unije. Europska unija ne može se smatrati odgovornom za njih.',
 
     // tabs
     'tab.overview':         'Pregled',
@@ -1168,7 +1168,7 @@ const I18N = {
 
     // measurements view
     'meas.title':           'Sirovi podaci s Mars2 API-ja (povijesno)',
-    'meas.loading':         'ucitavanje?',
+    'meas.loading':         'učitavanje…',
     'meas.empty':           'nema rezultata za odabrane filtere',
     'meas.all':             'sve',
     'meas.filter.station':  'stanica',
@@ -1177,47 +1177,47 @@ const I18N = {
     'meas.filter.value_min':'min. vrijednost',
     'meas.filter.value_max':'maks. vrijednost',
     'meas.filter.search':   'pretraga',
-    'meas.filter.missing':  'samo s nedostajucim vrijednostima',
-    'meas.refresh':         'osvje?i',
-    'meas.reset':           'poni?ti',
+    'meas.filter.missing':  'samo s nedostajućim vrijednostima',
+    'meas.refresh':         'osvježi',
+    'meas.reset':           'poništi',
     'meas.export':          'izvoz CSV',
     'meas.export_short':    'CSV',
-    'meas.exporting':       'preuzimam?',
+    'meas.exporting':       'preuzimam…',
     'meas.export_failed':   'Izvoz nije uspio: {msg}',
-    'meas.show_chart':      'prika?i graf',
+    'meas.show_chart':      'prikaži graf',
     'meas.show_chart_short':'graf',
     'meas.chart_title':     'Graf trenutnih filtera',
     'meas.chart_empty':     'Nema podataka za prikaz s odabranim filterima.',
-    'meas.chart_failed':    'Ucitavanje grafa nije uspjelo: {msg}',
-    'meas.chart_info':      '{n} tocaka ? {series} serija ? zadnjih {hours}h',
+    'meas.chart_failed':    'Učitavanje grafa nije uspjelo: {msg}',
+    'meas.chart_info':      '{n} točaka · {series} serija · zadnjih {hours}h',
     'meas.col.time':        'vrijeme',
     'meas.col.station':     'stanica',
     'meas.col.metric':      'metrika',
     'meas.col.value':       'vrijednost',
     'meas.prev':            'prethodna',
-    'meas.next':            'sljedeca',
+    'meas.next':            'sljedeća',
     'pager.per_page':       'po stranici',
-    'meas.page_info':       '{from}?{to} od {total} ? stranica {page}/{pages} ? ke?irano {age}',
+    'meas.page_info':       '{from}—{to} od {total} · stranica {page}/{pages} · keširano {age}',
     'meas.cache_age_now':   'sada',
     'meas.cache_age':       'prije {sec}s',
-    'meas.missing':         '?',
-    'meas.error':           'gre?ka: {msg}',
+    'meas.missing':         '—',
+    'meas.error':           'greška: {msg}',
 
     // predictions view
     'pred.title':           'Zapisi predikcija',
     'pred.subtab.forecasts':'Prognoze',
     'pred.subtab.anomalies':'Anomalije',
     'pred.subtab.quality':  'Kvaliteta podataka',
-    'pred.col.computed':    'izracunato',
+    'pred.col.computed':    'izračunato',
     'pred.col.station':     'stanica',
     'pred.col.metric':      'metrika',
     'pred.col.model':       'model',
-    'pred.col.points':      'tocke',
+    'pred.col.points':      'točke',
     'pred.col.horizon':     'horizont (h)',
-    'pred.col.residual':    'rezidualna pogre?ka',
+    'pred.col.residual':    'rezidualna pogreška',
     'pred.col.input_count': 'ulaznih uzoraka',
     'pred.col.anomaly_count':'anomalija',
-    'pred.col.severity':    'najte?a',
+    'pred.col.severity':    'najteža',
     'pred.col.status':      'status',
     'pred.col.gap':         'praznine',
     'pred.col.age':         'starost (min)',
@@ -1227,8 +1227,8 @@ const I18N = {
     // chain view
     'chain.title':          'Zapisi na lancu',
     'chain.col.created':    'kreirano',
-    'chain.col.confirmed':  'potvrdeno',
-    'chain.col.event':      'dogadaj',
+    'chain.col.confirmed':  'potvrđeno',
+    'chain.col.event':      'događaj',
     'chain.col.station':    'stanica',
     'chain.col.metric':     'metrika',
     'chain.col.value':      'vrijednost',
@@ -1238,7 +1238,7 @@ const I18N = {
     'chain.col.source_kind':'izvor',
     'chain.empty':          'nema zapisa',
     'chain.filter.status':  'status',
-    'chain.filter.event':   'tip dogadaja',
+    'chain.filter.event':   'tip događaja',
     'chain.status.all':     'sve',
 
     // tiles (energy-first)
@@ -1251,13 +1251,13 @@ const I18N = {
     'tile.storage.not_connected':'nije spojena',
     'tile.storage.no_battery_msg':'Niti jedna elektrana nema spojenu bateriju',
     'tile.storage.charging':'punjenje',
-    'tile.storage.discharging':'pra?njenje',
-    'tile.grid.label':      'Mre?a',
-    'tile.grid.name':       'Razmjena s mre?om',
-    'tile.grid.unavailable':'nema podataka o mre?i',
+    'tile.storage.discharging':'pražnjenje',
+    'tile.grid.label':      'Mreža',
+    'tile.grid.name':       'Razmjena s mrežom',
+    'tile.grid.unavailable':'nema podataka o mreži',
     'tile.grid.export':     'izvoz',
     'tile.grid.import':     'uvoz',
-    'tile.grid.balanced':   'uravnote?eno',
+    'tile.grid.balanced':   'uravnoteženo',
     'tile.health.label':    'Stanje sustava',
     'tile.health.name':     'Servisi',
     'tile.health.data':     'Podaci',
@@ -1277,90 +1277,90 @@ const I18N = {
     'card.energy.label':    'Trenutna proizvodnja',
     'card.energy.today':    'Danas kWh',
     'card.energy.month':    'Mjesec kWh',
-    'card.energy.grid':     'Mre?a kW',
+    'card.energy.grid':     'Mreža kW',
     'card.energy.soc':      'Baterija %',
     'card.power.title':     'Snaga (24h)',
     'card.power.empty':     'nema mjerenja snage u zadnja 24h',
     'card.power.ac_output': 'AC izlaz (kW)',
-    'card.power.grid_flow': 'Mre?a (kW)',
+    'card.power.grid_flow': 'Mreža (kW)',
     'card.power.solar_panel':'Solarna snaga (kW)',
-    'card.power.grid_panel': 'Razmjena s mre?om (kW)',
+    'card.power.grid_panel': 'Razmjena s mrežom (kW)',
     'card.power.series_empty':'nema mjerenja',
-    'card.power.meta':      'AC izlaz i razmjena s mre?om (kW)',
-    'card.power.meta_stale':'AC izlaz i razmjena s mre?om (kW) ? zadnje ocitanje prije {age}',
-    'card.power.meta_no_data':'nema dostupnih ocitanja snage',
+    'card.power.meta':      'AC izlaz i razmjena s mrežom (kW)',
+    'card.power.meta_stale':'AC izlaz i razmjena s mrežom (kW) · zadnje očitanje prije {age}',
+    'card.power.meta_no_data':'nema dostupnih očitanja snage',
     'card.method.model':    'Model',
     'card.ledger_summary.title':'Lanac',
     'card.alerts.title':    'Upozorenja',
     'ledger.anchored_24h':  'Zapisano 24h',
     'ledger.block_height':  'Visina bloka',
     'ledger.relay_status':  'Zapisivanje',
-    'ledger.open_full':     'Otvori Lanac ?',
+    'ledger.open_full':     'Otvori Lanac →',
     'alert.stale_data':     'Podaci stari {age}',
-    'alert.relay_error':    'Gre?ka releja za zapis',
+    'alert.relay_error':    'Greška releja za zapis',
     'alert.none':           'Nema upozorenja',
-    'legend.title':         'Znacenje statusa',
+    'legend.title':         'Značenje statusa',
     'legend.cat_solar':     'Proizvodnja',
-    'legend.cat_grid':      'Mre?a',
+    'legend.cat_grid':      'Mreža',
     'legend.cat_services':  'Sustav',
     'legend.cat_predictions':'Predikcije',
     'legend.cat_chain':     'Lanac',
-    'legend.live':          'Elektrana proizvodi, podaci sti?u redovito',
-    'legend.stale':         'Podaci stariji od 15 min ? noc/mirovanje/bez veze',
-    'legend.no_data_yet':   'Jo? nema podataka s ove elektrane',
-    'legend.export':        'Vi?ak energije ide u mre?u',
-    'legend.import':        'Elektrana tro?i iz mre?e',
-    'legend.balanced':      'Razmjena s mre?om blizu nule',
+    'legend.live':          'Elektrana proizvodi, podaci stižu redovito',
+    'legend.stale':         'Podaci stariji od 15 min — noć/mirovanje/bez veze',
+    'legend.no_data_yet':   'Još nema podataka s ove elektrane',
+    'legend.export':        'Višak energije ide u mrežu',
+    'legend.import':        'Elektrana troši iz mreže',
+    'legend.balanced':      'Razmjena s mrežom blizu nule',
     'legend.all_services':  'Svi servisi rade normalno',
-    'legend.partial_service':'Jedan servis ogranicen ili u ka?njenju',
-    'legend.offline':       'Vi?e servisa ne radi',
-    'legend.pred_ok':       'Prognoza uspje?no izracunata',
-    'legend.pred_running':  'Izracun prognoze u tijeku',
+    'legend.partial_service':'Jedan servis ograničen ili u kašnjenju',
+    'legend.offline':       'Više servisa ne radi',
+    'legend.pred_ok':       'Prognoza uspješno izračunata',
+    'legend.pred_running':  'Izračun prognoze u tijeku',
     'legend.pred_error':    'Prognoza nije uspjela',
     'legend.chain_ok':      'Podaci se zapisuju na lanac',
-    'legend.chain_demo':    'Demo nacin ? simulacija bez zapisa na pravi lanac',
+    'legend.chain_demo':    'Demo način — simulacija bez zapisa na pravi lanac',
     'legend.chain_off':     'Zapisivanje na lanac neaktivno ili nema vezu',
     'env.temperature':      'Temperatura',
-    'env.radiation':        'Suncevo zracenje',
-    'env.humidity':         'Vla?nost',
+    'env.radiation':        'Sunčevo zračenje',
+    'env.humidity':         'Vlažnost',
     'env.aqi':              'Kvaliteta zraka',
-    'env.no_data':          'Meteo stanice ne ?alju podatke',
+    'env.no_data':          'Meteo stanice ne šalju podatke',
     'env.stale':            'Zadnji podaci primljeni prije {age}',
-    'pill.degraded':        'ograniceno',
-    'pill.partial':         'djelomicno',
+    'pill.degraded':        'ograničeno',
+    'pill.partial':         'djelomično',
     'pill.stale':           'zastario',
 
     // contextual pill labels (self-explanatory per widget)
     'cpill.producing':      'proizvodi {kW} kW',
     'cpill.standby':        'mirovanje',
-    'cpill.awaiting_data':  'ceka podatke',
+    'cpill.awaiting_data':  'čeka podatke',
     'cpill.export_kw':      'izvoz {kW} kW',
     'cpill.import_kw':      'uvoz {kW} kW',
     'cpill.balanced':       '~0 kW',
     'cpill.no_data':        'nema podataka',
     'cpill.all_ok':         'sve radi',
-    'cpill.one_limited':    '1 servis ogranicen',
+    'cpill.one_limited':    '1 servis ograničen',
     'cpill.n_down':         '{n} servisa ne rade',
-    'cpill.computing':      'racunam...',
-    'cpill.computed_ago':   'izracunato {age}',
+    'cpill.computing':      'računam...',
+    'cpill.computed_ago':   'izračunato {age}',
     'cpill.ready':          'spremno',
-    'cpill.error':          'gre?ka',
-    'cpill.waiting_first':  'cekam prvi ciklus',
+    'cpill.error':          'greška',
+    'cpill.waiting_first':  'čekam prvi ciklus',
     'cpill.relay_active':   'zapisuje',
     'cpill.relay_starting': 'pokretanje...',
     'cpill.relay_offline':  'ne zapisuje',
-    'cpill.relay_demo':     'demo nacin',
+    'cpill.relay_demo':     'demo način',
     'cpill.no_alerts':      'nema upozorenja',
     'cpill.n_alerts':       '{n} upozorenja',
     'pill.ok_label':        'OK',
     'card.forecast.title':  'Predikcija',
-    'card.forecast.empty':  'metrika nije ucitana',
+    'card.forecast.empty':  'metrika nije učitana',
     'chart.forecast_placeholder': 'nema podataka za graf',
-    'chart.forecast_unavailable': 'Graf prognoze nije dostupan ? nema dovoljno ulaznih intervala s podacima za ovu metriku.',
-    'chart.forecast_waiting':     'Jo? nema podataka za graf ? cekam prvi ciklus predikcije.',
-    'card.method.title':    'Kako je izracunato',
-    'card.method.computed': 'Izracunato',
-    'card.method.next':     'Sljedeci ciklus',
+    'chart.forecast_unavailable': 'Graf prognoze nije dostupan — nema dovoljno ulaznih intervala s podacima za ovu metriku.',
+    'chart.forecast_waiting':     'Još nema podataka za graf — čekam prvi ciklus predikcije.',
+    'card.method.title':    'Kako je izračunato',
+    'card.method.computed': 'Izračunato',
+    'card.method.next':     'Sljedeći ciklus',
     'card.input.title':     'Ulazni podaci',
     'card.anomalies.title': 'Zdravlje senzora',
     'card.ledger.title':    'Registar zapisa',
@@ -1368,85 +1368,85 @@ const I18N = {
 
     // pills / status
     'pill.checking':        'provjera',
-    'pill.live':            'u?ivo',
-    'pill.partial':         'djelomicno',
+    'pill.live':            'uživo',
+    'pill.partial':         'djelomično',
     'pill.warming_up':      'pokretanje',
     'pill.behind':          'zaostatak {age}',
-    'pill.out_of_sla':      'izvan SLA ? {age}',
-    'pill.awaiting':        'na cekanju',
+    'pill.out_of_sla':      'izvan SLA · {age}',
+    'pill.awaiting':        'na čekanju',
     'pill.demo':            'demo',
     'pill.offline':         'nedostupno',
     'pill.throttled':       'usporeno {seconds}s',
     'pill.clear':           'sve u redu',
-    'pill.flagged_one':     '{n} metrika oznacena',
-    'pill.flagged_many':    '{n} metrika oznaceno',
+    'pill.flagged_one':     '{n} metrika označena',
+    'pill.flagged_many':    '{n} metrika označeno',
     'pill.signals_one':     '{n} upozorenje',
     'pill.signals_many':    '{n} upozorenja',
 
     // skeletons
-    'skeleton.first_cycle': 'cekam prvi ciklus',
-    'skeleton.first_scan':  'cekam prvi skeniranje',
-    'skeleton.first_anchor':'cekam prvi zapis',
-    'skeleton.ledger':      'cekam stanje',
-    'skeleton.awaiting_data':'cekam podatke',
+    'skeleton.first_cycle': 'čekam prvi ciklus',
+    'skeleton.first_scan':  'čekam prvi skeniranje',
+    'skeleton.first_anchor':'čekam prvi zapis',
+    'skeleton.ledger':      'čekam stanje',
+    'skeleton.awaiting_data':'čekam podatke',
 
     // source tile
     'source.stations':      '{n} postaja',
-    'source.samples':       '{got}/{expected} intervala ? {gap}% gap',
-    'source.raw_points_title':'vi?e sirovih redaka u istom vremenskom intervalu ? broj u zagradi je ukupno ocitanja s vrijedno?cu',
-    'source.last_reading':  'zadnje ocitanje prije {age}',
+    'source.samples':       '{got}/{expected} intervala · {gap}% gap',
+    'source.raw_points_title':'više sirovih redaka u istom vremenskom intervalu — broj u zagradi je ukupno očitanja s vrijednošću',
+    'source.last_reading':  'zadnje očitanje prije {age}',
     'source.offline_files': 'koristim offline datoteke',
     'source.past_sla':      'izvan 24h SLA',
 
     // forecasting tile
-    'forecast.metrics':     'pracenih {n}',
+    'forecast.metrics':     'praćenih {n}',
     'forecast.every':       'svakih {interval}m',
     'forecast.last':        'zadnje {time}',
-    'forecast.next':        'sljedece {time}',
+    'forecast.next':        'sljedeće {time}',
 
     // relay tile
     'relay.anchors_one':    '{n} zapis',
     'relay.anchors_many':   '{n} zapisa',
-    'relay.confirmed':      '{c} potvrdeno ? {s} poslano',
+    'relay.confirmed':      '{c} potvrđeno · {s} poslano',
     'relay.every_s':        'svakih {interval}s',
     'relay.last':           'zadnje {time}',
 
     // ledger tile
     'ledger.block':         'blok #{height}',
-    'ledger.seen':          'videno prije {time}',
-    'ledger.no_head':       'jo? nema vrha lanca',
+    'ledger.seen':          'viđeno prije {time}',
+    'ledger.no_head':       'još nema vrha lanca',
     'ledger.recovering':    'oporavak',
     'ledger.anchoring_live':'zapisivanje aktivno',
     'ledger.anchoring_armed':'zapisivanje spremno',
-    'ledger.broadcast_off': ', emitiranje iskljuceno',
-    'ledger.no_balance':    ', nema raspolo?ivog stanja',
+    'ledger.broadcast_off': ', emitiranje isključeno',
+    'ledger.no_balance':    ', nema raspoloživog stanja',
     'ledger.anchoring_off': 'zapisivanje nije spremno',
-    'ledger.no_connection': 'veza nije pode?ena',
-    'ledger.demo_mode':     'demo nacin',
+    'ledger.no_connection': 'veza nije podešena',
+    'ledger.demo_mode':     'demo način',
 
     // input data card
     'input.source':         'izvor',
-    'input.last_reading':   'zadnje ocitanje',
+    'input.last_reading':   'zadnje očitanje',
     'input.samples':        'uzoraka',
-    'input.expected':       'ocekivano',
+    'input.expected':       'očekivano',
     'input.gap':            'praznine',
     'input.sla_window':     'SLA prozor',
-    'input.sla_format':     '{window} ? {pct}% dostupnost',
+    'input.sla_format':     '{window} · {pct}% dostupnost',
     'input.action':         'napomena',
     'input.note':           'info',
-    'input.action.out_files':'Posljednje ocitanje je staro {age}, izvan 24h SLA. Citam offline datoteke; podesite live Mars2 API za svje?e podatke.',
-    'input.action.out':     'Posljednje ocitanje je staro {age}, izvan 24h SLA. Postaje su mo?da offline.',
-    'input.note.behind':    'Posljednje ocitanje je staro {age}. Unutar 24h SLA prozora; cilj svje?ine je 30m. Podaci se osvje?avaju automatski sa svakim izvje?tajem postaje.',
+    'input.action.out_files':'Posljednje očitanje je staro {age}, izvan 24h SLA. Čitam offline datoteke; podesite live Mars2 API za svježe podatke.',
+    'input.action.out':     'Posljednje očitanje je staro {age}, izvan 24h SLA. Postaje su možda offline.',
+    'input.note.behind':    'Posljednje očitanje je staro {age}. Unutar 24h SLA prozora; cilj svježine je 30m. Podaci se osvježavaju automatski sa svakim izvještajem postaje.',
 
     // anomalies
-    'anomalies.clear':      'nema zabilje?enih model-anomalija za pracene metrike',
-    'anomalies.no_evidence':'nemamo dovoljno mjerenja za procjenu ? cekaju se ciklusi predikcije i ulazni podaci',
-    'anomalies.input_weak': 'ulazni podaci ne zadovoljavaju SLA ili su nedostatni ? ne mo?emo tvrditi da su senzori u redu',
-    'anomalies.count_one':  '{n} ocitanje',
-    'anomalies.count_many': '{n} ocitanja',
-    'anomalies.soiling_warn':'inverter kasni {min}m za senzorima zracenja',
-    'anomalies.soiling_err':'inverter kasni {min}m za senzorima zracenja, moguc kvar',
-    'anomalies.soiling_label':'Solarna elektrana ? ci?cenje panela',
+    'anomalies.clear':      'nema zabilježenih model-anomalija za praćene metrike',
+    'anomalies.no_evidence':'nemamo dovoljno mjerenja za procjenu — čekaju se ciklusi predikcije i ulazni podaci',
+    'anomalies.input_weak': 'ulazni podaci ne zadovoljavaju SLA ili su nedostatni — ne možemo tvrditi da su senzori u redu',
+    'anomalies.count_one':  '{n} očitanje',
+    'anomalies.count_many': '{n} očitanja',
+    'anomalies.soiling_warn':'inverter kasni {min}m za senzorima zračenja',
+    'anomalies.soiling_err':'inverter kasni {min}m za senzorima zračenja, moguć kvar',
+    'anomalies.soiling_label':'Solarna elektrana · čišćenje panela',
     'anomalies.medium_one':  '{n} metrika s umjerenim odstupanjem',
     'anomalies.medium_many': '{n} metrika s umjerenim odstupanjima',
     'anomalies.data_age':    'podaci stari {age}',
@@ -1457,64 +1457,64 @@ const I18N = {
     // ledger card
     'ledger.proofs_total_one':'{n} zapis ukupno',
     'ledger.proofs_total_many':'{n} zapisa ukupno',
-    'ledger.confirmed_count':'{n} potvrdeno',
+    'ledger.confirmed_count':'{n} potvrđeno',
     'ledger.sent_count':    '{n} poslano',
     'ledger.relay':         'relej {mode}',
     'ledger.by_kind':       'po vrsti',
     'ledger.by_source':     'po izvoru',
-    'ledger.no_entries':    'jo? nema zapisa',
+    'ledger.no_entries':    'još nema zapisa',
     'ledger.demo':          'demo',
-    'ledger.demo_tooltip':  'Sinteticki demo dogadaji s tvrdo kodiranim vrijednostima, generirani svaki ciklus. Postavite BLOCKCHAIN_EVENT_SOURCE=prediction da onemogucite.',
+    'ledger.demo_tooltip':  'Sintetički demo događaji s tvrdo kodiranim vrijednostima, generirani svaki ciklus. Postavite BLOCKCHAIN_EVENT_SOURCE=prediction da onemogućite.',
 
     // event labels
     'event.data_sample':    'uzorak podataka',
     'event.quality_change': 'promjena kvalitete',
     'event.forecast':       'prognoza',
     'event.anomaly':        'anomalija',
-    'event.sla_breach':     'SLA prekr?aj',
+    'event.sla_breach':     'SLA prekršaj',
     'event.sla_recovered':  'SLA oporavljen',
-    'event.export_refresh': 'osvje?enje izvoza',
+    'event.export_refresh': 'osvježenje izvoza',
     'event.ok_ping':        'ok ping',
     'event.alarm':          'alarm',
     'event.export':         'izvoz',
     'event.config':         'konfiguracija',
-    'event.critical':       'kriticno',
+    'event.critical':       'kritično',
 
     // proof
     'proof.value':          'vrijednost',
-    'proof.confirmed':      'potvrdeno',
+    'proof.confirmed':      'potvrđeno',
     'proof.tx':             'tx',
     'proof.block':          'blok',
-    'proof.awaiting_block': 'cekam blok',
-    'proof.pending':        'na cekanju',
+    'proof.awaiting_block': 'čekam blok',
+    'proof.pending':        'na čekanju',
     'proof.failed':         'neuspjeh',
     'proof.sent':           'poslano',
     'proof.confirmations':  '{n}x',
     'proof.no_payload':     'nema podataka',
-    'proof.open_tx':        'Otvori tx u Stealth Monitoru ?',
-    'proof.open_block':     'Otvori blok ?',
+    'proof.open_tx':        'Otvori tx u Stealth Monitoru →',
+    'proof.open_block':     'Otvori blok →',
 
     // tx status (per-row pills in the ledger)
-    'tx.status.queued':       'red cekanja',
-    'tx.status.submitting':   '?alje se',
+    'tx.status.queued':       'red čekanja',
+    'tx.status.submitting':   'šalje se',
     'tx.status.sent':         'poslano',
-    'tx.status.confirmed':    'potvrdeno',
+    'tx.status.confirmed':    'potvrđeno',
     'tx.status.failed':       'neuspjeh',
-    'tx.status.retrying':     'poku?aj',
+    'tx.status.retrying':     'pokušaj',
     'tx.status.encoded':      'kodirano',
-    'tx.status.pending':      'na cekanju',
-    'tx.status.deferred':     'odgodeno',
+    'tx.status.pending':      'na čekanju',
+    'tx.status.deferred':     'odgođeno',
 
     // rationale
-    'rationale.first_cycle':'cekam prvi ciklus',
-    'rationale.flat_mean':  'Zadr?ano na prosjeku ulaza. Tek {n} ocitanja, premalo za testiranje alternativa.',
-    'rationale.picked_with_loser': 'Odabran model {winner} ispred modela {loser} s {lift} manjom pogre?kom (?{error}).',
-    'rationale.picked':     'Odabran model {winner} (pogre?ka ?{error}).',
-    'rationale.trained':    'Treniran na {n} ocitanja kroz {span}h{holdout}.',
-    'rationale.holdout':    '; {n} zadr?ano za bodovanje',
-    'rationale.next':       'Sljedecih {h}h: {min} do {max}.',
+    'rationale.first_cycle':'čekam prvi ciklus',
+    'rationale.flat_mean':  'Zadržano na prosjeku ulaza. Tek {n} očitanja, premalo za testiranje alternativa.',
+    'rationale.picked_with_loser': 'Odabran model {winner} ispred modela {loser} s {lift} manjom pogreškom (±{error}).',
+    'rationale.picked':     'Odabran model {winner} (pogreška ±{error}).',
+    'rationale.trained':    'Treniran na {n} očitanja kroz {span}h{holdout}.',
+    'rationale.holdout':    '; {n} zadržano za bodovanje',
+    'rationale.next':       'Sljedećih {h}h: {min} do {max}.',
     'rationale.range':      'Raspon {min} do {max}.',
-    'rationale.insufficient_forecast': 'Predikcija nije izgradena ? nema linije na grafu jer ulaz ne zadovoljava prag (npr. premalo intervala s podacima).',
+    'rationale.insufficient_forecast': 'Predikcija nije izgrađena — nema linije na grafu jer ulaz ne zadovoljava prag (npr. premalo intervala s podacima).',
     'rationale.insufficient_reason':   'Detalj:',
 
     // model labels (friendly Croatian names)
@@ -1524,28 +1524,28 @@ const I18N = {
 
     // metric picker (friendly names)
     'metric.PM2_5':         'Kvaliteta zraka (PM2.5)',
-    'metric.PM10':          'Cestice (PM10)',
+    'metric.PM10':          'Čestice (PM10)',
     'metric.CAQI':          'Indeks kvalitete zraka',
     'metric.Temperatura':   'Temperatura',
-    'metric.Grid_power_total':       'Mre?na snaga',
+    'metric.Grid_power_total':       'Mrežna snaga',
     'metric.Inverter_AC_power_total':'Solarna snaga',
 
     // footer / misc
     'misc.unknown_source':  'nepoznat izvor',
-    'misc.connection_error':'gre?ka u vezi',
+    'misc.connection_error':'greška u vezi',
   },
   en: {
     'partners.with':        'with',
     'live.connecting':      'connecting',
     'live.label':           'live',
-    'live.update_at':       '? last update {clock}',
-    'live.last_update':     'live ? last update {clock}',
+    'live.update_at':       '· last update {clock}',
+    'live.last_update':     'live · last update {clock}',
     'live.disconnected':    'disconnected at {time}, retrying',
     'lang.label':           'Language',
 
     // EU funding visibility (edit PROGRAMME_NAME / PROJECT_CODE in the HTML strip)
     'eu.lead':              'Co-funded by the European Union',
-    'eu.project':           'Operational Programme: PROGRAMME_NAME ? Project: PROJECT_CODE',
+    'eu.project':           'Operational Programme: PROGRAMME_NAME · Project: PROJECT_CODE',
     'eu.disclaimer':        'Views and opinions expressed are however those of the author(s) only and do not necessarily reflect those of the European Union. Neither the European Union can be held responsible for them.',
 
     'tab.overview':         'Overview',
@@ -1555,7 +1555,7 @@ const I18N = {
     'tab.eu':               'EU',
 
     'meas.title':           'Raw Mars2 measurements (historical)',
-    'meas.loading':         'loading?',
+    'meas.loading':         'loading…',
     'meas.empty':           'no rows match the current filters',
     'meas.all':             'all',
     'meas.filter.station':  'station',
@@ -1584,10 +1584,10 @@ const I18N = {
     'meas.prev':            'prev',
     'meas.next':            'next',
     'pager.per_page':       'per page',
-    'meas.page_info':       '{from}?{to} of {total} ? page {page}/{pages} ? cached {age}',
+    'meas.page_info':       '{from}—{to} of {total} · page {page}/{pages} · cached {age}',
     'meas.cache_age_now':   'just now',
     'meas.cache_age':       '{sec}s ago',
-    'meas.missing':         '?',
+    'meas.missing':         '—',
     'meas.error':           'error: {msg}',
 
     'pred.title':           'Prediction records',
@@ -1661,7 +1661,7 @@ const I18N = {
     'card.power.grid_panel': 'Grid exchange (kW)',
     'card.power.series_empty':'no measurements',
     'card.power.meta':      'AC output and grid exchange (kW)',
-    'card.power.meta_stale':'AC output and grid exchange (kW) ? last reading {age} ago',
+    'card.power.meta_stale':'AC output and grid exchange (kW) · last reading {age} ago',
     'card.power.meta_no_data':'no power readings available',
     'card.method.model':    'Model',
     'card.ledger_summary.title':'Chain',
@@ -1680,7 +1680,7 @@ const I18N = {
     'legend.cat_predictions':'Predictions',
     'legend.cat_chain':     'Blockchain',
     'legend.live':          'Plant producing, data arriving regularly',
-    'legend.stale':         'Data older than 15 min ? night/standby/connection lost',
+    'legend.stale':         'Data older than 15 min — night/standby/connection lost',
     'legend.no_data_yet':   'No data received from this plant yet',
     'legend.export':        'Surplus energy fed to grid',
     'legend.import':        'Plant consuming from grid',
@@ -1692,7 +1692,7 @@ const I18N = {
     'legend.pred_running':  'Forecast computation in progress',
     'legend.pred_error':    'Forecast failed',
     'legend.chain_ok':      'Blockchain relay anchoring normally',
-    'legend.chain_demo':    'Demo mode ? not writing to real chain',
+    'legend.chain_demo':    'Demo mode — not writing to real chain',
     'legend.chain_off':     'Relay inactive or disconnected',
     'env.temperature':      'Temperature',
     'env.radiation':        'Solar radiation',
@@ -1740,8 +1740,8 @@ const I18N = {
     'card.forecast.title':  'Forecast',
     'card.forecast.empty':  'no metric loaded',
     'chart.forecast_placeholder': 'no chart data',
-    'chart.forecast_unavailable': 'Forecast chart is not available ? not enough filled time intervals for this metric.',
-    'chart.forecast_waiting':     'No chart data yet ? awaiting the first prediction cycle.',
+    'chart.forecast_unavailable': 'Forecast chart is not available — not enough filled time intervals for this metric.',
+    'chart.forecast_waiting':     'No chart data yet — awaiting the first prediction cycle.',
     'card.method.title':    'How this was computed',
     'card.method.computed': 'Last computed',
     'card.method.next':     'Next cycle',
@@ -1755,7 +1755,7 @@ const I18N = {
     'pill.partial':         'partial',
     'pill.warming_up':      'warming up',
     'pill.behind':          '{age} behind',
-    'pill.out_of_sla':      'out of SLA ? {age}',
+    'pill.out_of_sla':      'out of SLA · {age}',
     'pill.awaiting':        'awaiting',
     'pill.demo':            'demo',
     'pill.offline':         'offline',
@@ -1773,8 +1773,8 @@ const I18N = {
     'skeleton.awaiting_data':'awaiting data',
 
     'source.stations':      '{n} stations',
-    'source.samples':       '{got}/{expected} intervals ? {gap}% gap',
-    'source.raw_points_title':'more raw rows fall in the same time bucket ? the number in parentheses is total readings with a value',
+    'source.samples':       '{got}/{expected} intervals · {gap}% gap',
+    'source.raw_points_title':'more raw rows fall in the same time bucket — the number in parentheses is total readings with a value',
     'source.last_reading':  'last reading {age} ago',
     'source.offline_files': 'using offline files',
     'source.past_sla':      'past 24h SLA',
@@ -1786,7 +1786,7 @@ const I18N = {
 
     'relay.anchors_one':    '{n} anchor',
     'relay.anchors_many':   '{n} anchors',
-    'relay.confirmed':      '{c} confirmed ? {s} sent',
+    'relay.confirmed':      '{c} confirmed · {s} sent',
     'relay.every_s':        'every {interval}s',
     'relay.last':           'last {time}',
 
@@ -1808,7 +1808,7 @@ const I18N = {
     'input.expected':       'expected',
     'input.gap':            'gap',
     'input.sla_window':     'SLA window',
-    'input.sla_format':     '{window} ? {pct}% available',
+    'input.sla_format':     '{window} · {pct}% available',
     'input.action':         'action',
     'input.note':           'note',
     'input.action.out_files':'Latest reading is {age} old, beyond the 24h SLA. Reading offline export files; configure live Mars2 API for fresh data.',
@@ -1816,13 +1816,13 @@ const I18N = {
     'input.note.behind':    'Latest reading is {age} old. Within the 24h SLA window; live target is 30m. Data refreshes automatically with each station report.',
 
     'anomalies.clear':      'no model-flagged anomalies on tracked metrics',
-    'anomalies.no_evidence':'not enough readings to assess ? awaiting prediction cycles and input data',
-    'anomalies.input_weak': 'input data fails SLA or is insufficient ? cannot assert sensors are healthy',
+    'anomalies.no_evidence':'not enough readings to assess — awaiting prediction cycles and input data',
+    'anomalies.input_weak': 'input data fails SLA or is insufficient — cannot assert sensors are healthy',
     'anomalies.count_one':  '{n} reading',
     'anomalies.count_many': '{n} readings',
     'anomalies.soiling_warn':'inverter {min}m behind irradiance sensors',
     'anomalies.soiling_err':'inverter {min}m behind irradiance sensors, possible fault',
-    'anomalies.soiling_label':'Solar plant ? panel soiling check',
+    'anomalies.soiling_label':'Solar plant · panel soiling check',
     'anomalies.medium_one':  '{n} metric with moderate deviation',
     'anomalies.medium_many': '{n} metrics with moderate deviations',
     'anomalies.data_age':    'data {age} old',
@@ -1864,8 +1864,8 @@ const I18N = {
     'proof.sent':           'sent',
     'proof.confirmations':  '{n}x',
     'proof.no_payload':     'no payload',
-    'proof.open_tx':        'Open tx in Stealth Monitor ?',
-    'proof.open_block':     'Open block ?',
+    'proof.open_tx':        'Open tx in Stealth Monitor →',
+    'proof.open_block':     'Open block →',
 
     'tx.status.queued':       'queued',
     'tx.status.submitting':   'submitting',
@@ -1879,13 +1879,13 @@ const I18N = {
 
     'rationale.first_cycle':'awaiting first cycle',
     'rationale.flat_mean':  'Held flat at the input mean. Only {n} readings so far, not enough to test alternatives.',
-    'rationale.picked_with_loser': 'Picked the {winner} model over the {loser} model with {lift} lower error (?{error}).',
-    'rationale.picked':     'Picked the {winner} model (error ?{error}).',
+    'rationale.picked_with_loser': 'Picked the {winner} model over the {loser} model with {lift} lower error (±{error}).',
+    'rationale.picked':     'Picked the {winner} model (error ±{error}).',
     'rationale.trained':    'Trained on {n} readings over {span}h{holdout}.',
     'rationale.holdout':    '; {n} held back for scoring',
     'rationale.next':       'Next {h}h: {min} to {max}.',
     'rationale.range':      'Range {min} to {max}.',
-    'rationale.insufficient_forecast': 'Forecast was not built ? there is no line on the chart because input does not meet the minimum (e.g. too few intervals with data).',
+    'rationale.insufficient_forecast': 'Forecast was not built — there is no line on the chart because input does not meet the minimum (e.g. too few intervals with data).',
     'rationale.insufficient_reason':   'Detail:',
 
     'model.daily':          'daily-rhythm',
@@ -1975,7 +1975,7 @@ function setLanguage(lang) {
   if (liveStreamUp) updateLiveStatusLabel();
 }
 
-/* syncOverviewPairHeaders removed ? old signal/ledger split layout no longer exists */
+/* syncOverviewPairHeaders removed — old signal/ledger split layout no longer exists */
 
 const FRIENDLY_METRICS = {
   'PM2_5':        'Air quality (PM2.5)',
@@ -2040,7 +2040,7 @@ function relativeTime(isoOrSec){
   return future ? `in ${value}${unit}` : `${value}${unit} ago`;
 }
 
-/* Compact past-only duration ("5m", "2h", "3d") for inline labels ? no
+/* Compact past-only duration ("5m", "2h", "3d") for inline labels — no
  * "ago"/"in" suffix so it slots into translated phrases like "podaci stari 2h"
  * or "data 2h old" without grammar noise. */
 function ageBrief(unixSecOrIso){
@@ -2057,7 +2057,7 @@ function ageBrief(unixSecOrIso){
 function shorten(text, head = 6, tail = 4){
   const s = String(text || '');
   if (s.length <= head + tail + 1) return s;
-  return `${s.slice(0, head)}?${s.slice(-tail)}`;
+  return `${s.slice(0, head)}…${s.slice(-tail)}`;
 }
 
 function stableClone(value){
@@ -2355,7 +2355,7 @@ function renderStorageTile(){
   setHtml('storageMeta1', m1.join(''));
   const m2 = [];
   if (battPlants.length > 1) {
-    m2.push(`<span class="muted">${battPlants.map(p => `${stationLabel(p.source)} ${Number(p.soc).toFixed(0)}%`).join(' ? ')}</span>`);
+    m2.push(`<span class="muted">${battPlants.map(p => `${stationLabel(p.source)} ${Number(p.soc).toFixed(0)}%`).join(' · ')}</span>`);
   }
   setHtml('storageMeta2', m2.join(''));
 }
@@ -2763,7 +2763,7 @@ function renderPowerChart(series){
   }
 }
 
-/* -- environment row (meteo data ? always visible) ------- */
+/* ── environment row (meteo data — always visible) ─────── */
 function renderEnvironment(){
   const el = $('envStats');
   if (!el) return;
@@ -2918,7 +2918,7 @@ function renderForecast(forecast){
   chartState.unit = meta.unit || '';
   const hasMeta = forecast?.source || forecast?.metric;
   const headline = hasMeta
-    ? `${forecast?.source || '--'} ? ${chartState.label || forecast?.metric || '--'}${chartState.unit ? ` ? ${chartState.unit}` : ''}`
+    ? `${forecast?.source || '--'} · ${chartState.label || forecast?.metric || '--'}${chartState.unit ? ` · ${chartState.unit}` : ''}`
     : 'no forecast loaded';
   const signalMetaEl = $('signalMeta');
   if (signalMetaEl) setText('signalMeta', headline);
@@ -3157,7 +3157,7 @@ async function checkSoiling(){
 
 let lastSoilingHint = null;
 
-// Friendly station label: "SOLAXBIOS" ? "Solarna elektrana" (HR) / "Solar plant" (EN).
+// Friendly station label: "SOLAXBIOS" → "Solarna elektrana" (HR) / "Solar plant" (EN).
 const STATION_LABEL = {
   hr: { SOLAXBIOS: 'Solarna elektrana (BIOS)', Solarman: 'Solarna elektrana (Dvorana)', OS1BIOS: 'Meteo postaja 1', OS2BIOS: 'Meteo postaja 2' },
   en: { SOLAXBIOS: 'Solar plant (BIOS)', Solarman: 'Solar plant (Dvorana)', OS1BIOS: 'Meteo station 1', OS2BIOS: 'Meteo station 2' },
@@ -3217,7 +3217,7 @@ function renderAnomalies(anomalies){
     const count = t(pointN === 1 ? 'anomalies.count_one' : 'anomalies.count_many', { n: pointN });
     // Show the *underlying data age* (most recent flagged sample), not when
     // the cycle ran. Without this, the panel says "5m ago" because the model
-    // just evaluated, even though the sensor has been silent for hours ? which
+    // just evaluated, even though the sensor has been silent for hours — which
     // is exactly the misread that caused operators to assume the feed was live.
     // Fall back to dataAgeMinutes when an anomaly entry lacks a timestamp.
     const stamps = (row.anomalies || []).map(a => Number(a.timestamp)).filter(Number.isFinite);
@@ -3249,7 +3249,7 @@ function renderAnomalies(anomalies){
         })
       : ageLabel;
     const station = stationLabel(row.source);
-    return `<div class="row" title="${escapeHtml(title)}"><span class="k">${escapeHtml(station)} ? ${escapeHtml(label)}</span><span class="v">${count}<span class="dim"> ? ${escapeHtml(ageLabel)}</span></span></div>`;
+    return `<div class="row" title="${escapeHtml(title)}"><span class="k">${escapeHtml(station)} · ${escapeHtml(label)}</span><span class="v">${count}<span class="dim"> · ${escapeHtml(ageLabel)}</span></span></div>`;
   });
   const extraRows = extras.map(x => {
     const txt = x.kind === 'err'
@@ -3433,7 +3433,7 @@ function buildPicker(targets){
     const i18nLabel = I18N[currentLang]?.[i18nKey];
     const label = i18nLabel || FRIENDLY_METRICS[metric] || metric;
     const target = targets.find(tgt => tgt.metric === metric);
-    return `<button data-source="${escapeHtml(target.source)}" data-metric="${escapeHtml(metric)}" title="${escapeHtml(target.source)} ? ${escapeHtml(metric)}">${escapeHtml(label)}</button>`;
+    return `<button data-source="${escapeHtml(target.source)}" data-metric="${escapeHtml(metric)}" title="${escapeHtml(target.source)} · ${escapeHtml(metric)}">${escapeHtml(label)}</button>`;
   }).join('');
   // Bind the click delegation only once on the container, so rebuilds (e.g.
   // on language toggle) don't stack duplicate listeners.
@@ -3621,12 +3621,12 @@ function updateLiveStatusLabel(){
   const tStr = new Date().toLocaleTimeString([], { hour12: false });
   const ageSec = lastLiveDataAt ? Math.max(0, Math.round((Date.now() - lastLiveDataAt) / 1000)) : 0;
   // Split the label into three parts so narrow viewports can hide the verbose
-  // middle ("? a?urirano u 09:04:19") via CSS while keeping the "u?ivo" label
+  // middle ("· ažurirano u 09:04:19") via CSS while keeping the "uživo" label
   // and the live age digits ("40s") visible at all times.
   const label = escapeHtml(t('live.label'));
   const updateAt = escapeHtml(t('live.update_at', { clock: tStr }));
   const ageDigits = escapeHtml(String(ageSec));
-  el.innerHTML = `${label} <span class="live-clock">${updateAt}</span> <span class="live-age">? <span class="live-age-digits">${ageDigits}</span>s</span>`;
+  el.innerHTML = `${label} <span class="live-clock">${updateAt}</span> <span class="live-age">· <span class="live-age-digits">${ageDigits}</span>s</span>`;
 }
 
 setInterval(() => { updateLiveStatusLabel(); }, 1000);
@@ -3966,7 +3966,7 @@ function renderMeasurements(payload) {
   } else {
     const rows = data.map(row => {
       const time = new Date(row.timestamp * 1000);
-      const friendly = FRIENDLY_METRICS[row.metric] ? `<span class="dim" style="color:var(--muted)"> ? ${escapeHtml(FRIENDLY_METRICS[row.metric])}</span>` : '';
+      const friendly = FRIENDLY_METRICS[row.metric] ? `<span class="dim" style="color:var(--muted)"> · ${escapeHtml(FRIENDLY_METRICS[row.metric])}</span>` : '';
       const valueCell = row.isMissing
         ? `<td class="value missing">${t('meas.missing')}</td>`
         : `<td class="value">${escapeHtml(formatNumber(row.value))}</td>`;
@@ -3984,7 +3984,7 @@ function renderMeasurements(payload) {
     const isSorted = th.dataset.sort === measurements.state.sort;
     th.classList.toggle('sorted', isSorted);
     const ind = th.querySelector('.ind');
-    if (ind) ind.textContent = isSorted ? (measurements.state.sortDir === 'asc' ? '?' : '?') : '';
+    if (ind) ind.textContent = isSorted ? (measurements.state.sortDir === 'asc' ? '↑' : '↓') : '';
   });
   measurements.total = payload.total || 0;
   measurements.cachedAt = payload.cachedAt;
@@ -3996,7 +3996,7 @@ function renderMeasurements(payload) {
     `<span class="chip ${s.ok ? 'ok' : 'bad'}" title="${escapeHtml(s.error || '')}">${escapeHtml(stationLabel(s.source))}: ${s.ok ? `${s.included}/${s.rows}` : 'fail'}</span>`
   ).join('');
   setText('measMeta', payload.cachedAt
-    ? `${t('meas.col.time')}: ${new Date(payload.cachedAt).toLocaleString()} ? TTL ${payload.cacheTtlSeconds}s`
+    ? `${t('meas.col.time')}: ${new Date(payload.cachedAt).toLocaleString()} · TTL ${payload.cacheTtlSeconds}s`
     : '--');
 }
 
@@ -4055,7 +4055,7 @@ async function exportMeasurementsCsv() {
   btn.disabled = true;
   btn.textContent = t('meas.exporting');
   try {
-    // Reuse current filter state but bypass paging ? fetch up to 5000 rows in one go.
+    // Reuse current filter state but bypass paging — fetch up to 5000 rows in one go.
     const p = new URLSearchParams();
     const src = $('measSource').value;
     const metric = $('measMetric').value;
@@ -4174,7 +4174,7 @@ async function showMeasurementsChart() {
       cssVar('--red'), '#7c3aed', '#0891b2', '#65a30d', '#ea580c', '#0284c7',
     ];
     const datasets = Object.values(groups).map((g, i) => ({
-      label: `${stationLabel(g.source)} ? ${FRIENDLY_METRICS[g.metric] || g.metric}`,
+      label: `${stationLabel(g.source)} · ${FRIENDLY_METRICS[g.metric] || g.metric}`,
       data: g.points,
       borderColor: palette[i % palette.length],
       backgroundColor: palette[i % palette.length] + '22',

@@ -20,7 +20,8 @@ function isUrlQueryDelimiter(source: string, questionIndex: number): boolean {
   }
 
   return openingQuote >= 0 &&
-    source.slice(openingQuote + 1, questionIndex).trimStart().startsWith("/");
+    source.slice(openingQuote + 1, questionIndex).trimStart().startsWith("/") &&
+    source.indexOf("?", openingQuote + 1) === questionIndex;
 }
 
 function assertNoUnexpectedEmbeddedQuestionMarks(source: string): void {
@@ -81,4 +82,7 @@ Deno.test("embedded question mark check only allows URL query delimiters", () =>
   );
   assertThrows(() => assertNoUnexpectedEmbeddedQuestionMarks("'a?foo='"));
   assertThrows(() => assertNoUnexpectedEmbeddedQuestionMarks("`a?${value}`"));
+  assertThrows(() =>
+    assertNoUnexpectedEmbeddedQuestionMarks('"/api?key=a?foo"')
+  );
 });

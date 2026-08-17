@@ -51,4 +51,35 @@ const denseQuality = dataQuality({
 assert.strictEqual(denseQuality.input.rawSamplePoints, 2);
 assert.strictEqual(denseQuality.input.observedSamples, 1);
 
+// /measurements/meta must expose every source that actually has rows in the
+// database (e.g. dynamically discovered HUAWEI:* sources), not only the
+// statically configured stations.
+const { mergeStationLists, observedMetricList } = require('./server');
+
+assert.deepStrictEqual(
+  mergeStationLists(
+    ['OS1BIOS', 'OS2BIOS', 'SOLAXBIOS'],
+    [
+      { source: 'SOLAXBIOS', rows: 10 },
+      { source: 'HUAWEI:NE=2', rows: 5 },
+      { source: 'HUAWEI:NE=1', rows: 5 },
+      { source: 'HUAWEI:NE=1:device:42', rows: 5 },
+    ],
+  ),
+  ['OS1BIOS', 'OS2BIOS', 'SOLAXBIOS', 'HUAWEI:NE=1', 'HUAWEI:NE=1:device:42', 'HUAWEI:NE=2'],
+);
+assert.deepStrictEqual(mergeStationLists(['A'], []), ['A']);
+assert.deepStrictEqual(mergeStationLists(['A'], [{ source: '' }, { source: null }, {}]), ['A']);
+
+assert.deepStrictEqual(
+  observedMetricList([
+    { metric: 'huawei.plant.daily_yield_kwh' },
+    { metric: 'Temperatura' },
+    { metric: 'huawei.plant.daily_yield_kwh' },
+    { metric: '' },
+  ]),
+  ['Temperatura', 'huawei.plant.daily_yield_kwh'],
+);
+assert.deepStrictEqual(observedMetricList(undefined), []);
+
 console.log('prediction tests passed');

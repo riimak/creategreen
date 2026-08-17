@@ -2082,6 +2082,32 @@ const FRIENDLY_METRICS = {
   '39_Daily_Grid_Feed-in': 'Daily grid feed-in',
   '38_Cumulative_Energy_Purchased': 'Energy purchased total',
   '43_Daily Consumption': 'Daily consumption',
+  'huawei.plant.daily_yield_kwh': 'Daily yield',
+  'huawei.plant.monthly_yield_kwh': 'Monthly yield',
+  'huawei.plant.total_yield_kwh': 'Total yield',
+  'huawei.plant.daily_on_grid_energy_kwh': 'Daily energy to grid',
+  'huawei.plant.daily_consumption_kwh': 'Daily consumption',
+  'huawei.string_inverter.active_power_kw': 'Inverter power',
+  'huawei.string_inverter.daily_yield_kwh': 'Inverter daily yield',
+  'huawei.string_inverter.total_yield_kwh': 'Inverter total yield',
+  'huawei.residential_inverter.active_power_kw': 'Inverter power',
+  'huawei.residential_inverter.daily_yield_kwh': 'Inverter daily yield',
+  'huawei.residential_inverter.total_yield_kwh': 'Inverter total yield',
+  'huawei.grid_meter.active_power_kw': 'Grid meter power',
+  'huawei.grid_meter.positive_active_energy_kwh': 'Grid feed-in total',
+  'huawei.grid_meter.negative_active_energy_kwh': 'Grid purchase total',
+  'huawei.power_sensor.active_power_kw': 'Power sensor',
+  'huawei.power_sensor.positive_active_energy_kwh': 'Sensor feed-in total',
+  'huawei.power_sensor.negative_active_energy_kwh': 'Sensor purchase total',
+  'huawei.battery.state_of_charge_percent': 'Battery SOC',
+  'huawei.battery.charge_discharge_power_kw': 'Battery power',
+  'huawei.battery.daily_charge_kwh': 'Battery daily charge',
+  'huawei.battery.daily_discharge_kwh': 'Battery daily discharge',
+  'huawei.battery.rated_capacity_kwh': 'Battery capacity',
+  'huawei.ess.state_of_charge_percent': 'ESS SOC',
+  'huawei.ess.charge_discharge_power_kw': 'ESS power',
+  'huawei.ess.daily_charge_kwh': 'ESS daily charge',
+  'huawei.ess.daily_discharge_kwh': 'ESS daily discharge',
 };
 const PICKER_METRICS = ['PM2_5','CAQI','Temperatura','Grid_power_total','Inverter_AC_power_total'];
 let activeTarget = null;
@@ -2509,6 +2535,124 @@ const ENERGY_COUNTER_KEYS = ['Inverter_AC_energy_out_daily', 'Inverter.AC.energy
 const TO_GRID_KEYS = ['Grid_energy_toGrid_total', 'Grid.energy.toGrid.total', '37_Cumulative_Grid_Feed-in', '39_Daily_Grid_Feed-in'];
 const FROM_GRID_KEYS = ['Grid_energy_fromGrid_total', 'Grid.energy.fromGrid.total', '38_Cumulative_Energy_Purchased'];
 
+/* -- Huawei (FusionSolar) sources ---------------------------------------
+ * Plant-level rows arrive on source "HUAWEI:<plantCode>"; per-device rows on
+ * "HUAWEI:<plantCode>:device:<id>". Unlike the Mars2/SOLAX counters, Huawei
+ * daily/monthly yields are already period totals, so the latest reading IS
+ * the value (never diff first/last). Live power lives on device sources and
+ * must be summed across a plant's devices. */
+const HUAWEI_INVERTER_POWER_KEYS = ['huawei.string_inverter.active_power_kw', 'huawei.residential_inverter.active_power_kw'];
+const HUAWEI_GRID_POWER_KEYS = ['huawei.grid_meter.active_power_kw', 'huawei.power_sensor.active_power_kw'];
+const HUAWEI_SOC_KEYS = ['huawei.battery.state_of_charge_percent', 'huawei.ess.state_of_charge_percent'];
+const HUAWEI_BATT_POWER_KEYS = ['huawei.battery.charge_discharge_power_kw', 'huawei.ess.charge_discharge_power_kw'];
+const HUAWEI_TO_GRID_KEYS = ['huawei.grid_meter.positive_active_energy_kwh', 'huawei.power_sensor.positive_active_energy_kwh'];
+const HUAWEI_FROM_GRID_KEYS = ['huawei.grid_meter.negative_active_energy_kwh', 'huawei.power_sensor.negative_active_energy_kwh'];
+
+function isHuaweiSource(source) {
+  return typeof source === 'string' && source.startsWith('HUAWEI:');
+}
+
+function huaweiPlantOf(source) {
+  return source.split(':device:')[0];
+}
+
+/* Latest value for the first candidate metric whose reading is younger than
+ * maxAgeSec. Prevents an offline device's last-known power from inflating
+ * "current" totals for hours. */
+function freshLatestValue(latest, candidates, maxAgeSec) {
+  const nowS = Date.now() / 1000;
+  for (const key of candidates) {
+    const entry = latest?.[key];
+    if (entry && Number.isFinite(entry.v) && (nowS - entry.ts) <= maxAgeSec) return entry.v;
+  }
+  return null;
+}
+
+/* Sums several power series into one. Points are bucketed to 5 minutes; each
+ * source contributes its last reading per bucket and is carried forward for
+ * up to 3 buckets (15 min) so short gaps don't produce artificial dips.
+ * A single series passes through unchanged (sorted). */
+function sumPowerSeries(seriesList) {
+  const usable = (seriesList || []).filter(s => Array.isArray(s) && s.length);
+  if (!usable.length) return [];
+  if (usable.length === 1) return [...usable[0]].sort((a, b) => a.x - b.x);
+  const BUCKET_MS = 5 * 60 * 1000;
+  const CARRY_BUCKETS = 3;
+  const perSource = usable.map(points => {
+    const byBucket = new Map();
+    for (const p of points) {
+      if (!(p?.x instanceof Date) || !Number.isFinite(Number(p.y))) continue;
+      const bucket = Math.floor(p.x.getTime() / BUCKET_MS);
+      const prev = byBucket.get(bucket);
+      if (!prev || p.x.getTime() >= prev.t) byBucket.set(bucket, { t: p.x.getTime(), y: Number(p.y) });
+    }
+    return byBucket;
+  });
+  const allBuckets = [...new Set(perSource.flatMap(m => [...m.keys()]))].sort((a, b) => a - b);
+  const lastSeen = perSource.map(() => null);
+  const out = [];
+  for (const bucket of allBuckets) {
+    let sum = 0;
+    let contributors = 0;
+    perSource.forEach((byBucket, i) => {
+      const hit = byBucket.get(bucket);
+      if (hit) lastSeen[i] = { bucket, y: hit.y };
+      const seen = lastSeen[i];
+      if (seen && bucket - seen.bucket <= CARRY_BUCKETS) { sum += seen.y; contributors += 1; }
+    });
+    if (contributors > 0) out.push({ x: new Date((bucket + 1) * BUCKET_MS), y: sum });
+  }
+  return out;
+}
+
+/* Aggregates one Huawei plant into the snapshot shape the dashboard uses:
+ * period yields from the plant source, live power / grid energy / battery
+ * state summed across its device sources. */
+function computeHuaweiPlant(plantSource, group) {
+  const FRESH_SEC = 30 * 60;
+  const { latest: plantLatest } = processStationRows(group.plantRows || []);
+  let ac = null, grid = null, battPower = null, toGrid = null, fromGrid = null;
+  let socSum = 0, socCount = 0, lastTs = 0;
+  const acSeriesList = [];
+  const gridSeriesList = [];
+
+  for (const l of Object.values(plantLatest)) if (l.ts > lastTs) lastTs = l.ts;
+
+  for (const rows of (group.devices ? group.devices.values() : [])) {
+    const { latest, series } = processStationRows(rows);
+    const acVal = freshLatestValue(latest, HUAWEI_INVERTER_POWER_KEYS, FRESH_SEC);
+    if (acVal !== null) ac = (ac ?? 0) + acVal;
+    const gridVal = freshLatestValue(latest, HUAWEI_GRID_POWER_KEYS, FRESH_SEC);
+    if (gridVal !== null) grid = (grid ?? 0) + gridVal;
+    const socVal = pickLatestValue(latest, series, HUAWEI_SOC_KEYS);
+    if (socVal !== null) { socSum += socVal; socCount += 1; }
+    const battVal = freshLatestValue(latest, HUAWEI_BATT_POWER_KEYS, FRESH_SEC);
+    if (battVal !== null) battPower = (battPower ?? 0) + battVal;
+    const toGridVal = pickLatestValue(latest, series, HUAWEI_TO_GRID_KEYS);
+    if (toGridVal !== null) toGrid = (toGrid ?? 0) + toGridVal;
+    const fromGridVal = pickLatestValue(latest, series, HUAWEI_FROM_GRID_KEYS);
+    if (fromGridVal !== null) fromGrid = (fromGrid ?? 0) + fromGridVal;
+    const acSeries = pickSeries(series, HUAWEI_INVERTER_POWER_KEYS);
+    if (acSeries.length) acSeriesList.push(acSeries);
+    const gridSeries = pickSeries(series, HUAWEI_GRID_POWER_KEYS);
+    if (gridSeries.length) gridSeriesList.push(gridSeries);
+    for (const l of Object.values(latest)) if (l.ts > lastTs) lastTs = l.ts;
+  }
+
+  const daily = plantLatest['huawei.plant.daily_yield_kwh']?.v ?? null;
+  const monthly = plantLatest['huawei.plant.monthly_yield_kwh']?.v ?? null;
+
+  if (ac === null && daily === null && !lastTs) return null;
+  return {
+    source: plantSource,
+    ac, grid, daily, monthly,
+    soc: socCount > 0 ? socSum / socCount : null,
+    battPower, toGrid, fromGrid, lastTs,
+    acSeries: sumPowerSeries(acSeriesList),
+    gridSeries: sumPowerSeries(gridSeriesList),
+  };
+}
+
 function pickMetricKey(latest, series, candidates) {
   for (const key of candidates) {
     if (latest?.[key] || series?.[key]?.length) return key;
@@ -2594,6 +2738,7 @@ async function loadLiveEnergy(){
     const metaRes = await fetch('/prediction/measurements/meta');
     if (!metaRes.ok) throw new Error(`HTTP ${metaRes.status}`);
     const meta = await metaRes.json();
+    if (meta?.stationLabels) dynamicStationLabels = { ...dynamicStationLabels, ...meta.stationLabels };
     const allStations = meta?.stations || [];
     if (!allStations.length) {
       renderEnergyHero();
@@ -2619,9 +2764,18 @@ async function loadLiveEnergy(){
 
     const solarPlants = [];
     const meteoStations = [];
+    const huaweiGroups = new Map();
     for (const r of results) {
       if (r.status !== 'fulfilled' || !r.value.data.length) continue;
       const { source, data } = r.value;
+      if (isHuaweiSource(source)) {
+        const plantSource = huaweiPlantOf(source);
+        if (!huaweiGroups.has(plantSource)) huaweiGroups.set(plantSource, { plantRows: [], devices: new Map() });
+        const group = huaweiGroups.get(plantSource);
+        if (source === plantSource) group.plantRows = data;
+        else group.devices.set(source, data);
+        continue;
+      }
       const metrics = new Set(data.filter(row => row.value !== null).map(row => row.metric));
       if (isSolarData(metrics)) solarPlants.push({ source, data, metrics });
       if (isMeteoData(metrics)) meteoStations.push({ source, data, metrics });
@@ -2630,7 +2784,8 @@ async function loadLiveEnergy(){
     // Aggregate solar plants
     let totalAc = 0, totalGrid = 0, totalToGrid = 0, totalFromGrid = 0;
     let totalBattPower = 0, socSum = 0, socCount = 0, latestTs = 0;
-    const mergedPowerSeries = {};
+    const acSeriesList = [];
+    const gridSeriesList = [];
     plantSnapshots = [];
 
     for (const plant of solarPlants) {
@@ -2656,31 +2811,47 @@ async function loadLiveEnergy(){
 
       plantSnapshots.push({ source: plant.source, ac, grid, daily, soc, battPower, lastTs: plantTs });
 
-      // Merge power series for combined chart
-      const powerKey = pickMetricKey(latest, series, AC_POWER_KEYS);
-      if (powerKey && series[powerKey]) {
-        if (!mergedPowerSeries['Inverter_AC_power_total']) mergedPowerSeries['Inverter_AC_power_total'] = [];
-        mergedPowerSeries['Inverter_AC_power_total'].push(...series[powerKey]);
-      }
-      if (gridKey && series[gridKey]) {
-        if (!mergedPowerSeries['Grid_power_total']) mergedPowerSeries['Grid_power_total'] = [];
-        mergedPowerSeries['Grid_power_total'].push(...series[gridKey]);
-      }
+      // Collect power series for the combined chart
+      if (acKey && series[acKey]) acSeriesList.push(series[acKey]);
+      if (gridKey && series[gridKey]) gridSeriesList.push(series[gridKey]);
     }
 
-    // Sort merged series by time
-    for (const key of Object.keys(mergedPowerSeries)) {
-      mergedPowerSeries[key].sort((a, b) => a.x - b.x);
+    // Huawei plants: yields come from the plant source, power from devices.
+    const huaweiPlantSnaps = [];
+    for (const [plantSource, group] of huaweiGroups) {
+      const snap = computeHuaweiPlant(plantSource, group);
+      if (!snap) continue;
+      huaweiPlantSnaps.push(snap);
+      if (snap.ac !== null) totalAc += snap.ac;
+      if (snap.grid !== null) totalGrid += snap.grid;
+      if (snap.toGrid !== null) totalToGrid += snap.toGrid;
+      if (snap.fromGrid !== null) totalFromGrid += snap.fromGrid;
+      if (snap.soc !== null) { socSum += snap.soc; socCount += 1; }
+      if (snap.battPower !== null) totalBattPower += snap.battPower;
+      if (snap.lastTs > latestTs) latestTs = snap.lastTs;
+      plantSnapshots.push({ source: plantSource, ac: snap.ac, grid: snap.grid, daily: snap.daily, soc: snap.soc, battPower: snap.battPower, lastTs: snap.lastTs });
+      if (snap.acSeries.length) acSeriesList.push(snap.acSeries);
+      if (snap.gridSeries.length) gridSeriesList.push(snap.gridSeries);
     }
+
+    // Merge chart series by summing per timestamp bucket (concatenating
+    // multiple plants' points would zig-zag the chart between plants).
+    const mergedPowerSeries = {};
+    const mergedAc = sumPowerSeries(acSeriesList);
+    const mergedGrid = sumPowerSeries(gridSeriesList);
+    if (mergedAc.length) mergedPowerSeries['Inverter_AC_power_total'] = mergedAc;
+    if (mergedGrid.length) mergedPowerSeries['Grid_power_total'] = mergedGrid;
+
+    const plantCount = solarPlants.length + huaweiPlantSnaps.length;
 
     // Compute combined daily yield
     let totalDaily = null;
     const dailies = plantSnapshots.map(p => p.daily).filter(d => d !== null);
     if (dailies.length) totalDaily = dailies.reduce((a, b) => a + b, 0);
 
-    energySnap.ac = solarPlants.length ? totalAc : null;
+    energySnap.ac = plantCount ? totalAc : null;
     energySnap.daily = totalDaily;
-    energySnap.grid = solarPlants.length ? totalGrid : null;
+    energySnap.grid = plantCount ? totalGrid : null;
     energySnap.soc = socCount > 0 ? socSum / socCount : null;
     energySnap.battPower = socCount > 0 ? totalBattPower : null;
     energySnap.battPlantCount = socCount;
@@ -2718,6 +2889,10 @@ async function loadLiveEnergy(){
       for (const r of monthResults) {
         if (r.status === 'fulfilled' && r.value !== null) { totalMonthly += r.value; hasAny = true; }
       }
+      // Huawei reports the month-to-date total directly on the plant source.
+      for (const snap of huaweiPlantSnaps) {
+        if (snap.monthly !== null) { totalMonthly += snap.monthly; hasAny = true; }
+      }
       energySnap.monthly = hasAny ? totalMonthly : null;
     } catch { energySnap.monthly = null; }
 
@@ -2741,7 +2916,7 @@ async function loadLiveEnergy(){
     rerenderTiles();
     const hasPower = (mergedPowerSeries['Inverter_AC_power_total']?.length || 0)
       + (mergedPowerSeries['Grid_power_total']?.length || 0) > 0;
-    setPanelState('energy', solarPlants.length ? 'ready' : 'empty', 'cpill.awaiting_data');
+    setPanelState('energy', plantCount ? 'ready' : 'empty', 'cpill.awaiting_data');
     setPanelState('power', hasPower ? 'ready' : 'empty', 'card.power.empty');
   } catch (e) {
     console.warn('loadLiveEnergy failed:', e);
@@ -3270,8 +3445,11 @@ const STATION_LABEL = {
   hr: { SOLAXBIOS: 'Solarna elektrana (BIOS)', Solarman: 'Solarna elektrana (Dvorana)', OS1BIOS: 'Meteo postaja 1', OS2BIOS: 'Meteo postaja 2' },
   en: { SOLAXBIOS: 'Solar plant (BIOS)', Solarman: 'Solar plant (Dvorana)', OS1BIOS: 'Meteo station 1', OS2BIOS: 'Meteo station 2' },
 };
+// Labels for dynamically discovered sources (Huawei plants and devices),
+// served by /prediction/measurements/meta as stationLabels.
+let dynamicStationLabels = {};
 function stationLabel(code){
-  return STATION_LABEL[currentLang]?.[code] || code;
+  return STATION_LABEL[currentLang]?.[code] || dynamicStationLabels[code] || code;
 }
 
 function renderAnomalies(anomalies){
@@ -4124,15 +4302,17 @@ const measurements = {
 function loadMeasurementsMeta() {
   measurements.metaLoaded = true;
   fetch('/prediction/measurements/meta').then(r => r.json()).then(meta => {
+    if (meta?.stationLabels) dynamicStationLabels = { ...dynamicStationLabels, ...meta.stationLabels };
     const srcSel = $('measSource');
     const metricSel = $('measMetric');
     const stationFor = code => stationLabel(code);
     for (const s of meta.stations || []) {
       const opt = document.createElement('option');
-      opt.value = s; opt.textContent = `${stationFor(s)} (${s})`;
+      const label = stationFor(s);
+      opt.value = s; opt.textContent = label === s ? s : `${label} (${s})`;
       srcSel.appendChild(opt);
     }
-    const allMetrics = [...new Set([...(meta.metrics?.meteo || []), ...(meta.metrics?.solax || [])])].sort();
+    const allMetrics = [...new Set([...(meta.metrics?.meteo || []), ...(meta.metrics?.solax || []), ...(meta.metrics?.observed || [])])].sort();
     for (const m of allMetrics) {
       const opt = document.createElement('option');
       opt.value = m; opt.textContent = (FRIENDLY_METRICS[m] || m) + (FRIENDLY_METRICS[m] ? ` (${m})` : '');

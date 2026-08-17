@@ -171,6 +171,66 @@ test('converts documented meter watts to kW without coercing invalid values', ()
   assert.equal(REGISTRY['17'].active_power.destinationUnit, 'kW');
 });
 
+test('maps documented residential battery (type 39) fields and converts watts', () => {
+  const result = normalizeKpis({
+    source: 'HUAWEI:NE=12345678:device:1000000037723942',
+    deviceType: 39,
+    timestamp: 1785924000000,
+    payload: {
+      battery_soc: '87.5',
+      ch_discharge_power: -2500,
+      charge_cap: 4.812,
+      discharge_cap: '3.107',
+      rated_capacity: 15,
+      battery_status: 2,
+      battery_unit_info: { unit1: { sn: 'x', soh: '90.0%' } },
+    },
+  });
+
+  assert.deepEqual(
+    result.measurements.map(({ metric, value }) => ({ metric, value })),
+    [
+      { metric: 'huawei.battery.state_of_charge_percent', value: 87.5 },
+      { metric: 'huawei.battery.charge_discharge_power_kw', value: -2.5 },
+      { metric: 'huawei.battery.daily_charge_kwh', value: 4.812 },
+      { metric: 'huawei.battery.daily_discharge_kwh', value: 3.107 },
+      { metric: 'huawei.battery.rated_capacity_kwh', value: 15 },
+    ],
+  );
+  assert.deepEqual(result.skipped, ['battery_status', 'battery_unit_info']);
+  assert.equal(REGISTRY['39'].ch_discharge_power.sourceUnit, 'W');
+  assert.equal(REGISTRY['39'].ch_discharge_power.destinationUnit, 'kW');
+  assert.equal(REGISTRY['39'].battery_soc.sourceUnit, '%');
+});
+
+test('maps documented C&I/utility ESS (type 41) fields and converts watts', () => {
+  const result = normalizeKpis({
+    source: 'HUAWEI:NE=12345678:device:2000000048834053',
+    deviceType: '41',
+    timestamp: 1785924000000,
+    payload: {
+      battery_soc: 42,
+      ch_discharge_power: '18000',
+      charge_cap: '120.5',
+      discharge_cap: 98.25,
+      run_state: 1,
+    },
+  });
+
+  assert.deepEqual(
+    result.measurements.map(({ metric, value }) => ({ metric, value })),
+    [
+      { metric: 'huawei.ess.state_of_charge_percent', value: 42 },
+      { metric: 'huawei.ess.charge_discharge_power_kw', value: 18 },
+      { metric: 'huawei.ess.daily_charge_kwh', value: 120.5 },
+      { metric: 'huawei.ess.daily_discharge_kwh', value: 98.25 },
+    ],
+  );
+  assert.deepEqual(result.skipped, ['run_state']);
+  assert.equal(REGISTRY['41'].ch_discharge_power.sourceUnit, 'W');
+  assert.equal(REGISTRY['41'].ch_discharge_power.destinationUnit, 'kW');
+});
+
 test('rejects missing immutable identifiers and invalid timestamps', () => {
   assert.throws(() => normalizePlant({ plantCode: '  ' }), /plantCode/);
   assert.throws(

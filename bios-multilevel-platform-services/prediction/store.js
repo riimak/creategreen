@@ -78,7 +78,7 @@ function createStore(file) {
   async function persistRawRecords() { return { inserted: 0, skipped: 'json store does not persist raw measurements' }; }
   async function listRawMeasurements() { return { data: [], total: 0, limit: 0, offset: 0 }; }
   async function rawMeasurementsStats() {
-    return { totalRows: 0, uniqueSources: 0, uniqueMetrics: 0, missingRows: 0, rows24h: 0, rows7d: 0, earliest: null, latest: null, perStation: [] };
+    return { totalRows: 0, uniqueSources: 0, uniqueMetrics: 0, missingRows: 0, rows24h: 0, rows7d: 0, earliest: null, latest: null, perStation: [], perMetric: [] };
   }
   async function pruneRawMeasurements() { return { deleted: 0, skipped: 'json store has no retention' }; }
 

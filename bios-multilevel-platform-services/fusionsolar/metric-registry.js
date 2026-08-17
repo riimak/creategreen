@@ -148,6 +148,72 @@ const REGISTRY = Object.freeze({
       'kWh',
     ),
   }),
+  // Residential battery. Real-time KPI fields per SmartPVMS 26.1.0 NBI
+  // reference (getDevRealKpi, devTypeId 39): SOC in %, power in W,
+  // charge_cap/discharge_cap are period totals for the current day.
+  '39': Object.freeze({
+    battery_soc: inverterEntry(
+      '39',
+      'battery_soc',
+      'huawei.battery.state_of_charge_percent',
+      '%',
+    ),
+    ch_discharge_power: meterEntry(
+      '39',
+      'ch_discharge_power',
+      'huawei.battery.charge_discharge_power_kw',
+      'W',
+      'kW',
+      wattsToKilowatts,
+    ),
+    charge_cap: inverterEntry(
+      '39',
+      'charge_cap',
+      'huawei.battery.daily_charge_kwh',
+      'kWh',
+    ),
+    discharge_cap: inverterEntry(
+      '39',
+      'discharge_cap',
+      'huawei.battery.daily_discharge_kwh',
+      'kWh',
+    ),
+    rated_capacity: inverterEntry(
+      '39',
+      'rated_capacity',
+      'huawei.battery.rated_capacity_kwh',
+      'kWh',
+    ),
+  }),
+  // C&I and utility ESS (getDevRealKpi, devTypeId 41).
+  '41': Object.freeze({
+    battery_soc: inverterEntry(
+      '41',
+      'battery_soc',
+      'huawei.ess.state_of_charge_percent',
+      '%',
+    ),
+    ch_discharge_power: meterEntry(
+      '41',
+      'ch_discharge_power',
+      'huawei.ess.charge_discharge_power_kw',
+      'W',
+      'kW',
+      wattsToKilowatts,
+    ),
+    charge_cap: inverterEntry(
+      '41',
+      'charge_cap',
+      'huawei.ess.daily_charge_kwh',
+      'kWh',
+    ),
+    discharge_cap: inverterEntry(
+      '41',
+      'discharge_cap',
+      'huawei.ess.daily_discharge_kwh',
+      'kWh',
+    ),
+  }),
   '47': Object.freeze({
     active_power: meterEntry(
       '47',

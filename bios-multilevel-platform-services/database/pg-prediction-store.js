@@ -273,11 +273,18 @@ function createPgPredictionStore(databaseUrl) {
   async function rawMeasurementsStats() {
     const { rows } = await pool.query('SELECT * FROM raw_measurements_stats');
     const top = rows[0] || {};
-    const perStation = await pool.query(
-      `SELECT source, count(*)::bigint AS rows, min(ts) AS earliest, max(ts) AS latest
-       FROM raw_measurements GROUP BY source ORDER BY source`,
-    );
+    const [perStation, perMetric] = await Promise.all([
+      pool.query(
+        `SELECT source, count(*)::bigint AS rows, min(ts) AS earliest, max(ts) AS latest
+         FROM raw_measurements GROUP BY source ORDER BY source`,
+      ),
+      pool.query(
+        `SELECT metric, count(*)::bigint AS rows
+         FROM raw_measurements GROUP BY metric ORDER BY metric`,
+      ),
+    ]);
     return {
+      perMetric: perMetric.rows.map(r => ({ metric: r.metric, rows: Number(r.rows) })),
       totalRows: Number(top.total_rows || 0),
       uniqueSources: Number(top.unique_sources || 0),
       uniqueMetrics: Number(top.unique_metrics || 0),
@@ -295,6 +302,34 @@ function createPgPredictionStore(databaseUrl) {
     };
   }
 
+  // Human-readable labels for dynamically discovered FusionSolar sources.
+  // Plants map to their Huawei display name; devices to "<plant> · <device>".
+  // The tables may not exist on standalone deployments, hence the guard.
+  async function sourceLabels() {
+    try {
+      const [plants, devices] = await Promise.all([
+        pool.query('SELECT source_key, display_name, plant_code FROM fusionsolar_plants'),
+        pool.query(
+          `SELECT p.source_key || ':device:' || d.device_id AS source,
+                  coalesce(p.display_name, p.plant_code) AS plant_name,
+                  coalesce(d.metadata->>'devName', d.model, d.device_id) AS device_name
+           FROM fusionsolar_devices d
+           JOIN fusionsolar_plants p ON p.plant_code = d.plant_code`,
+        ),
+      ]);
+      const labels = {};
+      for (const row of plants.rows) {
+        if (row.display_name) labels[row.source_key] = row.display_name;
+      }
+      for (const row of devices.rows) {
+        labels[row.source] = `${row.plant_name} · ${row.device_name}`;
+      }
+      return labels;
+    } catch {
+      return {};
+    }
+  }
+
   async function pruneRawMeasurements(retentionDays) {
     if (!retentionDays || retentionDays <= 0) return { deleted: 0, skipped: 'retention disabled' };
     const { rows } = await pool.query('SELECT prune_raw_measurements($1) AS deleted', [retentionDays]);
@@ -303,7 +338,7 @@ function createPgPredictionStore(databaseUrl) {
 
   return {
     init, append, list, latest, listPaginated, checkpoint, setMeta, read, write, stats, prune,
-    persistRawRecords, listRawMeasurements, rawMeasurementsStats, pruneRawMeasurements,
+    persistRawRecords, listRawMeasurements, rawMeasurementsStats, pruneRawMeasurements, sourceLabels,
     file: 'postgres',
   };
 }

@@ -506,11 +506,44 @@ async function listMeasurements(params) {
   return { ...result, filters: { ...filters, valueMin: filters.valueMin, valueMax: filters.valueMax } };
 }
 
+// Configured stations first (stable order for the UI), then any additional
+// sources observed in raw_measurements (e.g. HUAWEI:* plants and devices),
+// alphabetically. Duplicates and blank sources are dropped.
+function mergeStationLists(configured, perStation) {
+  const observed = (perStation || [])
+    .map(entry => entry?.source)
+    .filter(source => typeof source === 'string' && source.trim() !== '')
+    .sort();
+  const merged = [];
+  const seen = new Set();
+  for (const source of [...configured, ...observed]) {
+    if (seen.has(source)) continue;
+    seen.add(source);
+    merged.push(source);
+  }
+  return merged;
+}
+
+function observedMetricList(perMetric) {
+  const metrics = (perMetric || [])
+    .map(entry => entry?.metric)
+    .filter(metric => typeof metric === 'string' && metric.trim() !== '');
+  return [...new Set(metrics)].sort();
+}
+
 async function measurementsMeta() {
   const stats = await S(store.rawMeasurementsStats());
+  const stationLabels = typeof store.sourceLabels === 'function'
+    ? await S(store.sourceLabels())
+    : {};
   return {
-    stations: stationIds(),
-    metrics: { meteo: METEO_FIELDS, solax: SOLAX_FIELDS },
+    stations: mergeStationLists(stationIds(), stats?.perStation),
+    stationLabels,
+    metrics: {
+      meteo: METEO_FIELDS,
+      solax: SOLAX_FIELDS,
+      observed: observedMetricList(stats?.perMetric),
+    },
     inputSource: inputSourceInfo(),
     intervalMinutes: numberParam('PREDICTION_INTERVAL_MINUTES', 10),
     expectedSampleMinutes: numberParam('PREDICTION_EXPECTED_SAMPLE_MINUTES', 10),
@@ -795,4 +828,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { handle, runForecast, runAnomalies, runCycle, dataQuality, slaSummary };
+module.exports = { handle, runForecast, runAnomalies, runCycle, dataQuality, slaSummary, mergeStationLists, observedMetricList };

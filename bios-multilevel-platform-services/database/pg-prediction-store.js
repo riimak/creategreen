@@ -1,7 +1,10 @@
 const { createPool } = require('./pg-pool');
 
 function createPgPredictionStore(databaseUrl) {
-  const pool = createPool(databaseUrl, { max: 5 });
+  // The dashboard fires one indexed /measurements query per source on every
+  // page load (11+ sources with FusionSolar devices), so 5 connections queue
+  // badly under a couple of concurrent clients.
+  const pool = createPool(databaseUrl, { max: 10 });
 
   async function init() {
     const fs = require('fs');

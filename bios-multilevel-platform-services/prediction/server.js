@@ -531,7 +531,7 @@ function observedMetricList(perMetric) {
   return [...new Set(metrics)].sort();
 }
 
-async function measurementsMeta() {
+async function computeMeasurementsMeta() {
   const stats = await S(store.rawMeasurementsStats());
   const stationLabels = typeof store.sourceLabels === 'function'
     ? await S(store.sourceLabels())
@@ -551,6 +551,43 @@ async function measurementsMeta() {
     stats,
     retentionDays: Number(process.env.RAW_MEASUREMENTS_RETENTION_DAYS) || null,
   };
+}
+
+// The stats behind /measurements/meta scan the whole raw_measurements table
+// (~1M rows and growing), which is far too expensive to run per page load:
+// concurrent dashboards used to exhaust the PG pool and stall every endpoint.
+// Cache the response and coalesce refreshes so the scans run at most once per
+// TTL across all clients; a stale copy is served while a refresh is in flight.
+const META_CACHE_TTL_MS = Math.max(0, Number(process.env.MEASUREMENTS_META_CACHE_MS ?? 60_000));
+const metaCache = { body: null, at: 0, inflight: null, error: null };
+
+function refreshMeasurementsMeta() {
+  metaCache.inflight = computeMeasurementsMeta().then(
+    (body) => {
+      metaCache.body = body;
+      metaCache.at = Date.now();
+      metaCache.error = null;
+      metaCache.inflight = null;
+      return body;
+    },
+    (err) => {
+      // Swallow instead of rethrowing: callers served from stale cache never
+      // observe this promise, and a rethrow would be an unhandled rejection.
+      metaCache.error = err;
+      metaCache.inflight = null;
+      return null;
+    },
+  );
+  return metaCache.inflight;
+}
+
+async function measurementsMeta() {
+  if (metaCache.body && Date.now() - metaCache.at < META_CACHE_TTL_MS) return metaCache.body;
+  const inflight = metaCache.inflight || refreshMeasurementsMeta();
+  if (metaCache.body) return metaCache.body;
+  const body = await inflight;
+  if (body) return body;
+  throw metaCache.error || new Error('measurements meta unavailable');
 }
 
 async function listFromStore(kind, params) {
@@ -828,4 +865,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { handle, runForecast, runAnomalies, runCycle, dataQuality, slaSummary, mergeStationLists, observedMetricList };
+module.exports = { handle, runForecast, runAnomalies, runCycle, dataQuality, slaSummary, mergeStationLists, observedMetricList, measurementsMeta };

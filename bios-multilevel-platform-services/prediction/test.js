@@ -82,4 +82,17 @@ assert.deepStrictEqual(
 );
 assert.deepStrictEqual(observedMetricList(undefined), []);
 
-console.log('prediction tests passed');
+// /measurements/meta is expensive to compute (full-table stats scans), so the
+// server must serve repeat requests within the TTL from cache.
+const { measurementsMeta } = require('./server');
+
+(async () => {
+  const [first, second] = await Promise.all([measurementsMeta(), measurementsMeta()]);
+  const third = await measurementsMeta();
+  assert.strictEqual(second, first, 'concurrent meta requests must coalesce to one computation');
+  assert.strictEqual(third, first, 'meta must be served from cache within the TTL');
+  console.log('prediction tests passed');
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

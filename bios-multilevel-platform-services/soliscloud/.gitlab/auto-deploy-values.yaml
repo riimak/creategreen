@@ -1,0 +1,111 @@
+# SolisCloud service — internal ClusterIP only (no public ingress).
+replicaCount: 1
+strategyType: "Recreate"
+
+image:
+  repository: git.barrage.net/bios-multilevel/bios-multilevel-dashboard
+  tag: stable
+  pullPolicy: IfNotPresent
+  secrets:
+    - name: gitlab-registry-bios-multilevel-bios-multilevel-dashboard
+
+application:
+  track: stable
+  tier: app
+
+barrage:
+  vault:
+    create: false
+
+service:
+  enabled: true
+  # The chart also uses this as the container port name (Kubernetes max: 15 chars).
+  name: soliscloud
+  type: ClusterIP
+  externalPort: 8094
+  internalPort: 8094
+
+ingress:
+  enabled: false
+  path: "/"
+  tls:
+    enabled: false
+
+livenessProbe:
+  path: "/health"
+  initialDelaySeconds: 15
+  timeoutSeconds: 5
+  scheme: "HTTP"
+  probeType: "httpGet"
+
+readinessProbe:
+  path: "/health"
+  initialDelaySeconds: 5
+  timeoutSeconds: 5
+  scheme: "HTTP"
+  probeType: "httpGet"
+
+startupProbe:
+  enabled: true
+  path: "/health"
+  initialDelaySeconds: 5
+  timeoutSeconds: 5
+  failureThreshold: 30
+  periodSeconds: 5
+  scheme: "HTTP"
+  probeType: "httpGet"
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+postgresql:
+  managed: false
+
+persistence:
+  enabled: false
+
+extraVolumes:
+  - name: pg-ca
+    secret:
+      secretName: bios-pg-ca
+      optional: true
+extraVolumeMounts:
+  - name: pg-ca
+    mountPath: /etc/ssl/pg
+    readOnly: true
+
+serviceAccount:
+  name: bios-multilevel-sa
+  annotations: {}
+  createNew: true
+
+podDisruptionBudget:
+  enabled: false
+
+networkPolicy:
+  enabled: false
+
+extraEnv:
+  - name: SOLISCLOUD_PORT
+    value: "8094"
+  - name: SOLISCLOUD_API_BASE_URL
+    value: "https://www.soliscloud.com:13333"
+  - name: SOLISCLOUD_LIVE_INTERVAL_SECONDS
+    value: "300"
+  - name: SOLISCLOUD_REQUEST_TIMEOUT_SECONDS
+    value: "20"
+  - name: SOLISCLOUD_BACKFILL_ENABLED
+    value: "true"
+  - name: SOLISCLOUD_BACKFILL_DAYS
+    value: "90"
+  # Project scope: only Veterinarski Institut for now. A CI variable with the
+  # same name overrides this (empty is not forwarded; edit here to widen).
+  - name: SOLISCLOUD_STATION_IDS
+    value: "1298491919450654168"
+  - name: DATABASE_CA_FILE
+    value: "/etc/ssl/pg/ca.crt"

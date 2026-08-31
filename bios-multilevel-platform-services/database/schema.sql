@@ -187,6 +187,52 @@ CREATE TABLE IF NOT EXISTS fusionsolar_diagnostics (
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- SolisCloud inventory and synchronization state.
+
+CREATE TABLE IF NOT EXISTS soliscloud_plants (
+  station_id       TEXT PRIMARY KEY,
+  source_key       TEXT NOT NULL UNIQUE,
+  display_name     TEXT,
+  timezone         DOUBLE PRECISION,
+  visible          BOOLEAN NOT NULL DEFAULT TRUE,
+  metadata         JSONB NOT NULL DEFAULT '{}',
+  first_seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS soliscloud_devices (
+  device_sn        TEXT PRIMARY KEY,
+  station_id       TEXT NOT NULL REFERENCES soliscloud_plants(station_id) ON DELETE CASCADE,
+  inverter_id      TEXT,
+  model            TEXT,
+  visible          BOOLEAN NOT NULL DEFAULT TRUE,
+  metadata         JSONB NOT NULL DEFAULT '{}',
+  first_seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_soliscloud_devices_station
+  ON soliscloud_devices (station_id);
+
+CREATE TABLE IF NOT EXISTS soliscloud_sync_state (
+  sync_key         TEXT PRIMARY KEY,
+  checkpoint       JSONB NOT NULL DEFAULT '{}',
+  backoff_until    TIMESTAMPTZ,
+  last_success_at  TIMESTAMPTZ,
+  last_error       TEXT,
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS soliscloud_diagnostics (
+  id               TEXT PRIMARY KEY DEFAULT 'active',
+  cycles           BIGINT NOT NULL DEFAULT 0,
+  solis_failures   BIGINT NOT NULL DEFAULT 0,
+  rows_ingested    BIGINT NOT NULL DEFAULT 0,
+  skipped_fields   BIGINT NOT NULL DEFAULT 0,
+  backfill_steps   BIGINT NOT NULL DEFAULT 0,
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Blockchain service tables
 
 CREATE TABLE IF NOT EXISTS blockchain_events (

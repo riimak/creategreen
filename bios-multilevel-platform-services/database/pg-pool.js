@@ -68,7 +68,14 @@ function createPool(databaseUrl, opts = {}) {
   };
   if (ssl) poolConfig.ssl = ssl;
 
-  return new Pool(poolConfig);
+  const pool = new Pool(poolConfig);
+  // The server can terminate idle clients (failover, restart, admin action).
+  // Without a listener that surfaces as an unhandled 'error' event and kills
+  // the whole process; log it and let the pool replace the connection.
+  pool.on('error', (error) => {
+    console.error('pg pool idle client error:', error?.message || error);
+  });
+  return pool;
 }
 
 module.exports = { createPool };

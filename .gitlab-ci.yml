@@ -42,6 +42,8 @@ production-dashboard:
       optional: true
     - job: production-fusionsolar
       optional: true
+    - job: production-soliscloud
+      optional: true
   rules:
     - !reference [.production, rules]
     - when: on_success
@@ -144,6 +146,48 @@ production-fusionsolar:
         FUSIONSOLAR_BACKFILL_ENABLED"
       bash bios-multilevel-platform-services/fusionsolar/.gitlab/forward-env.sh \
         "$VALUES_FILE" $FUSIONSOLAR_FORWARD_ENVS
+  rules:
+    - !reference [.production, rules]
+    - when: on_success
+
+# ─── SolisCloud (Node API, internal only) ───
+build-soliscloud:
+  extends: .build
+  variables:
+    TARGET_APP: soliscloud
+    DOCKERFILE_PATH: bios-multilevel-platform-services/soliscloud/Dockerfile
+    APPLICATION_IMAGE_NAME_TAG: soliscloud
+  rules:
+    - !reference [.build, rules]
+    - when: on_success
+
+production-soliscloud:
+  extends: .production
+  stage: deploy
+  resource_group: bios-multilevel-production
+  variables:
+    TARGET_APP: soliscloud
+    APPLICATION_IMAGE_NAME_TAG: soliscloud
+    HELM_RELEASE_PREFIX: bios-soliscloud
+  environment:
+    name: production/soliscloud
+  needs:
+    - job: build-soliscloud
+      optional: true
+  before_script:
+    - |
+      set -e
+      VALUES_FILE="bios-multilevel-platform-services/soliscloud/.gitlab/auto-deploy-values.yaml"
+      SOLISCLOUD_FORWARD_ENVS="\
+        SOLISCLOUD_KEY_ID SOLISCLOUD_KEY_SECRET \
+        SOLISCLOUD_API_BASE_URL SOLISCLOUD_LIVE_INTERVAL_SECONDS \
+        SOLISCLOUD_REQUEST_TIMEOUT_SECONDS SOLISCLOUD_BACKFILL_ENABLED \
+        SOLISCLOUD_BACKFILL_DAYS SOLISCLOUD_STATION_IDS"
+      bash bios-multilevel-platform-services/fusionsolar/.gitlab/forward-env.sh \
+        "$VALUES_FILE" $SOLISCLOUD_FORWARD_ENVS
+      if [ -z "${SOLISCLOUD_KEY_ID:-}" ] || [ -z "${SOLISCLOUD_KEY_SECRET:-}" ]; then
+        echo "WARN: SOLISCLOUD_KEY_ID/SOLISCLOUD_KEY_SECRET not set as CI variables; SolisCloud ingest will be OFF."
+      fi
   rules:
     - !reference [.production, rules]
     - when: on_success

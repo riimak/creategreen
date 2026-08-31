@@ -97,3 +97,24 @@ spec:
       ports:
         - protocol: TCP
           port: 8093
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bios-soliscloud-allow-from-dashboard
+  labels:
+    app.kubernetes.io/part-of: bios-multilevel
+spec:
+  podSelector:
+    matchLabels:
+      app: bios-soliscloud-production-barrage-autodeploy
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: bios-dashboard-production-barrage-autodeploy
+      ports:
+        - protocol: TCP
+          port: 8094

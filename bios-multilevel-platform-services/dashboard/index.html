@@ -2108,6 +2108,25 @@ const FRIENDLY_METRICS = {
   'huawei.ess.charge_discharge_power_kw': 'ESS power',
   'huawei.ess.daily_charge_kwh': 'ESS daily charge',
   'huawei.ess.daily_discharge_kwh': 'ESS daily discharge',
+  'solis.plant.current_power_kw': 'Plant power',
+  'solis.plant.daily_yield_kwh': 'Daily yield',
+  'solis.plant.monthly_yield_kwh': 'Monthly yield',
+  'solis.plant.total_yield_kwh': 'Total yield',
+  'solis.plant.daily_grid_purchased_kwh': 'Daily grid purchase',
+  'solis.plant.daily_grid_sell_kwh': 'Daily grid feed-in',
+  'solis.plant.total_grid_purchased_kwh': 'Grid purchase total',
+  'solis.plant.total_grid_sell_kwh': 'Grid feed-in total',
+  'solis.plant.daily_consumption_kwh': 'Daily consumption',
+  'solis.plant.daily_battery_charge_kwh': 'Battery daily charge',
+  'solis.plant.daily_battery_discharge_kwh': 'Battery daily discharge',
+  'solis.inverter.active_power_kw': 'Inverter power',
+  'solis.inverter.daily_yield_kwh': 'Inverter daily yield',
+  'solis.inverter.total_yield_kwh': 'Inverter total yield',
+  'solis.inverter.battery_soc_percent': 'Battery SOC',
+  'solis.inverter.battery_power_kw': 'Battery power',
+  'solis.inverter.daily_grid_purchased_kwh': 'Daily grid purchase',
+  'solis.inverter.daily_grid_sell_kwh': 'Daily grid feed-in',
+  'solis.inverter.temperature_c': 'Inverter temperature',
 };
 const PICKER_METRICS = ['PM2_5','CAQI','Temperatura','Grid_power_total','Inverter_AC_power_total'];
 let activeTarget = null;
@@ -2653,6 +2672,75 @@ function computeHuaweiPlant(plantSource, group) {
   };
 }
 
+/* -- Solis (SolisCloud) sources ------------------------------------------
+ * Plant-level rows arrive on source "SOLIS:<stationId>"; per-device rows on
+ * "SOLIS:<stationId>:device:<sn>". Solis daily counters are running totals
+ * for the local day (like SOLAX eToday), so the latest reading IS today's
+ * value so far. Live power exists both at plant level (current_power_kw) and
+ * per inverter; device sums win when fresh, the plant reading is fallback. */
+const SOLIS_INVERTER_POWER_KEYS = ['solis.inverter.active_power_kw'];
+const SOLIS_PLANT_POWER_KEYS = ['solis.plant.current_power_kw'];
+const SOLIS_SOC_KEYS = ['solis.inverter.battery_soc_percent'];
+const SOLIS_BATT_POWER_KEYS = ['solis.inverter.battery_power_kw'];
+const SOLIS_TO_GRID_KEYS = ['solis.plant.total_grid_sell_kwh'];
+const SOLIS_FROM_GRID_KEYS = ['solis.plant.total_grid_purchased_kwh'];
+
+function isSolisSource(source) {
+  return typeof source === 'string' && source.startsWith('SOLIS:');
+}
+
+function solisPlantOf(source) {
+  return source.split(':device:')[0];
+}
+
+function computeSolisPlant(plantSource, group) {
+  const FRESH_SEC = 30 * 60;
+  const { latest: plantLatest, series: plantSeries } = processStationRows(group.plantRows || []);
+  let ac = null, battPower = null;
+  let socSum = 0, socCount = 0, lastTs = 0;
+  const acSeriesList = [];
+
+  for (const l of Object.values(plantLatest)) if (l.ts > lastTs) lastTs = l.ts;
+
+  for (const rows of (group.devices ? group.devices.values() : [])) {
+    const { latest, series } = processStationRows(rows);
+    const acVal = freshLatestValue(latest, SOLIS_INVERTER_POWER_KEYS, FRESH_SEC);
+    if (acVal !== null) ac = (ac ?? 0) + acVal;
+    const socVal = pickLatestValue(latest, series, SOLIS_SOC_KEYS);
+    if (socVal !== null) { socSum += socVal; socCount += 1; }
+    const battVal = freshLatestValue(latest, SOLIS_BATT_POWER_KEYS, FRESH_SEC);
+    if (battVal !== null) battPower = (battPower ?? 0) + battVal;
+    const acSeries = pickSeries(series, SOLIS_INVERTER_POWER_KEYS);
+    if (acSeries.length) acSeriesList.push(acSeries);
+    for (const l of Object.values(latest)) if (l.ts > lastTs) lastTs = l.ts;
+  }
+
+  // Plant-level current power backs up device readings (e.g. before the
+  // device backfill has run, or if an inverter list page failed).
+  if (ac === null) {
+    ac = freshLatestValue(plantLatest, SOLIS_PLANT_POWER_KEYS, FRESH_SEC);
+  }
+  if (!acSeriesList.length) {
+    const plantPowerSeries = pickSeries(plantSeries, SOLIS_PLANT_POWER_KEYS);
+    if (plantPowerSeries.length) acSeriesList.push(plantPowerSeries);
+  }
+
+  const daily = plantLatest['solis.plant.daily_yield_kwh']?.v ?? null;
+  const monthly = plantLatest['solis.plant.monthly_yield_kwh']?.v ?? null;
+  const toGrid = pickLatestValue(plantLatest, plantSeries, SOLIS_TO_GRID_KEYS);
+  const fromGrid = pickLatestValue(plantLatest, plantSeries, SOLIS_FROM_GRID_KEYS);
+
+  if (ac === null && daily === null && !lastTs) return null;
+  return {
+    source: plantSource,
+    ac, grid: null, daily, monthly,
+    soc: socCount > 0 ? socSum / socCount : null,
+    battPower, toGrid, fromGrid, lastTs,
+    acSeries: sumPowerSeries(acSeriesList),
+    gridSeries: [],
+  };
+}
+
 function pickMetricKey(latest, series, candidates) {
   for (const key of candidates) {
     if (latest?.[key] || series?.[key]?.length) return key;
@@ -2765,6 +2853,7 @@ async function loadLiveEnergy(){
     const solarPlants = [];
     const meteoStations = [];
     const huaweiGroups = new Map();
+    const solisGroups = new Map();
     for (const r of results) {
       if (r.status !== 'fulfilled' || !r.value.data.length) continue;
       const { source, data } = r.value;
@@ -2772,6 +2861,14 @@ async function loadLiveEnergy(){
         const plantSource = huaweiPlantOf(source);
         if (!huaweiGroups.has(plantSource)) huaweiGroups.set(plantSource, { plantRows: [], devices: new Map() });
         const group = huaweiGroups.get(plantSource);
+        if (source === plantSource) group.plantRows = data;
+        else group.devices.set(source, data);
+        continue;
+      }
+      if (isSolisSource(source)) {
+        const plantSource = solisPlantOf(source);
+        if (!solisGroups.has(plantSource)) solisGroups.set(plantSource, { plantRows: [], devices: new Map() });
+        const group = solisGroups.get(plantSource);
         if (source === plantSource) group.plantRows = data;
         else group.devices.set(source, data);
         continue;
@@ -2834,6 +2931,23 @@ async function loadLiveEnergy(){
       if (snap.gridSeries.length) gridSeriesList.push(snap.gridSeries);
     }
 
+    // Solis plants follow the same shape: yields from the plant source,
+    // live power preferring device sums with the plant reading as fallback.
+    const solisPlantSnaps = [];
+    for (const [plantSource, group] of solisGroups) {
+      const snap = computeSolisPlant(plantSource, group);
+      if (!snap) continue;
+      solisPlantSnaps.push(snap);
+      if (snap.ac !== null) totalAc += snap.ac;
+      if (snap.toGrid !== null) totalToGrid += snap.toGrid;
+      if (snap.fromGrid !== null) totalFromGrid += snap.fromGrid;
+      if (snap.soc !== null) { socSum += snap.soc; socCount += 1; }
+      if (snap.battPower !== null) totalBattPower += snap.battPower;
+      if (snap.lastTs > latestTs) latestTs = snap.lastTs;
+      plantSnapshots.push({ source: plantSource, ac: snap.ac, grid: snap.grid, daily: snap.daily, soc: snap.soc, battPower: snap.battPower, lastTs: snap.lastTs });
+      if (snap.acSeries.length) acSeriesList.push(snap.acSeries);
+    }
+
     // Merge chart series by summing per timestamp bucket (concatenating
     // multiple plants' points would zig-zag the chart between plants).
     const mergedPowerSeries = {};
@@ -2842,7 +2956,7 @@ async function loadLiveEnergy(){
     if (mergedAc.length) mergedPowerSeries['Inverter_AC_power_total'] = mergedAc;
     if (mergedGrid.length) mergedPowerSeries['Grid_power_total'] = mergedGrid;
 
-    const plantCount = solarPlants.length + huaweiPlantSnaps.length;
+    const plantCount = solarPlants.length + huaweiPlantSnaps.length + solisPlantSnaps.length;
 
     // Compute combined daily yield
     let totalDaily = null;
@@ -2889,8 +3003,11 @@ async function loadLiveEnergy(){
       for (const r of monthResults) {
         if (r.status === 'fulfilled' && r.value !== null) { totalMonthly += r.value; hasAny = true; }
       }
-      // Huawei reports the month-to-date total directly on the plant source.
+      // Huawei and Solis report the month-to-date total on the plant source.
       for (const snap of huaweiPlantSnaps) {
+        if (snap.monthly !== null) { totalMonthly += snap.monthly; hasAny = true; }
+      }
+      for (const snap of solisPlantSnaps) {
         if (snap.monthly !== null) { totalMonthly += snap.monthly; hasAny = true; }
       }
       energySnap.monthly = hasAny ? totalMonthly : null;

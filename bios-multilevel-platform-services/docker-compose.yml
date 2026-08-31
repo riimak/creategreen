@@ -148,6 +148,34 @@ services:
       timeout: 5s
       retries: 3
 
+  soliscloud:
+    build:
+      context: ..
+      dockerfile: bios-multilevel-platform-services/soliscloud/Dockerfile
+    env_file:
+      - ../.env
+    environment:
+      SOLISCLOUD_PORT: "8094"
+      SOLISCLOUD_KEY_ID: "${SOLISCLOUD_KEY_ID:-}"
+      SOLISCLOUD_KEY_SECRET: "${SOLISCLOUD_KEY_SECRET:-}"
+      SOLISCLOUD_API_BASE_URL: "${SOLISCLOUD_API_BASE_URL:-https://www.soliscloud.com:13333}"
+      SOLISCLOUD_LIVE_INTERVAL_SECONDS: "${SOLISCLOUD_LIVE_INTERVAL_SECONDS:-300}"
+      SOLISCLOUD_REQUEST_TIMEOUT_SECONDS: "${SOLISCLOUD_REQUEST_TIMEOUT_SECONDS:-20}"
+      SOLISCLOUD_BACKFILL_ENABLED: "${SOLISCLOUD_BACKFILL_ENABLED:-true}"
+      SOLISCLOUD_BACKFILL_DAYS: "${SOLISCLOUD_BACKFILL_DAYS:-90}"
+      SOLISCLOUD_STATION_IDS: "${SOLISCLOUD_STATION_IDS:-}"
+      DATABASE_URL: "${DATABASE_URL:-postgresql://bios:bios@postgres:5432/bios}"
+    ports:
+      - "8094:8094"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8094/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   dashboard:
     build:
       context: ..

@@ -305,10 +305,12 @@ function createPgPredictionStore(databaseUrl) {
     };
   }
 
-  // Human-readable labels for dynamically discovered FusionSolar sources.
-  // Plants map to their Huawei display name; devices to "<plant> · <device>".
-  // The tables may not exist on standalone deployments, hence the guard.
+  // Human-readable labels for dynamically discovered vendor sources
+  // (FusionSolar and SolisCloud). Plants map to their portal display name;
+  // devices to "<plant> · <device>". The tables may not exist on standalone
+  // deployments, hence the per-vendor guards.
   async function sourceLabels() {
+    const labels = {};
     try {
       const [plants, devices] = await Promise.all([
         pool.query('SELECT source_key, display_name, plant_code FROM fusionsolar_plants'),
@@ -320,17 +322,36 @@ function createPgPredictionStore(databaseUrl) {
            JOIN fusionsolar_plants p ON p.plant_code = d.plant_code`,
         ),
       ]);
-      const labels = {};
       for (const row of plants.rows) {
         if (row.display_name) labels[row.source_key] = row.display_name;
       }
       for (const row of devices.rows) {
         labels[row.source] = `${row.plant_name} · ${row.device_name}`;
       }
-      return labels;
     } catch {
-      return {};
+      // FusionSolar tables absent; continue with other vendors.
     }
+    try {
+      const [plants, devices] = await Promise.all([
+        pool.query('SELECT source_key, display_name, station_id FROM soliscloud_plants'),
+        pool.query(
+          `SELECT p.source_key || ':device:' || d.device_sn AS source,
+                  coalesce(p.display_name, p.station_id) AS plant_name,
+                  coalesce(d.metadata->>'name', d.model, d.device_sn) AS device_name
+           FROM soliscloud_devices d
+           JOIN soliscloud_plants p ON p.station_id = d.station_id`,
+        ),
+      ]);
+      for (const row of plants.rows) {
+        if (row.display_name) labels[row.source_key] = row.display_name;
+      }
+      for (const row of devices.rows) {
+        labels[row.source] = `${row.plant_name} · ${row.device_name}`;
+      }
+    } catch {
+      // SolisCloud tables absent; labels stay as collected so far.
+    }
+    return labels;
   }
 
   async function pruneRawMeasurements(retentionDays) {

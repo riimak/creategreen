@@ -335,9 +335,11 @@ function createPgPredictionStore(databaseUrl) {
       const [plants, devices] = await Promise.all([
         pool.query('SELECT source_key, display_name, station_id FROM soliscloud_plants'),
         pool.query(
+          // SolisCloud device names are generic model strings ("1200"), so
+          // the serial number is the only distinctive per-device label.
           `SELECT p.source_key || ':device:' || d.device_sn AS source,
                   coalesce(p.display_name, p.station_id) AS plant_name,
-                  coalesce(d.metadata->>'name', d.model, d.device_sn) AS device_name
+                  'INV-' || d.device_sn AS device_name
            FROM soliscloud_devices d
            JOIN soliscloud_plants p ON p.station_id = d.station_id`,
         ),

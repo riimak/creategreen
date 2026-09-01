@@ -74,14 +74,18 @@ function attachSseStream(res, req) {
   });
 }
 
-function json(res, status, body) {
+function jsonText(res, status, text) {
   res.writeHead(status, {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
   });
-  res.end(JSON.stringify(body, null, 2));
+  res.end(text);
+}
+
+function json(res, status, body) {
+  jsonText(res, status, JSON.stringify(body, null, 2));
 }
 
 function config() {
@@ -590,6 +594,123 @@ async function measurementsMeta() {
   throw metaCache.error || new Error('measurements meta unavailable');
 }
 
+/* ── Warm cache for /measurements ───────────────────────────────────────────
+ * The dashboard's first paint issues one 24h query per station (17+ and
+ * growing) in a single burst. Each query is cheap in isolation, but a cold
+ * burst can stall behind ingest, backfill, or prune activity on the shared
+ * database and blow through the client's loading timeout. Responses are
+ * cached here pre-serialized with stale-while-revalidate semantics, and a
+ * background warmer keeps the per-station dashboard queries plus any
+ * recently requested query permanently fresh, so page loads are served from
+ * memory and never wait on PostgreSQL. Staleness is bounded by the TTL
+ * (default 60s), well under the 5–10 minute cadence of the data itself. */
+const MEASUREMENTS_CACHE_TTL_MS = Math.max(0, Number(process.env.MEASUREMENTS_CACHE_MS ?? 60_000));
+const MEASUREMENTS_CACHE_MAX_ENTRIES = 60;
+const MEASUREMENTS_WARM_RECENT_MS = 15 * 60 * 1000;
+const measurementsCache = new Map(); // key -> { text, at, lastAccess, inflight }
+
+// Normalized so that logically identical querystrings share one entry, and
+// so warmer-built keys match keys derived from live request URLs.
+function measurementsCacheKey(params) {
+  const entries = [...params.entries()].filter(([, value]) => value !== '');
+  entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return new URLSearchParams(entries).toString();
+}
+
+function measurementsCacheEntry(key) {
+  let entry = measurementsCache.get(key);
+  if (!entry) {
+    entry = { text: null, at: 0, lastAccess: 0, inflight: null };
+    measurementsCache.set(key, entry);
+    if (measurementsCache.size > MEASUREMENTS_CACHE_MAX_ENTRIES) {
+      const oldest = [...measurementsCache.entries()]
+        .filter(([, candidate]) => candidate !== entry && !candidate.inflight)
+        .sort(([, a], [, b]) => a.lastAccess - b.lastAccess)[0];
+      if (oldest) measurementsCache.delete(oldest[0]);
+    }
+  }
+  return entry;
+}
+
+function refreshMeasurementsEntry(key, entry) {
+  if (entry.inflight) return entry.inflight;
+  entry.inflight = listMeasurements(new URLSearchParams(key)).then(
+    (body) => {
+      entry.text = JSON.stringify(body, null, 2);
+      entry.at = Date.now();
+      entry.inflight = null;
+      return entry.text;
+    },
+    (error) => {
+      entry.inflight = null;
+      throw error;
+    },
+  );
+  return entry.inflight;
+}
+
+async function cachedMeasurementsText(params) {
+  if (MEASUREMENTS_CACHE_TTL_MS === 0) {
+    return JSON.stringify(await listMeasurements(params), null, 2);
+  }
+  const entry = measurementsCacheEntry(measurementsCacheKey(params));
+  entry.lastAccess = Date.now();
+  if (entry.text && Date.now() - entry.at < MEASUREMENTS_CACHE_TTL_MS) return entry.text;
+  const refresh = refreshMeasurementsEntry(measurementsCacheKey(params), entry);
+  if (entry.text) {
+    // Serve the stale copy immediately; the warmer retries failed refreshes.
+    refresh.catch(() => {});
+    return entry.text;
+  }
+  return refresh;
+}
+
+function dashboardStationQueryKey(source) {
+  return measurementsCacheKey(new URLSearchParams({
+    source, hours: '24', limit: '5000', sort: 'timestamp', sortDir: 'asc',
+  }));
+}
+
+let measurementsWarmerBusy = false;
+async function warmMeasurementsCache() {
+  if (measurementsWarmerBusy) return;
+  measurementsWarmerBusy = true;
+  try {
+    const keys = new Set();
+    try {
+      const meta = await measurementsMeta();
+      for (const source of meta?.stations || []) keys.add(dashboardStationQueryKey(source));
+    } catch {
+      // Meta unavailable (e.g. stats scan failed); still refresh known keys.
+    }
+    const now = Date.now();
+    for (const [key, entry] of measurementsCache) {
+      if (now - entry.lastAccess < MEASUREMENTS_WARM_RECENT_MS) keys.add(key);
+    }
+    // Sequential on purpose: one pool connection, no burst against the DB.
+    for (const key of keys) {
+      const entry = measurementsCacheEntry(key);
+      if (entry.text && Date.now() - entry.at < MEASUREMENTS_CACHE_TTL_MS) continue;
+      try {
+        await refreshMeasurementsEntry(key, entry);
+      } catch (error) {
+        log('warn', `measurements warm ${key}: ${error.message}`);
+      }
+    }
+  } finally {
+    measurementsWarmerBusy = false;
+  }
+}
+
+function startMeasurementsWarmer() {
+  if (MEASUREMENTS_CACHE_TTL_MS === 0) return;
+  const tick = () => { warmMeasurementsCache().catch((error) => log('warn', `measurements warm: ${error.message}`)); };
+  // Prewarm right after boot so the first visitor after a deploy hits a
+  // warm cache too; unref so the timers never hold the process open.
+  setTimeout(tick, 2000).unref();
+  setInterval(tick, Math.max(MEASUREMENTS_CACHE_TTL_MS, 30_000)).unref();
+}
+
 async function listFromStore(kind, params) {
   const source = params.get('source');
   const metric = params.get('metric');
@@ -767,7 +888,7 @@ async function handle(req, res) {
       return json(res, 200, await slaSummary(url.searchParams));
     }
     if (req.method === 'GET' && url.pathname === '/measurements') {
-      return json(res, 200, await listMeasurements(url.searchParams));
+      return jsonText(res, 200, await cachedMeasurementsText(url.searchParams));
     }
     if (req.method === 'GET' && url.pathname === '/measurements/meta') {
       return json(res, 200, await measurementsMeta());
@@ -839,6 +960,7 @@ function startScheduler() {
 
 if (require.main === module) {
   startScheduler();
+  startMeasurementsWarmer();
   http.createServer((req, res) => {
     const started = Date.now();
     const url = new URL(req.url, `http://${req.headers.host}`);

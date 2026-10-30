@@ -2819,7 +2819,14 @@ function isMeteoData(metrics) {
   return metrics.has('Temperatura') || metrics.has('PM2_5') || metrics.has('Suncevo_zracenje');
 }
 
+let liveEnergyInflight = null;
 async function loadLiveEnergy(){
+  if (liveEnergyInflight) return liveEnergyInflight;
+  liveEnergyInflight = loadLiveEnergyOnce().finally(() => { liveEnergyInflight = null; });
+  return liveEnergyInflight;
+}
+
+async function loadLiveEnergyOnce(){
   setPanelState('energy', 'loading', 'loading.energy');
   setPanelState('power', 'loading', 'loading.power');
   try {
@@ -4461,6 +4468,7 @@ function buildMeasurementsQuery() {
   p.set('sortDir', measurements.state.sortDir);
   p.set('limit', String(measurements.state.limit));
   p.set('offset', String(measurements.state.offset));
+  p.set('count', '1');
   return p.toString();
 }
 

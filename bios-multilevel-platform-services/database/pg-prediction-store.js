@@ -4,13 +4,31 @@ function createPgPredictionStore(databaseUrl) {
   // The dashboard fires one indexed /measurements query per source on every
   // page load (11+ sources with FusionSolar devices), so 5 connections queue
   // badly under a couple of concurrent clients.
-  const pool = createPool(databaseUrl, { max: 10 });
+  // 12s is under the dashboard proxy timeout, so a stuck scan becomes an
+  // error response instead of an open request that keeps the slot forever.
+  const statementTimeoutMs = Math.max(0, Number(process.env.PG_STATEMENT_TIMEOUT_MS ?? 12_000));
+  const connectionTimeoutMs = Math.max(0, Number(process.env.PG_CONNECTION_TIMEOUT_MS ?? 5_000));
+  const pool = createPool(databaseUrl, {
+    max: 10,
+    statementTimeoutMs,
+    connectionTimeoutMs,
+  });
 
   async function init() {
     const fs = require('fs');
     const path = require('path');
     const schema = fs.readFileSync(path.resolve(__dirname, 'schema.sql'), 'utf8');
-    await pool.query(schema);
+    const client = await pool.connect();
+    try {
+      // Index builds on raw_measurements must not inherit the query timeout.
+      if (statementTimeoutMs > 0) await client.query('SET statement_timeout = 0');
+      await client.query(schema);
+    } finally {
+      if (statementTimeoutMs > 0) {
+        await client.query(`SET statement_timeout = ${statementTimeoutMs}`).catch(() => {});
+      }
+      client.release();
+    }
   }
 
   function append(kind, artifact) {
@@ -262,15 +280,44 @@ function createPgPredictionStore(databaseUrl) {
                    FROM raw_measurements ${whereSql}
                    ORDER BY ${sortCol} ${sortDir}
                    LIMIT ${limit} OFFSET ${offset}`;
-    const countQ = `SELECT count(*)::bigint AS total FROM raw_measurements ${whereSql}`;
-    const [data, count] = await Promise.all([pool.query(dataQ, values), pool.query(countQ, values)]);
+    const data = await pool.query(dataQ, values);
+    // COUNT(*) on raw_measurements walks every matching row. The overview
+    // never reads total, and running it beside every station query is what
+    // filled the pool. Only the measurements table asks for it (count=1).
+    let total = null;
+    if (filters.includeTotal) {
+      const countQ = `SELECT count(*)::bigint AS total FROM raw_measurements ${whereSql}`;
+      const count = await pool.query(countQ, values);
+      total = Number(count.rows[0].total);
+    }
     return {
       data: data.rows.map(r => ({
         source: r.source, metric: r.metric, timestamp: Number(r.timestamp), value: r.value, isMissing: r.is_missing,
       })),
-      total: Number(count.rows[0].total),
+      total,
       limit, offset,
     };
+  }
+
+  // Vendor inventory is tiny. The overview station list must not wait on a
+  // full scan of raw_measurements to discover Huawei and Solis sources.
+  async function listKnownSources() {
+    const sources = [];
+    const queries = [
+      'SELECT source_key AS source FROM fusionsolar_plants',
+      `SELECT source_key || ':device:' || device_id AS source FROM fusionsolar_devices`,
+      'SELECT source_key AS source FROM soliscloud_plants',
+      `SELECT source_key || ':device:' || device_sn AS source FROM soliscloud_devices`,
+    ];
+    for (const sql of queries) {
+      try {
+        const { rows } = await pool.query(sql);
+        for (const row of rows) if (row.source) sources.push(row.source);
+      } catch {
+        // Vendor tables are absent on deployments that don't run that ingest.
+      }
+    }
+    return sources;
   }
 
   async function rawMeasurementsStats() {
@@ -364,7 +411,7 @@ function createPgPredictionStore(databaseUrl) {
 
   return {
     init, append, list, latest, listPaginated, checkpoint, setMeta, read, write, stats, prune,
-    persistRawRecords, listRawMeasurements, rawMeasurementsStats, pruneRawMeasurements, sourceLabels,
+    persistRawRecords, listRawMeasurements, rawMeasurementsStats, pruneRawMeasurements, sourceLabels, listKnownSources,
     file: 'postgres',
   };
 }

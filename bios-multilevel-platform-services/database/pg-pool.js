@@ -66,6 +66,16 @@ function createPool(databaseUrl, opts = {}) {
     connectionString: cleanUrl,
     max: opts.max || 5,
   };
+  // statement_timeout is a server-side cancel: a runaway scan releases the
+  // connection instead of pinning a pool slot until the client gives up.
+  // connectionTimeoutMillis fails fast when every slot is already busy,
+  // instead of queueing the HTTP request forever.
+  if (Number.isFinite(opts.statementTimeoutMs) && opts.statementTimeoutMs > 0) {
+    poolConfig.statement_timeout = opts.statementTimeoutMs;
+  }
+  if (Number.isFinite(opts.connectionTimeoutMs) && opts.connectionTimeoutMs > 0) {
+    poolConfig.connectionTimeoutMillis = opts.connectionTimeoutMs;
+  }
   if (ssl) poolConfig.ssl = ssl;
 
   const pool = new Pool(poolConfig);

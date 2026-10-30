@@ -90,6 +90,9 @@ CREATE TABLE IF NOT EXISTS raw_measurements (
 
 CREATE INDEX IF NOT EXISTS idx_raw_measurements_ts ON raw_measurements (ts DESC);
 CREATE INDEX IF NOT EXISTS idx_raw_measurements_source_metric_ts ON raw_measurements (source, metric, ts DESC);
+-- Dashboard overview filters by source + time and does not constrain metric.
+-- The primary key (source, metric, ts) cannot serve that lookup.
+CREATE INDEX IF NOT EXISTS idx_raw_measurements_source_ts ON raw_measurements (source, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_raw_measurements_ingested ON raw_measurements (ingested_at DESC);
 
 CREATE OR REPLACE VIEW raw_measurements_stats AS

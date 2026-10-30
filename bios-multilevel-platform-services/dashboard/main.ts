@@ -681,6 +681,7 @@ async function proxy(req: Request, kind: "prediction" | "blockchain", prefix: st
     const res = await fetch(upstream, {
       method: req.method,
       headers: filteredUpstreamHeaders(req),
+      signal: AbortSignal.timeout(upstreamTimeoutMs(kind, upstream.pathname)),
     });
 
     // Copy upstream response headers but drop any CORS leakage from the

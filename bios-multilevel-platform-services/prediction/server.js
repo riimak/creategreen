@@ -504,6 +504,9 @@ async function listMeasurements(params) {
     sortDir: params.get('sortDir') === 'asc' ? 'asc' : 'desc',
     limit: Math.min(Math.max(Number(params.get('limit')) || 500, 1), 5000),
     offset: Math.max(0, Number(params.get('offset')) || 0),
+    // Overview and the cache warmer omit this. COUNT(*) is a full scan of
+    // the matching rows and was exhausting the pool when every station asked.
+    includeTotal: params.get('count') === '1' || params.get('count') === 'true',
   };
 
   const result = await S(store.listRawMeasurements(filters));
@@ -535,26 +538,73 @@ function observedMetricList(perMetric) {
   return [...new Set(metrics)].sort();
 }
 
+let statsInflight = null;
+let latestMeasurementStats = null;
+let statsAttemptAt = 0;
+const STATS_REFRESH_MS = 5 * 60 * 1000;
+
+function applyMeasurementStats(body, stats) {
+  if (!body || !stats) return body;
+  body.stats = stats;
+  body.stations = mergeStationLists(stationIds(), [
+    ...(body.stations || []).map(source => ({ source })),
+    ...(stats.perStation || []),
+  ]);
+  body.metrics = {
+    ...(body.metrics || {}),
+    observed: observedMetricList(stats.perMetric),
+  };
+  return body;
+}
+
+// Full-table stats stay off the request path. Callers get the station list
+// immediately; stats fold into the cached body when the scan finishes.
+// Failures are not retried for STATS_REFRESH_MS, so a scan that hits the
+// statement timeout cannot occupy a pool slot on every page load.
+function refreshStatsInBackground() {
+  if (statsInflight) return statsInflight;
+  if (Date.now() - statsAttemptAt < STATS_REFRESH_MS) return null;
+  statsAttemptAt = Date.now();
+  statsInflight = S(store.rawMeasurementsStats()).then(
+    (stats) => {
+      latestMeasurementStats = stats;
+      applyMeasurementStats(metaCache.body, stats);
+      return stats;
+    },
+    (err) => {
+      log('warn', `measurements stats: ${err.message}`);
+      return null;
+    },
+  ).finally(() => {
+    statsInflight = null;
+  });
+  return statsInflight;
+}
+
 async function computeMeasurementsMeta() {
-  const stats = await S(store.rawMeasurementsStats());
   const stationLabels = typeof store.sourceLabels === 'function'
     ? await S(store.sourceLabels())
     : {};
-  return {
-    stations: mergeStationLists(stationIds(), stats?.perStation),
+  const knownSources = typeof store.listKnownSources === 'function'
+    ? await S(store.listKnownSources())
+    : [];
+  const body = {
+    stations: mergeStationLists(stationIds(), knownSources.map(source => ({ source }))),
     stationLabels,
     metrics: {
       meteo: METEO_FIELDS,
       solax: SOLAX_FIELDS,
-      observed: observedMetricList(stats?.perMetric),
+      observed: [],
     },
     inputSource: inputSourceInfo(),
     intervalMinutes: numberParam('PREDICTION_INTERVAL_MINUTES', 10),
     expectedSampleMinutes: numberParam('PREDICTION_EXPECTED_SAMPLE_MINUTES', 10),
     storage: store.file === 'postgres' ? 'postgres' : 'json',
-    stats,
+    stats: null,
     retentionDays: Number(process.env.RAW_MEASUREMENTS_RETENTION_DAYS) || null,
   };
+  refreshStatsInBackground();
+  return body;
 }
 
 // The stats behind /measurements/meta scan the whole raw_measurements table
@@ -568,6 +618,7 @@ const metaCache = { body: null, at: 0, inflight: null, error: null };
 function refreshMeasurementsMeta() {
   metaCache.inflight = computeMeasurementsMeta().then(
     (body) => {
+      applyMeasurementStats(body, latestMeasurementStats);
       metaCache.body = body;
       metaCache.at = Date.now();
       metaCache.error = null;
@@ -676,13 +727,16 @@ async function warmMeasurementsCache() {
   if (measurementsWarmerBusy) return;
   measurementsWarmerBusy = true;
   try {
-    const keys = new Set();
+    const keys = new Set(stationIds().map(dashboardStationQueryKey));
     try {
-      const meta = await measurementsMeta();
-      for (const source of meta?.stations || []) keys.add(dashboardStationQueryKey(source));
-    } catch {
-      // Meta unavailable (e.g. stats scan failed); still refresh known keys.
+      if (typeof store.listKnownSources === 'function') {
+        const extra = await S(store.listKnownSources());
+        for (const source of extra || []) keys.add(dashboardStationQueryKey(source));
+      }
+    } catch (error) {
+      log('warn', `measurements warm sources: ${error.message}`);
     }
+    for (const source of metaCache.body?.stations || []) keys.add(dashboardStationQueryKey(source));
     const now = Date.now();
     for (const [key, entry] of measurementsCache) {
       if (now - entry.lastAccess < MEASUREMENTS_WARM_RECENT_MS) keys.add(key);

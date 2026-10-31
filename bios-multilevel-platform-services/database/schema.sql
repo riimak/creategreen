@@ -29,6 +29,12 @@ CREATE TABLE IF NOT EXISTS forecasts (
 
 CREATE INDEX IF NOT EXISTS idx_forecasts_source_metric ON forecasts (source, metric, computed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_forecasts_computed ON forecasts (computed_at DESC);
+-- The artifact tables grow by one row per target per cycle (~3k/day) and are
+-- never pruned, so every "newest N" read must be an index walk. Without an
+-- index on the ORDER BY column, `ORDER BY created_at DESC LIMIT n` is a full
+-- scan plus an on-disk sort of 500k+ wide JSONB rows (60-200 s in production),
+-- which pinned every pool connection and hung the dashboard.
+CREATE INDEX IF NOT EXISTS idx_forecasts_created ON forecasts (created_at DESC);
 
 CREATE TABLE IF NOT EXISTS anomalies (
   id            TEXT PRIMARY KEY DEFAULT 'anomalies-' || extract(epoch from now())::bigint || '-' || substr(gen_random_uuid()::text, 1, 8),
@@ -42,6 +48,8 @@ CREATE TABLE IF NOT EXISTS anomalies (
 );
 
 CREATE INDEX IF NOT EXISTS idx_anomalies_source_metric ON anomalies (source, metric, computed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_anomalies_computed ON anomalies (computed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_anomalies_created ON anomalies (created_at DESC);
 
 CREATE TABLE IF NOT EXISTS data_quality (
   id            TEXT PRIMARY KEY DEFAULT 'quality-' || extract(epoch from now())::bigint || '-' || substr(gen_random_uuid()::text, 1, 8),
@@ -57,6 +65,8 @@ CREATE TABLE IF NOT EXISTS data_quality (
 );
 
 CREATE INDEX IF NOT EXISTS idx_quality_source_metric ON data_quality (source, metric, computed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_quality_computed ON data_quality (computed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_quality_created ON data_quality (created_at DESC);
 
 CREATE TABLE IF NOT EXISTS prediction_runs (
   id            TEXT PRIMARY KEY,
@@ -67,6 +77,9 @@ CREATE TABLE IF NOT EXISTS prediction_runs (
   finished_at   TIMESTAMPTZ,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- /status reads the newest run on every call.
+CREATE INDEX IF NOT EXISTS idx_runs_created ON prediction_runs (created_at DESC);
 
 CREATE TABLE IF NOT EXISTS prediction_checkpoints (
   key           TEXT PRIMARY KEY,
@@ -89,11 +102,18 @@ CREATE TABLE IF NOT EXISTS raw_measurements (
 );
 
 CREATE INDEX IF NOT EXISTS idx_raw_measurements_ts ON raw_measurements (ts DESC);
-CREATE INDEX IF NOT EXISTS idx_raw_measurements_source_metric_ts ON raw_measurements (source, metric, ts DESC);
 -- Dashboard overview filters by source + time and does not constrain metric.
 -- The primary key (source, metric, ts) cannot serve that lookup.
 CREATE INDEX IF NOT EXISTS idx_raw_measurements_source_ts ON raw_measurements (source, ts DESC);
-CREATE INDEX IF NOT EXISTS idx_raw_measurements_ingested ON raw_measurements (ingested_at DESC);
+-- Retired indexes. Every cycle re-upserts the whole 72h window, so each extra
+-- index on this table is paid for on ~180k rows every 10 minutes:
+--   * (source, metric, ts DESC) duplicates the primary key (a btree serves
+--     ORDER BY ts DESC by scanning backwards) and was never chosen by the
+--     planner in production.
+--   * (ingested_at) was never queried, yet because ingested_at changed on
+--     every upsert it defeated HOT updates and grew to 3x the heap size.
+DROP INDEX IF EXISTS idx_raw_measurements_source_metric_ts;
+DROP INDEX IF EXISTS idx_raw_measurements_ingested;
 
 CREATE OR REPLACE VIEW raw_measurements_stats AS
 SELECT

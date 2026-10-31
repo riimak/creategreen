@@ -40,6 +40,22 @@ function createStore(file) {
     return list(kind, predicate, 1)[0] || null;
   }
 
+  // Mirrors the Postgres store: newest-first data-quality rows computed at or
+  // after `sinceIso`, with only the fields the SLA summary reads.
+  function listDataQualityWindow(sinceIso, limit = 10000) {
+    const since = Date.parse(sinceIso);
+    return list('dataQuality', row => Date.parse(row.computedAt) >= since, Number.MAX_SAFE_INTEGER)
+      .sort((a, b) => Date.parse(b.computedAt) - Date.parse(a.computedAt))
+      .slice(0, limit)
+      .map(row => ({
+        source: row.source,
+        metric: row.metric,
+        status: row.status,
+        computedAt: row.computedAt,
+        input: { missingRatio: row.input?.missingRatio },
+      }));
+  }
+
   function listPaginated(kind, filters = {}, options = {}) {
     const data = read();
     let rows = Array.isArray(data[kind]) ? data[kind].slice().reverse() : [];
@@ -84,7 +100,7 @@ function createStore(file) {
   async function pruneRawMeasurements() { return { deleted: 0, skipped: 'json store has no retention' }; }
 
   return {
-    read, write, append, list, latest, listPaginated, setMeta, checkpoint,
+    read, write, append, list, latest, listPaginated, listDataQualityWindow, setMeta, checkpoint,
     persistRawRecords, listRawMeasurements, rawMeasurementsStats, pruneRawMeasurements, listKnownSources,
     file: storeFile,
   };

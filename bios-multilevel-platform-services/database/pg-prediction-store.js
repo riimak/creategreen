@@ -95,16 +95,46 @@ function createPgPredictionStore(databaseUrl) {
     return items[0] || null;
   }
 
+  /* SLA input: only the columns the summary reads, filtered by time in SQL.
+   * The previous approach pulled the newest 10k full rows (JSONB and all) and
+   * discarded most of them in JS on every /sla call. */
+  async function listDataQualityWindow(sinceIso, limit = 10000) {
+    const cap = Math.min(Math.max(Number(limit) || 10000, 1), 50000);
+    const { rows } = await pool.query(
+      `SELECT source, metric, status, computed_at, input->'missingRatio' AS missing_ratio
+       FROM data_quality
+       WHERE computed_at >= $1
+       ORDER BY computed_at DESC
+       LIMIT ${cap}`,
+      [sinceIso],
+    );
+    return rows.map(row => ({
+      source: row.source,
+      metric: row.metric,
+      status: row.status,
+      computedAt: row.computed_at?.toISOString?.() || row.computed_at,
+      input: { missingRatio: row.missing_ratio === null ? undefined : Number(row.missing_ratio) },
+    }));
+  }
+
   /* Paginated artifact listing. Used by the dashboard's Predikcije browser.
    * Accepts source/metric/status/search filters and limit/offset/sort options.
    * Returns { data, total } so the UI can render real pagination instead of
-   * pulling a fixed page and filtering in JS. */
+   * pulling a fixed page and filtering in JS.
+   *
+   * options.includeTotal (default true): callers that only need the rows
+   * (the dashboard's "latest N" reads) pass false so no COUNT(*) runs beside
+   * every query. An unfiltered total comes from the planner's row estimate
+   * (pg_class.reltuples, refreshed by autovacuum/ANALYZE): an exact COUNT(*)
+   * over 550k wide rows takes ~50 s on this database, and a pager does not
+   * need better than ~1% accuracy. */
   async function listPaginated(kind, filters = {}, options = {}) {
     const table = kind === 'forecasts' ? 'forecasts'
       : kind === 'anomalies' ? 'anomalies'
       : kind === 'dataQuality' ? 'data_quality'
       : kind === 'runs' ? 'prediction_runs' : null;
     if (!table) return { data: [], total: 0, limit: 0, offset: 0 };
+    const includeTotal = options.includeTotal !== false;
     const where = [];
     const values = [];
     let p = 1;
@@ -133,9 +163,23 @@ function createPgPredictionStore(databaseUrl) {
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
     const dataQ = `SELECT * FROM ${table} ${whereSql} ORDER BY ${sortCol} ${sortDir} LIMIT ${limit} OFFSET ${offset}`;
-    const countQ = `SELECT count(*)::bigint AS total FROM ${table} ${whereSql}`;
+    if (!includeTotal) {
+      const data = await pool.query(dataQ, values);
+      return { data: data.rows.map(rowToArtifact), total: null, limit, offset };
+    }
+    const countQ = where.length
+      ? `SELECT count(*)::bigint AS total, false AS estimated FROM ${table} ${whereSql}`
+      : `SELECT greatest(reltuples, 0)::bigint AS total, true AS estimated FROM pg_class WHERE oid = '${table}'::regclass`;
     const [data, count] = await Promise.all([pool.query(dataQ, values), pool.query(countQ, values)]);
-    return { data: data.rows.map(rowToArtifact), total: Number(count.rows[0].total), limit, offset };
+    let total = Number(count.rows[0]?.total ?? 0);
+    let totalEstimated = Boolean(count.rows[0]?.estimated);
+    if (totalEstimated && total === 0) {
+      // Never analyzed yet (reltuples = -1 or 0): fall back to the exact count.
+      const exact = await pool.query(`SELECT count(*)::bigint AS total FROM ${table}`);
+      total = Number(exact.rows[0].total);
+      totalEstimated = false;
+    }
+    return { data: data.rows.map(rowToArtifact), total, totalEstimated, limit, offset };
   }
 
   async function checkpoint(key, value) {
@@ -222,12 +266,18 @@ function createPgPredictionStore(databaseUrl) {
         tuples.push(`($${p++},$${p++},$${p++},$${p++},$${p++})`);
         values.push(...row);
       }
+      // Each cycle re-sends the whole 72h window, so nearly every row already
+      // exists with the same value. Rewriting it anyway (just to bump
+      // ingested_at) produced ~180k dead tuples plus index churn every 10
+      // minutes; the WHERE makes unchanged rows a no-op.
       const sql = `INSERT INTO raw_measurements (source, metric, ts, value, is_missing)
                    VALUES ${tuples.join(',')}
                    ON CONFLICT (source, metric, ts) DO UPDATE
                      SET value = EXCLUDED.value,
                          is_missing = EXCLUDED.is_missing,
-                         ingested_at = now()`;
+                         ingested_at = now()
+                   WHERE raw_measurements.value IS DISTINCT FROM EXCLUDED.value
+                      OR raw_measurements.is_missing IS DISTINCT FROM EXCLUDED.is_missing`;
       const r = await pool.query(sql, values);
       total += r.rowCount || 0;
       batch.clear();
@@ -410,7 +460,7 @@ function createPgPredictionStore(databaseUrl) {
   }
 
   return {
-    init, append, list, latest, listPaginated, checkpoint, setMeta, read, write, stats, prune,
+    init, append, list, latest, listPaginated, listDataQualityWindow, checkpoint, setMeta, read, write, stats, prune,
     persistRawRecords, listRawMeasurements, rawMeasurementsStats, pruneRawMeasurements, sourceLabels, listKnownSources,
     file: 'postgres',
   };

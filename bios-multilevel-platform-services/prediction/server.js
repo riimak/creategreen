@@ -772,10 +772,12 @@ async function listFromStore(kind, params) {
   // IMPORTANT: For Postgres, filter in SQL before LIMIT. Filtering after a
   // global LIMIT can hide valid rows for a specific source/metric.
   if (typeof store.listPaginated === 'function') {
+    // includeTotal:false — only the rows are returned; a COUNT(*) beside every
+    // "latest N" read was a full table scan per dashboard refresh.
     const paged = await S(store.listPaginated(
       kind,
       { source: source || undefined, metric: metric || undefined },
-      { limit, offset: 0, sort: kind === 'runs' ? 'created_at' : 'computed_at', sortDir: 'desc' },
+      { limit, offset: 0, sort: kind === 'runs' ? 'created_at' : 'computed_at', sortDir: 'desc', includeTotal: false },
     ));
     if (paged && Array.isArray(paged.data)) return paged.data;
   }
@@ -789,19 +791,25 @@ async function latestFromStore(kind, params) {
     const paged = await S(store.listPaginated(
       kind,
       { source: source || undefined, metric: metric || undefined },
-      { limit: 1, offset: 0, sort: kind === 'runs' ? 'created_at' : 'computed_at', sortDir: 'desc' },
+      { limit: 1, offset: 0, sort: kind === 'runs' ? 'created_at' : 'computed_at', sortDir: 'desc', includeTotal: false },
     ));
     if (paged && Array.isArray(paged.data) && paged.data[0]) return paged.data[0];
   }
   return await S(store.latest(kind, row => (!source || row.source === source) && (!metric || row.metric === metric)));
 }
 
+const SLA_MAX_ROWS = 10000;
+
 async function slaSummary(params) {
   const window = params.get('window') || '24h';
   const windowHours = window === '1h' ? 1 : window === '7d' ? 168 : 24;
   const cutoff = Date.now() - windowHours * 3600 * 1000;
   const targetPercent = numberParam('SLA_TARGET_PERCENT', 95);
-  const listed = await S(store.list('dataQuality', row => Date.parse(row.computedAt) >= cutoff, 10000));
+  // Postgres: filter by time in SQL and read only the columns summarize() uses.
+  // JSON store: scan in memory as before.
+  const listed = typeof store.listDataQualityWindow === 'function'
+    ? await S(store.listDataQualityWindow(new Date(cutoff).toISOString(), SLA_MAX_ROWS))
+    : await S(store.list('dataQuality', row => Date.parse(row.computedAt) >= cutoff, SLA_MAX_ROWS));
   const rows = listed.slice().reverse();
   const byTarget = new Map();
   for (const row of rows) {

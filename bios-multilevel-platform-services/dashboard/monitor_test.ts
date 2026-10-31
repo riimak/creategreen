@@ -72,12 +72,21 @@ Deno.test("the Oct 24 failure mode is detected: wedged cycle, stale cycle, stale
 Deno.test("solar sources use the longer staleness limit", () => {
   const body = healthy(T0, {
     sources: [
-      { source: "OS2BIOS", solar: false, latestTs: new Date(T0 - 100 * MIN).toISOString(), ageMinutes: 100 },
+      { source: "OS2BIOS", solar: false, latestTs: new Date(T0 - 300 * MIN).toISOString(), ageMinutes: 300 },
       { source: "SOLAXBIOS", solar: true, latestTs: new Date(T0 - 600 * MIN).toISOString(), ageMinutes: 600 },
     ],
   });
   const { problems } = evaluateProblems(input(T0, body), initialState(T0), thresholds);
   assertEquals(problems.map((p) => p.key), ["data.stale:OS2BIOS"]);
+});
+
+Deno.test("normal Mars2 lag for the meteo station is not an alert", () => {
+  // Production: OS2BIOS samples at :00/:20 and Mars2 serves them 1-2 h late,
+  // so a 2.5 h old newest row is routine.
+  const body = healthy(T0, {
+    sources: [{ source: "OS2BIOS", solar: false, latestTs: new Date(T0 - 150 * MIN).toISOString(), ageMinutes: 150 }],
+  });
+  assertEquals(evaluateProblems(input(T0, body), initialState(T0), thresholds).problems, []);
 });
 
 Deno.test("a station with no rows at all is a problem", () => {
@@ -131,7 +140,7 @@ Deno.test("upstream outages need consecutive failures and clear on success", () 
 Deno.test("alerts fire on change, remind on the repeat interval, and stay quiet otherwise", () => {
   const stale = (now: number) =>
     healthy(now, {
-      sources: [{ source: "OS2BIOS", solar: false, latestTs: new Date(now - 200 * MIN).toISOString(), ageMinutes: 200 }],
+      sources: [{ source: "OS2BIOS", solar: false, latestTs: new Date(now - 300 * MIN).toISOString(), ageMinutes: 300 }],
     });
   let state = initialState(T0);
   let result = step(state, input(T0, stale(T0)), thresholds, ctx);

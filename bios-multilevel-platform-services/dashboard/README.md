@@ -77,7 +77,7 @@ situation changes:
 | Prediction cycle past its deadline (pod restart pending) | from `/freshness` |
 | Prediction service cannot reach PostgreSQL | from `/freshness` |
 | Last cycle ended `degraded`/`failed` | from `/freshness` |
-| No new measurements for a configured station | 90 min (`ALERT_DATA_STALE_MINUTES`), solar 720 min (`ALERT_DATA_STALE_MINUTES_SOLAR`) |
+| No new measurements for a configured station | 240 min (`ALERT_DATA_STALE_MINUTES`), solar 720 min (`ALERT_DATA_STALE_MINUTES_SOLAR`) — the meteo station samples at :00/:20 and Mars2 serves them 1–2 h late, so its newest row is routinely 2–3 h old |
 
 One digest is sent when problems appear or change, a reminder every
 `ALERT_REPEAT_MINUTES` (default 240) while they persist, and a recovery message

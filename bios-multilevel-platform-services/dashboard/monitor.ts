@@ -28,10 +28,13 @@ export interface MonitorThresholds {
   startupGraceMs: number;
 }
 
+// Calibrated against production: the meteo station (OS2BIOS) samples at :00
+// and :20 only, and Mars2 serves them 1-2 h late, so its newest row is
+// routinely 2-3 h old while everything is fine. Solar loggers pause overnight.
 export const DEFAULT_THRESHOLDS: Readonly<MonitorThresholds> = {
   upstreamFailures: 3,
   cycleStaleMinutes: 45,
-  dataStaleMinutes: 90,
+  dataStaleMinutes: 240,
   dataStaleMinutesSolar: 720,
   repeatMinutes: 240,
   startupGraceMs: 120_000,

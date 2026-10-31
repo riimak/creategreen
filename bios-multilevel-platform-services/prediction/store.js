@@ -98,10 +98,15 @@ function createStore(file) {
     return { totalRows: 0, uniqueSources: 0, uniqueMetrics: 0, missingRows: 0, rows24h: 0, rows7d: 0, earliest: null, latest: null, perStation: [], perMetric: [] };
   }
   async function pruneRawMeasurements() { return { deleted: 0, skipped: 'json store has no retention' }; }
+  async function ping() { return { ok: true }; }
+  async function latestMeasurementTimestamps(sources) {
+    return (sources || []).map(source => ({ source, latestTs: null }));
+  }
 
   return {
     read, write, append, list, latest, listPaginated, listDataQualityWindow, setMeta, checkpoint,
     persistRawRecords, listRawMeasurements, rawMeasurementsStats, pruneRawMeasurements, listKnownSources,
+    ping, latestMeasurementTimestamps,
     file: storeFile,
   };
 }

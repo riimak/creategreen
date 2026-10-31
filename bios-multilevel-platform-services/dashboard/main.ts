@@ -1,5 +1,16 @@
 import { proxyFusionSolarOAuth } from "./oauth-proxy.ts";
 import { applyDashboardSecurityHeaders } from "./security-headers.ts";
+import {
+  type CheckInput,
+  formatStartup,
+  type FreshnessPayload,
+  initialState,
+  type MonitorState,
+  postSlack,
+  step,
+  thresholdsFromEnv,
+  type UpstreamResult,
+} from "./monitor.ts";
 
 const dashboardHtml = await Deno.readTextFile(new URL("./index.html", import.meta.url));
 const euVisibilityHtml = await safeReadHtml(new URL("./eu-visibility.html", import.meta.url));
@@ -229,6 +240,7 @@ function sseRelease(ip: string): void {
 const PREDICTION_ALLOW_EXACT = new Set<string>([
   "/prediction",
   "/prediction/health",
+  "/prediction/freshness",
   "/prediction/stats",
   "/prediction/status",
   "/prediction/models",
@@ -447,6 +459,88 @@ function startDashboardTick(): void {
       receivedAt: new Date().toISOString(),
     });
   }, 1000);
+}
+
+// ── Slack health monitor ───────────────────────────────────────────────────
+//
+// Decides "the platform is not working / not showing data" from the
+// prediction service's /freshness and the blockchain /health, and posts to a
+// Slack incoming webhook on transitions (see monitor.ts). Checks always run so
+// GET /monitor shows the current verdict; posting requires SLACK_WEBHOOK_URL.
+const SLACK_WEBHOOK_URL = (Deno.env.get("SLACK_WEBHOOK_URL") || "").trim();
+const ALERT_CHECK_SECONDS = Math.max(30, Number(Deno.env.get("ALERT_CHECK_SECONDS") || 60));
+const alertThresholds = thresholdsFromEnv((name) => Deno.env.get(name));
+const alertContext = {
+  envLabel: Deno.env.get("ALERT_ENV_LABEL") || "production",
+  dashboardUrl: Deno.env.get("DASHBOARD_PUBLIC_URL") || undefined,
+};
+let monitorState: MonitorState = initialState(Date.now());
+let monitorBusy = false;
+let lastFreshness: FreshnessPayload | null = null;
+
+/** Deno fetch errors embed the target URL; never surface cluster hostnames via /monitor or Slack. */
+function redactUpstreamError(message: string): string {
+  return message.replace(/https?:\/\/[^\s)"']+/g, "<upstream>").slice(0, 200);
+}
+
+async function upstreamCheck<T>(kind: "prediction" | "blockchain", path: string): Promise<UpstreamResult<T>> {
+  const result = await fetchService(kind, path);
+  if (isFetchErrorPayload(result)) return { ok: false, error: redactUpstreamError(result.error) };
+  return { ok: true, body: result as T };
+}
+
+async function runHealthCheck(): Promise<void> {
+  if (monitorBusy) return;
+  monitorBusy = true;
+  try {
+    const [prediction, blockchain] = await Promise.all([
+      upstreamCheck<FreshnessPayload>("prediction", "/freshness"),
+      upstreamCheck<unknown>("blockchain", "/health"),
+    ]);
+    if (prediction.ok) lastFreshness = prediction.body;
+    const input: CheckInput = { now: Date.now(), prediction, blockchain };
+    const { state, action } = step(monitorState, input, alertThresholds, alertContext);
+    monitorState = state;
+    if (action.kind === "none") return;
+    const summary = state.active.map((p) => p.key).join(", ") || "all clear";
+    logLine(action.kind === "recovered" ? "info" : "warn", `monitor: ${action.kind}: ${summary}`);
+    if (!SLACK_WEBHOOK_URL) return;
+    const posted = await postSlack(SLACK_WEBHOOK_URL, action.text);
+    if (!posted.ok) logLine("error", `monitor: Slack post failed: ${posted.error}`);
+  } catch (e) {
+    logLine("error", `monitor: ${e instanceof Error ? e.message : String(e)}`);
+  } finally {
+    monitorBusy = false;
+  }
+}
+
+function monitorSnapshot(): Record<string, unknown> {
+  const at = (ms: number | null) => (ms === null ? null : new Date(ms).toISOString());
+  return {
+    slackConfigured: Boolean(SLACK_WEBHOOK_URL),
+    checkIntervalSeconds: ALERT_CHECK_SECONDS,
+    thresholds: alertThresholds,
+    healthy: monitorState.active.length === 0,
+    problems: monitorState.active,
+    problemsSince: at(monitorState.problemsSince),
+    lastCheckAt: at(monitorState.lastCheckAt),
+    lastNotifiedAt: at(monitorState.lastNotifiedAt),
+    notifications: monitorState.notifications,
+    prediction: lastFreshness,
+  };
+}
+
+function startHealthMonitor(): void {
+  if (!SLACK_WEBHOOK_URL) {
+    logLine("warn", "monitor: SLACK_WEBHOOK_URL not set — health checks run (see /monitor) but no Slack alerts are sent");
+  } else if (Deno.env.get("ALERT_SEND_STARTUP_MESSAGE") !== "false") {
+    // Doubles as a webhook self-test and a restart notification.
+    void postSlack(SLACK_WEBHOOK_URL, formatStartup(alertContext, alertThresholds, ALERT_CHECK_SECONDS)).then((posted) => {
+      if (!posted.ok) logLine("error", `monitor: Slack startup message failed: ${posted.error}`);
+    });
+  }
+  setTimeout(() => void runHealthCheck(), 5_000);
+  setInterval(() => void runHealthCheck(), ALERT_CHECK_SECONDS * 1000);
 }
 
 function startSafetySync(): void {
@@ -770,7 +864,15 @@ async function handleRequest(req: Request, ip: string): Promise<Response> {
       service: "bios-multilevel-platform-services-dashboard",
       predictionConfigured: Boolean(serviceUrl("prediction")),
       blockchainConfigured: Boolean(serviceUrl("blockchain")),
+      monitor: { healthy: monitorState.active.length === 0, problems: monitorState.active.map((p) => p.key) },
     });
+  }
+
+  if (url.pathname === "/monitor") {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      return json({ error: "method not allowed" }, 405, { Allow: "GET, HEAD" });
+    }
+    return json(monitorSnapshot(), 200, { "Cache-Control": "no-store" });
   }
 
   return json({ error: "not found" }, 404);
@@ -823,5 +925,6 @@ Deno.serve(async (req: Request, info: ConnInfoLike) => {
 }
 startDashboardTick();
 startSafetySync();
+startHealthMonitor();
 void forwardPredictionStream();
 void forwardBlockchainStream();

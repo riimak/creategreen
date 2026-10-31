@@ -6,7 +6,8 @@ quality and SLA overview over BIOS/SOLAX measurements.
 ## Endpoints
 
 ```sh
-GET /health
+GET /health       # 200, or 503 once a cycle has outlived PREDICTION_CYCLE_DEADLINE_MINUTES
+GET /freshness    # cycle state, PostgreSQL ping, newest measurement age per station
 GET /status
 GET /models
 GET /forecasts
@@ -57,6 +58,31 @@ PREDICTION_STATIONS=OS1BIOS,OS2BIOS,SOLAXBIOS
 ```
 
 The service runs one cycle on startup, then repeats on the configured interval.
+Each cycle pulls every configured station from Mars2 once and reuses those rows
+for all of that station's forecast and anomaly targets.
+
+### Liveness and data-flow safety
+
+Every wait inside a cycle is bounded: Mars2 calls time out after
+`BIOS_API_TIMEOUT_MS` (default 30000) and PostgreSQL queries after
+`PG_STATEMENT_TIMEOUT_MS` / `PG_QUERY_TIMEOUT_MS` (defaults 12000 / 15000). As a
+backstop, a cycle that is still running after `PREDICTION_CYCLE_DEADLINE_MINUTES`
+(default `max(30, 3 x interval)`) makes `GET /health` answer 503, so the
+Kubernetes liveness probe restarts the container and scheduled cycles resume.
+Skipped scheduled runs are logged with the age of the cycle that blocked them.
+
+`GET /freshness` is what the dashboard's Slack monitor polls:
+
+```json
+{
+  "ok": true,
+  "running": false,
+  "cycleHealth": { "ok": true, "cycleRunningMinutes": null, "deadlineMinutes": 30 },
+  "lastCycle": { "status": "ready", "finishedAt": "...", "okTargets": 23, "totalTargets": 23 },
+  "db": { "ok": true, "latencyMs": 3 },
+  "sources": [ { "source": "OS2BIOS", "solar": false, "latestTs": "...", "ageMinutes": 7, "staleAfterMinutes": 30 } ]
+}
+```
 
 ## Missing Data And SLA
 

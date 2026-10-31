@@ -66,11 +66,30 @@ function mars2Host(apiBase) {
   }
 }
 
+/** Upstream HTTP deadline. A hung Mars2 connection must fail the station, not
+ * park the whole prediction cycle (and with it every scheduled run after it). */
+function upstreamTimeoutMs() {
+  const value = Number(process.env.BIOS_API_TIMEOUT_MS);
+  return Number.isFinite(value) && value > 0 ? value : 30_000;
+}
+
+async function fetchWithDeadline(url, init, label) {
+  const ms = upstreamTimeoutMs();
+  try {
+    return await fetch(url, { ...init, signal: AbortSignal.timeout(ms) });
+  } catch (err) {
+    if (err && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw new Error(`${label} timed out after ${ms}ms`);
+    }
+    throw err;
+  }
+}
+
 async function loadFromWorker(baseUrl, source, hours) {
   const url = new URL('/api/data', baseUrl);
   url.searchParams.set('station', source);
   url.searchParams.set('hours', String(hours));
-  const res = await fetch(url);
+  const res = await fetchWithDeadline(url, {}, `prediction data API for ${source}`);
   if (!res.ok) throw new Error(`prediction data API failed: ${res.status}`);
   const body = await res.json();
   return Array.isArray(body.data) ? body.data : [];
@@ -84,11 +103,11 @@ async function getMars2Token(apiBase, username, password) {
   const body = new URLSearchParams({
     userName: username, password, grant_type: 'password',
   });
-  const res = await fetch(`${apiBase}/Token`, {
+  const res = await fetchWithDeadline(`${apiBase}/Token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body.toString(),
-  });
+  }, 'Mars2 auth');
   if (!res.ok) {
     if (ingestLogEnabled()) {
       console.error(`${new Date().toISOString()} prediction mars2: auth FAILED status=${res.status} host=${mars2Host(apiBase)}`);
@@ -140,7 +159,7 @@ async function loadFromMars2Range(apiBase, username, password, source, from, to)
       `${new Date().toISOString()} prediction mars2: GET CustomDataExport station=${source} fromUTC=${fmtMars2Utc(fromDate)} toUTC=${fmtMars2Utc(toDate)} host=${mars2Host(apiBase)}`,
     );
   }
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await fetchWithDeadline(url, { headers: { Authorization: `Bearer ${token}` } }, `Mars2 export for ${source}`);
   if (res.status === 401) {
     mars2Token = null;
     mars2TokenExpiry = 0;

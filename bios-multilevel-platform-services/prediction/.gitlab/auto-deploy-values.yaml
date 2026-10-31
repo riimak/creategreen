@@ -114,6 +114,13 @@ extraEnv:
     value: "95"
   - name: DATABASE_CA_FILE
     value: "/etc/ssl/pg/ca.crt"
+  # Self-healing: a cycle running longer than this makes /health return 503 so
+  # the liveness probe restarts the container (a wedged cycle once went
+  # unnoticed for a week). Mars2 calls get a hard deadline for the same reason.
+  - name: PREDICTION_CYCLE_DEADLINE_MINUTES
+    value: "30"
+  - name: BIOS_API_TIMEOUT_MS
+    value: "30000"
   # Mars2 / BIOS API ingest. Without these three set, `loadRecords` falls back to
   # local export files which don't exist in the pod → 0 targets, no Mars2 logs, blank dashboard.
   # `BIOS_API_BASE` is committed (not a secret); `BIOS_USERNAME`/`BIOS_PASSWORD` are appended

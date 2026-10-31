@@ -31,10 +31,41 @@ if (process.env.DATABASE_URL) {
 const state = {
   lifecycle: 'initializing',
   running: false,
+  cycleStartedAt: null,
   startedAt: new Date().toISOString(),
   lastCycle: null,
   nextRunAt: null,
 };
+
+/* ── Liveness semantics ──────────────────────────────────────────────────────
+ * In production a cycle once sat in an await that never settled; `running`
+ * stayed true for a week, every scheduled run was skipped, and /health kept
+ * answering 200 because the event loop was fine. Nothing restarted the pod and
+ * nothing alerted. A cycle has a hard deadline now: past it /health returns
+ * 503 so the kubelet's liveness probe restarts the container (same node,
+ * image already present — no pull needed), and /freshness lets the dashboard
+ * monitor raise a Slack alert. Every await inside a cycle is also bounded
+ * (Mars2 fetch deadline, pg query_timeout), so the deadline is a backstop, not
+ * the primary control. */
+function cycleDeadlineMinutes() {
+  const configured = Number(process.env.PREDICTION_CYCLE_DEADLINE_MINUTES);
+  if (Number.isFinite(configured) && configured > 0) return configured;
+  return Math.max(30, 3 * numberParam('PREDICTION_INTERVAL_MINUTES', 10));
+}
+
+function cycleHealth(snapshot, now = Date.now()) {
+  const deadlineMinutes = cycleDeadlineMinutes();
+  const startedAt = snapshot.running && snapshot.cycleStartedAt ? Date.parse(snapshot.cycleStartedAt) : NaN;
+  const cycleRunningMinutes = Number.isFinite(startedAt) ? Math.max(0, Math.round((now - startedAt) / 60000)) : null;
+  const wedged = cycleRunningMinutes !== null && cycleRunningMinutes > deadlineMinutes;
+  return {
+    ok: !wedged,
+    reason: wedged ? 'cycle_deadline_exceeded' : null,
+    cycleRunningMinutes,
+    deadlineMinutes,
+    lastCycleFinishedAt: snapshot.lastCycle?.finishedAt || null,
+  };
+}
 
 /** Server-sent events clients (`GET /stream`) — push to the dashboard without it polling. */
 const sseClients = new Set();
@@ -146,7 +177,11 @@ function stationIds() {
     .filter(Boolean);
 }
 
-async function expandTargets(targets, hours) {
+/* `preloaded` (Map source -> records) receives every station pull so the
+ * per-target forecast and anomaly passes reuse it instead of fetching the same
+ * 72h window from Mars2 again — that was 2 extra Mars2 calls per target
+ * (~47 per cycle) and most of the cycle's wall time. */
+async function expandTargets(targets, hours, preloaded = new Map()) {
   const expanded = [];
   const stationOutcome = [];
   for (const target of targets) {
@@ -157,6 +192,7 @@ async function expandTargets(targets, hours) {
     for (const source of stationIds()) {
       try {
         const records = await loadRecords({ source, hours, ...config() });
+        preloaded.set(source, records);
         const fields = fieldsFor(source);
         const before = expanded.length;
         for (const metric of fields) {
@@ -327,17 +363,20 @@ async function maybeNotifyDataQuality(quality) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    // On the cycle's critical path: a hung webhook must not stall ingest.
+    signal: AbortSignal.timeout(10_000),
   });
   await S(store.checkpoint(key, { sentAt: new Date().toISOString(), status: res.status, payload }));
   return payload;
 }
 
-async function runForecast(params) {
+/** `options.records`: station rows already pulled this cycle (see expandTargets). */
+async function runForecast(params, options = {}) {
   const source = params.get('source') || params.get('station') || 'OS1BIOS';
   const metric = params.get('metric') || 'PM2_5';
   const horizon = Math.min(Number(params.get('horizon') || 24), MAX_HORIZON_HOURS);
   const hours = Number(params.get('hours') || 72);
-  const records = await loadRecords({ source, hours, ...config() });
+  const records = options.records || await loadRecords({ source, hours, ...config() });
   const series = seriesFor(records, metric);
   const quality = dataQuality({ source, metric, hours, records, series });
   await S(store.append('dataQuality', quality));
@@ -367,11 +406,11 @@ async function runForecast(params) {
   return artifact;
 }
 
-async function runAnomalies(params) {
+async function runAnomalies(params, options = {}) {
   const source = params.get('source') || params.get('station') || 'OS1BIOS';
   const metric = params.get('metric') || 'PM2_5';
   const hours = Number(params.get('hours') || 24);
-  const records = await loadRecords({ source, hours, ...config() });
+  const records = options.records || await loadRecords({ source, hours, ...config() });
   const series = seriesFor(records, metric);
   const latestQuality = (await S(store.latest('dataQuality', row => row.source === source && row.metric === metric)))
     || dataQuality({ source, metric, hours, records, series });
@@ -406,18 +445,21 @@ async function runAnomalies(params) {
   return artifact;
 }
 
-async function processTarget(target, reason = 'scheduled') {
+async function processTarget(target, reason = 'scheduled', preloaded = null) {
   const hours = numberParam('PREDICTION_BACKFILL_HOURS', 72);
   const horizon = numberParam('PREDICTION_HORIZON_HOURS', 24);
   const params = new URLSearchParams({ source: target.source, metric: target.metric, hours: String(hours), horizon: String(horizon) });
-  const forecastArtifact = await runForecast(params);
+  // Both passes use the same `hours` window expandTargets pulled, so the
+  // station rows can be shared; without preloaded rows they fetch live.
+  const shared = preloaded?.get(target.source) ? { records: preloaded.get(target.source) } : {};
+  const forecastArtifact = await runForecast(params, shared);
   const quality = await S(store.latest('dataQuality', row => row.source === target.source && row.metric === target.metric));
   if (quality) {
     await maybeNotifyDataQuality(quality).catch(error => {
       void S(store.append('runs', { id: `notification-${Date.now()}`, target: targetKey(target.source, target.metric), status: 'notification_failed', error: error.message }));
     });
   }
-  const anomalyArtifact = await runAnomalies(params);
+  const anomalyArtifact = await runAnomalies(params, shared);
   const checkpoint = {
     target: targetKey(target.source, target.metric),
     lastProcessedAt: new Date().toISOString(),
@@ -439,14 +481,16 @@ async function runCycle(reason = 'scheduled') {
   if (state.running) return { skipped: true, reason: 'cycle_already_running' };
   state.running = true;
   const startedAt = new Date();
+  state.cycleStartedAt = startedAt.toISOString();
   const results = [];
   try {
     sseEmit('cycle', { phase: 'started', reason, at: startedAt.toISOString() });
     const hours = numberParam('PREDICTION_BACKFILL_HOURS', 72);
-    const targets = await expandTargets(parseTargets(), hours);
+    const preloaded = new Map();
+    const targets = await expandTargets(parseTargets(), hours, preloaded);
     for (const target of targets) {
       try {
-        results.push({ target: targetKey(target.source, target.metric), status: 'ok', ...(await processTarget(target, reason)) });
+        results.push({ target: targetKey(target.source, target.metric), status: 'ok', ...(await processTarget(target, reason, preloaded)) });
       } catch (error) {
         results.push({ target: targetKey(target.source, target.metric), status: 'failed', error: error.message });
       }
@@ -471,7 +515,80 @@ async function runCycle(reason = 'scheduled') {
     return state.lastCycle;
   } finally {
     state.running = false;
+    state.cycleStartedAt = null;
   }
+}
+
+/* ── Freshness (for the dashboard's Slack monitor) ──────────────────────────
+ * Cheap, indexed, and honest: it reports whether the cycle is alive, whether
+ * PostgreSQL answers, and how old the newest row per configured station is. */
+async function dbPing() {
+  const kind = store.file === 'postgres' ? 'postgres' : 'json';
+  if (typeof store.ping !== 'function') return { ok: true, store: kind };
+  const started = Date.now();
+  try {
+    const result = await store.ping();
+    return { ok: result?.ok !== false, latencyMs: Date.now() - started, store: kind, error: result?.error };
+  } catch (error) {
+    return { ok: false, latencyMs: Date.now() - started, store: kind, error: error.message };
+  }
+}
+
+async function freshnessBody() {
+  const now = Date.now();
+  const health = cycleHealth(state, now);
+  const db = await dbPing();
+  const staleDefault = numberParam('PREDICTION_STALE_AFTER_MINUTES', 30);
+  const staleSolar = numberParam('PREDICTION_STALE_AFTER_MINUTES_SOLAR', 720);
+  let sources = [];
+  let sourcesError = null;
+  try {
+    const latest = typeof store.latestMeasurementTimestamps === 'function'
+      ? await S(store.latestMeasurementTimestamps(stationIds()))
+      : stationIds().map(source => ({ source, latestTs: null }));
+    sources = latest.map((row) => {
+      const solar = isSolarSource(row.source);
+      const ts = row.latestTs ? Date.parse(row.latestTs) : NaN;
+      return {
+        source: row.source,
+        solar,
+        latestTs: Number.isFinite(ts) ? new Date(ts).toISOString() : null,
+        ageMinutes: Number.isFinite(ts) ? Math.max(0, Math.round((now - ts) / 60000)) : null,
+        staleAfterMinutes: solar ? staleSolar : staleDefault,
+      };
+    });
+  } catch (error) {
+    sourcesError = error.message;
+  }
+  const last = state.lastCycle;
+  const results = Array.isArray(last?.results) ? last.results : [];
+  return {
+    checkedAt: new Date(now).toISOString(),
+    service: 'prediction',
+    ok: health.ok && db.ok,
+    lifecycle: state.lifecycle,
+    running: state.running,
+    cycleStartedAt: state.cycleStartedAt,
+    processStartedAt: state.startedAt,
+    intervalMinutes: numberParam('PREDICTION_INTERVAL_MINUTES', 10),
+    cycleHealth: health,
+    lastCycle: last
+      ? {
+        id: last.id,
+        reason: last.reason,
+        status: last.status,
+        startedAt: last.startedAt || null,
+        finishedAt: last.finishedAt || null,
+        okTargets: results.filter(r => r.status === 'ok').length,
+        totalTargets: results.length,
+        error: last.error || null,
+      }
+      : null,
+    db,
+    sources,
+    sourcesError,
+    inputSource: inputSourceInfo().type,
+  };
 }
 
 /* ── Raw measurements view (Mars2 data browser, DB-backed) ──────────────────
@@ -905,7 +1022,12 @@ async function handle(req, res) {
       return;
     }
     if (req.method === 'GET' && url.pathname === '/health') {
-      return json(res, 200, { ok: true, service: 'prediction', store: store.file });
+      // Liveness: 503 once a cycle has outlived its deadline (see cycleHealth).
+      const health = cycleHealth(state);
+      return json(res, health.ok ? 200 : 503, { ok: health.ok, service: 'prediction', store: store.file, ...health });
+    }
+    if (req.method === 'GET' && url.pathname === '/freshness') {
+      return json(res, 200, await freshnessBody());
     }
     if (req.method === 'GET' && url.pathname === '/stats') {
       const stats = typeof store.stats === 'function' ? await store.stats() : {};
@@ -999,6 +1121,11 @@ function startScheduler() {
 
   setInterval(() => {
     state.nextRunAt = new Date(Date.now() + interval * 60 * 1000).toISOString();
+    if (state.running) {
+      const health = cycleHealth(state);
+      log('warn', `cycle: scheduled run skipped — previous cycle still running for ${health.cycleRunningMinutes} min (deadline ${health.deadlineMinutes} min${health.ok ? '' : '; /health now reports 503 so the pod will be restarted'})`);
+      return;
+    }
     runCycle('scheduled').catch(error => {
       state.lifecycle = 'degraded';
       log('error', `cycle: scheduled failed: ${error.message}`);
@@ -1049,4 +1176,7 @@ if (require.main === module) {
   });
 }
 
-module.exports = { handle, runForecast, runAnomalies, runCycle, dataQuality, slaSummary, mergeStationLists, observedMetricList, measurementsMeta };
+module.exports = {
+  handle, runForecast, runAnomalies, runCycle, dataQuality, slaSummary, mergeStationLists, observedMetricList, measurementsMeta,
+  cycleHealth, freshnessBody,
+};

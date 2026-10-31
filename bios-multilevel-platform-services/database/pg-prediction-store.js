@@ -466,9 +466,35 @@ function createPgPredictionStore(databaseUrl) {
     return { deleted: Number(rows[0]?.deleted || 0) };
   }
 
+  /* Health probes must answer quickly even when the pool is busy: short
+   * client-side ceiling so a dead backend reports as an error, not a hang. */
+  async function ping() {
+    await pool.query({ text: 'SELECT 1', query_timeout: 3_000 });
+    return { ok: true };
+  }
+
+  /* Newest measurement per configured station. One correlated max(ts) per
+   * source walks idx_raw_measurements_source_ts backwards: a handful of index
+   * probes, independent of table size. */
+  async function latestMeasurementTimestamps(sources) {
+    const wanted = [...new Set((sources || []).filter(Boolean))];
+    if (wanted.length === 0) return [];
+    const { rows } = await pool.query(
+      `SELECT s.source, (SELECT max(r.ts) FROM raw_measurements r WHERE r.source = s.source) AS latest
+       FROM unnest($1::text[]) AS s(source)`,
+      [wanted],
+    );
+    const byName = new Map(rows.map(r => [r.source, r.latest]));
+    return wanted.map(source => {
+      const latest = byName.get(source);
+      return { source, latestTs: latest?.toISOString?.() || latest || null };
+    });
+  }
+
   return {
     init, append, list, latest, listPaginated, listDataQualityWindow, checkpoint, setMeta, read, write, stats, prune,
     persistRawRecords, listRawMeasurements, rawMeasurementsStats, pruneRawMeasurements, sourceLabels, listKnownSources,
+    ping, latestMeasurementTimestamps,
     file: 'postgres',
   };
 }

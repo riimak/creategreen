@@ -44,6 +44,23 @@ production-dashboard:
       optional: true
     - job: production-soliscloud
       optional: true
+  # Slack alerting for the data-flow health monitor (dashboard/monitor.ts).
+  # SLACK_WEBHOOK_URL is a masked GitLab CI/CD variable; forward-env.sh only
+  # prints variable names, never values.
+  before_script:
+    - |
+      set -e
+      VALUES_FILE="bios-multilevel-platform-services/dashboard/.gitlab/auto-deploy-values.yaml"
+      DASHBOARD_FORWARD_ENVS="\
+        SLACK_WEBHOOK_URL ALERT_CHECK_SECONDS ALERT_UPSTREAM_FAILURES \
+        ALERT_CYCLE_STALE_MINUTES ALERT_DATA_STALE_MINUTES ALERT_DATA_STALE_MINUTES_SOLAR \
+        ALERT_REPEAT_MINUTES ALERT_STARTUP_GRACE_SECONDS ALERT_SEND_STARTUP_MESSAGE \
+        ALERT_ENV_LABEL DASHBOARD_PUBLIC_URL"
+      bash bios-multilevel-platform-services/fusionsolar/.gitlab/forward-env.sh \
+        "$VALUES_FILE" $DASHBOARD_FORWARD_ENVS
+      if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
+        echo "WARN: SLACK_WEBHOOK_URL not set as a CI variable; the health monitor runs (GET /monitor) but sends no Slack alerts."
+      fi
   rules:
     - !reference [.production, rules]
     - when: on_success

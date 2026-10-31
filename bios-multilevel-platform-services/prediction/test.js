@@ -8,6 +8,14 @@ const path = require('path');
 const scratchStore = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bios-prediction-test-')), 'prediction-store.json');
 process.env.PREDICTION_DB_PATH = scratchStore;
 delete process.env.DATABASE_URL;
+// No live data source: the export-files fallback must point at an empty dir so
+// the "live fetch required" assertions below are deterministic.
+process.env.BIOS_OUTPUT_DIR = path.join(path.dirname(scratchStore), 'no-output');
+delete process.env.BIOS_API_BASE;
+delete process.env.BIOS_USERNAME;
+delete process.env.BIOS_PASSWORD;
+delete process.env.PREDICTION_DATA_API_BASE;
+process.env.PREDICTION_INGEST_LOG = 'false';
 
 const { parseExportText, seriesFor } = require('./bios-data');
 const { forecast, anomalies } = require('./model');
@@ -95,7 +103,61 @@ assert.deepStrictEqual(observedMetricList(undefined), []);
 
 // /measurements/meta is expensive to compute (full-table stats scans), so the
 // server must serve repeat requests within the TTL from cache.
-const { measurementsMeta, slaSummary } = require('./server');
+const { measurementsMeta, slaSummary, cycleHealth, freshnessBody, runForecast, runAnomalies } = require('./server');
+
+// Liveness: a cycle that outlives its deadline must make /health fail so the
+// kubelet restarts the pod (this is the failure that went unnoticed for a week).
+{
+  const now = Date.parse('2026-10-31T12:00:00Z');
+  const idle = cycleHealth({ running: false, cycleStartedAt: null, lastCycle: { finishedAt: '2026-10-31T11:55:00Z' } }, now);
+  assert.strictEqual(idle.ok, true);
+  assert.strictEqual(idle.cycleRunningMinutes, null);
+  assert.strictEqual(idle.lastCycleFinishedAt, '2026-10-31T11:55:00Z');
+  assert.strictEqual(idle.deadlineMinutes, 30, 'default deadline is max(30, 3 x interval)');
+
+  const fresh = cycleHealth({ running: true, cycleStartedAt: '2026-10-31T11:50:00Z', lastCycle: null }, now);
+  assert.strictEqual(fresh.ok, true);
+  assert.strictEqual(fresh.cycleRunningMinutes, 10);
+
+  const wedged = cycleHealth({ running: true, cycleStartedAt: '2026-10-24T07:30:00Z', lastCycle: null }, now);
+  assert.strictEqual(wedged.ok, false);
+  assert.strictEqual(wedged.reason, 'cycle_deadline_exceeded');
+  assert.ok(wedged.cycleRunningMinutes > 7 * 24 * 60);
+
+  process.env.PREDICTION_CYCLE_DEADLINE_MINUTES = '5';
+  assert.strictEqual(cycleHealth({ running: true, cycleStartedAt: '2026-10-31T11:50:00Z', lastCycle: null }, now).ok, false);
+  delete process.env.PREDICTION_CYCLE_DEADLINE_MINUTES;
+}
+
+// The cycle must be able to forecast and detect anomalies from rows already
+// pulled for the station (no second Mars2 round-trip, no export files).
+async function checkPreloadedRecords() {
+  const params = new URLSearchParams({ source: 'OS1BIOS', metric: 'PM2_5', hours: '24', horizon: '2' });
+  const artifact = await runForecast(params, { records });
+  assert.strictEqual(artifact.source, 'OS1BIOS');
+  assert.strictEqual(artifact.metric, 'PM2_5');
+  assert.ok(['ok', 'insufficient_data'].includes(artifact.status));
+  const anomaly = await runAnomalies(params, { records });
+  assert.ok(Array.isArray(anomaly.anomalies));
+  assert.strictEqual(anomaly.input.count, 6, 'anomalies must be computed from the preloaded rows');
+  // Without preloaded rows and without any data source configured, the live path must fail loudly.
+  await assert.rejects(runForecast(params), /export file missing|Mars2|prediction data API/);
+}
+
+async function checkFreshness() {
+  const body = await freshnessBody();
+  assert.strictEqual(body.service, 'prediction');
+  assert.strictEqual(typeof body.ok, 'boolean');
+  assert.strictEqual(body.db.ok, true);
+  assert.deepStrictEqual(Object.keys(body.cycleHealth).sort(), ['cycleRunningMinutes', 'deadlineMinutes', 'lastCycleFinishedAt', 'ok', 'reason']);
+  assert.deepStrictEqual(body.sources.map(s => s.source), ['OS1BIOS', 'OS2BIOS', 'SOLAXBIOS']);
+  const solax = body.sources.find(s => s.source === 'SOLAXBIOS');
+  assert.strictEqual(solax.solar, true);
+  assert.strictEqual(solax.latestTs, null, 'json store has no raw measurements');
+  assert.strictEqual(solax.ageMinutes, null);
+  assert.strictEqual(solax.staleAfterMinutes, 720);
+  assert.strictEqual(body.sources.find(s => s.source === 'OS1BIOS').staleAfterMinutes, 30);
+}
 
 // /sla must only consider data-quality rows inside the requested window and
 // must work from the reduced projection returned by listDataQualityWindow
@@ -148,6 +210,8 @@ async function checkSlaWindow() {
   assert.strictEqual(second, first, 'concurrent meta requests must coalesce to one computation');
   assert.strictEqual(third, first, 'meta must be served from cache within the TTL');
   await checkSlaWindow();
+  await checkPreloadedRecords();
+  await checkFreshness();
   console.log('prediction tests passed');
 })().catch((err) => {
   console.error(err);

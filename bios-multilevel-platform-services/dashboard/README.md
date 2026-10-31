@@ -62,3 +62,41 @@ The dashboard proxies:
 
 This keeps the browser pointed at one Deno Deploy URL while the actual services
 can run on a VM, VPS, or other real server.
+
+## Health Monitor And Slack Alerts
+
+`monitor.ts` checks the platform's data flow every `ALERT_CHECK_SECONDS`
+(default 60) by reading the prediction service's `GET /freshness` and the
+blockchain `GET /health`, and posts to a Slack incoming webhook when the
+situation changes:
+
+| Condition | Default |
+| --- | --- |
+| Prediction or blockchain service unreachable | 3 consecutive checks (`ALERT_UPSTREAM_FAILURES`) |
+| No completed prediction cycle | 45 min (`ALERT_CYCLE_STALE_MINUTES`) |
+| Prediction cycle past its deadline (pod restart pending) | from `/freshness` |
+| Prediction service cannot reach PostgreSQL | from `/freshness` |
+| Last cycle ended `degraded`/`failed` | from `/freshness` |
+| No new measurements for a configured station | 90 min (`ALERT_DATA_STALE_MINUTES`), solar 720 min (`ALERT_DATA_STALE_MINUTES_SOLAR`) |
+
+One digest is sent when problems appear or change, a reminder every
+`ALERT_REPEAT_MINUTES` (default 240) while they persist, and a recovery message
+when everything clears. Nothing is sent during the first
+`ALERT_STARTUP_GRACE_SECONDS` (default 120) after boot. With
+`ALERT_SEND_STARTUP_MESSAGE` unset, a short "dashboard started" message is
+posted at boot, which doubles as a webhook self-test and a restart signal.
+
+Setup:
+
+1. In Slack create an incoming webhook (Apps → *Incoming WebHooks*, or a Slack
+   app with the *Incoming Webhooks* feature) and pick the channel or DM that
+   should receive alerts. Copy the `https://hooks.slack.com/services/...` URL.
+2. Add it as a masked CI/CD variable `SLACK_WEBHOOK_URL` in the GitLab project;
+   the `production-dashboard` job forwards it (and any `ALERT_*` overrides) into
+   the Helm values. Re-run the deploy.
+3. `GET /monitor` on the dashboard shows the monitor's current verdict, last
+   check time, active problems and the last `/freshness` payload;
+   `GET /health` includes a one-line summary.
+
+The monitor cannot report that the dashboard itself is down; point an external
+uptime check at `https://<host>/health` for that.

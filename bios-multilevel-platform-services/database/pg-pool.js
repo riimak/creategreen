@@ -65,6 +65,11 @@ function createPool(databaseUrl, opts = {}) {
   const poolConfig = {
     connectionString: cleanUrl,
     max: opts.max || 5,
+    // TCP keepalive so a connection whose peer vanished (DB crash recovery,
+    // node failover, conntrack drop) is torn down by the kernel instead of
+    // staying ESTABLISHED forever with a query parked on it.
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 30_000,
   };
   // statement_timeout is a server-side cancel: a runaway scan releases the
   // connection instead of pinning a pool slot until the client gives up.
@@ -72,6 +77,14 @@ function createPool(databaseUrl, opts = {}) {
   // instead of queueing the HTTP request forever.
   if (Number.isFinite(opts.statementTimeoutMs) && opts.statementTimeoutMs > 0) {
     poolConfig.statement_timeout = opts.statementTimeoutMs;
+  }
+  // query_timeout is the client-side counterpart: it rejects the promise and
+  // destroys the client even when the server can no longer answer at all.
+  // In production a backend that died mid-query left the prediction service
+  // awaiting pool.query() indefinitely (stuck cycle, stuck meta cache) — a
+  // server-side statement_timeout cannot fire on a backend that is gone.
+  if (Number.isFinite(opts.queryTimeoutMs) && opts.queryTimeoutMs > 0) {
+    poolConfig.query_timeout = opts.queryTimeoutMs;
   }
   if (Number.isFinite(opts.connectionTimeoutMs) && opts.connectionTimeoutMs > 0) {
     poolConfig.connectionTimeoutMillis = opts.connectionTimeoutMs;

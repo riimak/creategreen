@@ -7,10 +7,17 @@ function createPgPredictionStore(databaseUrl) {
   // 12s is under the dashboard proxy timeout, so a stuck scan becomes an
   // error response instead of an open request that keeps the slot forever.
   const statementTimeoutMs = Math.max(0, Number(process.env.PG_STATEMENT_TIMEOUT_MS ?? 12_000));
+  // Client-side ceiling, a little above the server-side cancel so the server
+  // gets to abort cleanly first; it is the guard that still works when the
+  // backend is dead.
+  const queryTimeoutMs = Math.max(0, Number(process.env.PG_QUERY_TIMEOUT_MS ?? (statementTimeoutMs > 0 ? statementTimeoutMs + 3_000 : 0)));
   const connectionTimeoutMs = Math.max(0, Number(process.env.PG_CONNECTION_TIMEOUT_MS ?? 5_000));
+  // Schema application can build indexes over millions of rows.
+  const initTimeoutMs = Math.max(60_000, Number(process.env.PG_INIT_TIMEOUT_MS ?? 15 * 60_000));
   const pool = createPool(databaseUrl, {
     max: 10,
     statementTimeoutMs,
+    queryTimeoutMs,
     connectionTimeoutMs,
   });
 
@@ -22,7 +29,7 @@ function createPgPredictionStore(databaseUrl) {
     try {
       // Index builds on raw_measurements must not inherit the query timeout.
       if (statementTimeoutMs > 0) await client.query('SET statement_timeout = 0');
-      await client.query(schema);
+      await client.query({ text: schema, query_timeout: initTimeoutMs });
     } finally {
       if (statementTimeoutMs > 0) {
         await client.query(`SET statement_timeout = ${statementTimeoutMs}`).catch(() => {});

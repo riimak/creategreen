@@ -1,6 +1,16 @@
 # Prediction service — internal ClusterIP only (no public ingress).
-replicaCount: 1
+# Two replicas on different nodes; a PostgreSQL advisory lock elects the one
+# that runs the cycle scheduler, the other serves reads and takes over within
+# PREDICTION_LEADER_CHECK_SECONDS when the leader disappears (server.js).
+replicaCount: 2
 strategyType: "RollingUpdate"
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - topologyKey: kubernetes.io/hostname
+        labelSelector:
+          matchLabels:
+            app: bios-prediction-production
 
 image:
   repository: git.barrage.net/bios-multilevel/bios-multilevel-dashboard
@@ -89,7 +99,8 @@ serviceAccount:
   createNew: true
 
 podDisruptionBudget:
-  enabled: false
+  enabled: true
+  maxUnavailable: 1
 
 networkPolicy:
   enabled: false

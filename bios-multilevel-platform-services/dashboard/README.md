@@ -119,5 +119,45 @@ Setup:
    check time, active problems and the last `/freshness` payload;
    `GET /health` includes a one-line summary.
 
-The monitor cannot report that the dashboard itself is down; point an external
-uptime check at `https://<host>/health` for that.
+The monitor cannot report that the dashboard itself is down; the GitLab
+scheduled pipeline `uptime-probe` (see `.gitlab-ci.yml`) and the Zabbix web
+scenario requested from DevOps cover that from outside the cluster.
+
+## Service level objectives
+
+Measured over a calendar month (30-day rolling window on the dashboard).
+`GET /monitor/slo?days=30` returns the numbers; the "Razina usluge" card on
+the overview renders them. Targets are environment variables with these
+defaults:
+
+| Objective | Target | Measured by |
+| --- | --- | --- |
+| Public availability: `GET /` and `GET /health` answer 200 | 99.9 % of minutes (`SLO_AVAILABILITY_PERCENT`; about 43 min budget per month) | external probe (GitLab schedule, Zabbix) |
+| Component availability: prediction, blockchain, PostgreSQL reachable from the dashboard | 99.9 % of checks | monitor checks recorded every `ALERT_CHECK_SECONDS` |
+| Read API latency: `/prediction/freshness` round trip | p95 under 2 s (`SLO_READ_P95_MS`) | monitor checks |
+| Data freshness as shown on the page | 99 % of checks without a `data.stale:*` problem (`SLO_FRESHNESS_PERCENT`); limits are the alert thresholds above | monitor checks |
+| Degraded mode | an upstream outage never shows the loading screen for data that was served in the last 60 min (`DASHBOARD_STALE_MAX_MINUTES`) | proxy stale-while-error |
+
+Checks are recorded through the prediction service (`/internal/monitor-checks`,
+table `monitor_checks`, pruned after `MONITOR_CHECKS_RETENTION_DAYS`, default
+90). A window in which the dashboard itself was down is simply absent from
+the record; only the external probe sees that.
+
+## Running two replicas
+
+The dashboard runs with `replicaCount: 2`, a pod disruption budget and a
+required anti-affinity across nodes, so one node failure costs nothing. Each
+replica evaluates the monitor, but only the holder of the `dashboard-monitor`
+lease (PostgreSQL, via `PUT /internal/lease/...` on the prediction service,
+renewed every check with a 3-check TTL) posts to Slack, records checks and
+sends the startup message. If the lease cannot be renewed because the
+prediction service is unreachable, every replica posts — a duplicated alert
+during an outage is preferable to none. `GET /monitor` shows `replica` and
+`lease`.
+
+Proxied reads keep the last good response per path and query for
+`DASHBOARD_STALE_MAX_MINUTES` (default 60). When the upstream is unreachable
+or answers 5xx, that copy is served with `X-Data-Stale: <seconds>` and
+`X-Data-Stale-Since`, and the page shows an amber banner with the data age
+instead of panels timing out. The Mars2 feed paths (`/prediction/feed/*`)
+are never served stale.

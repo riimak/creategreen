@@ -3,7 +3,7 @@ const { loadRecords, seriesFor, fieldsFor, METEO_FIELDS, SOLAX_FIELDS } = requir
 const { forecast, anomalies, isSolarNight } = require('./model');
 const { createStore: createJsonStore } = require('./store');
 const { METRICS, metricInfo, targetInfo } = require('./metrics');
-const { feedConfig, createFeedHandler } = require('./feed');
+const { feedConfig, createFeedHandler, readBody } = require('./feed');
 
 const PORT = Number(process.env.PREDICTION_PORT || 8091);
 const MAX_HORIZON_HOURS = 48;
@@ -638,30 +638,22 @@ async function freshnessBody() {
       sourcesError = error.message;
     }
   }
-  const last = state.lastCycle;
-  const results = Array.isArray(last?.results) ? last.results : [];
+  // The last cycle comes from the database so both replicas report the same
+  // thing; only the leader has cycle state in memory.
+  const lastCycle = storeStatus.ready ? await latestRunSummary() : null;
+  const lifecycle = leadership.leader || !lastCycle ? state.lifecycle : (lastCycle.status === 'ready' ? 'ready' : 'degraded');
   return {
     checkedAt: new Date(now).toISOString(),
     service: 'prediction',
     ok: health.ok && db.ok,
-    lifecycle: state.lifecycle,
+    lifecycle,
     running: state.running,
     cycleStartedAt: state.cycleStartedAt,
     processStartedAt: state.startedAt,
     intervalMinutes: numberParam('PREDICTION_INTERVAL_MINUTES', 10),
     cycleHealth: health,
-    lastCycle: last
-      ? {
-        id: last.id,
-        reason: last.reason,
-        status: last.status,
-        startedAt: last.startedAt || null,
-        finishedAt: last.finishedAt || null,
-        okTargets: results.filter(r => r.status === 'ok').length,
-        totalTargets: results.length,
-        error: last.error || null,
-      }
-      : null,
+    lastCycle,
+    leader: { isLeader: leadership.leader, replica: leadership.replica, since: leadership.since, error: leadership.error },
     db,
     sources,
     sourcesError,
@@ -1098,6 +1090,10 @@ async function buildStatusBody() {
   const lastRun = await S(store.latest('runs'));
   return {
     ...state,
+    // Cluster view: the newest run in the database, whichever replica ran it.
+    lastCycle: lastRun || state.lastCycle,
+    lifecycle: leadership.leader || !lastRun ? state.lifecycle : (lastRun.status === 'ready' ? 'ready' : 'degraded'),
+    leader: { isLeader: leadership.leader, replica: leadership.replica, since: leadership.since },
     intervalMinutes: numberParam('PREDICTION_INTERVAL_MINUTES', 10),
     targets: lastRun?.results?.map((result) => {
       const [source, metric] = String(result.target || '').split(':');
@@ -1106,6 +1102,50 @@ async function buildStatusBody() {
     inputSource: inputSourceInfo(),
     checkpoints: store.read().checkpoints || {},
   };
+}
+
+/* ── Cluster-internal coordination for the dashboard ────────────────────────
+ * The dashboard (Deno, no database driver) runs two replicas; these routes
+ * give it a lease ("who posts to Slack") and a place to record its health
+ * checks for the SLO summary. They are never proxied to the public host: the
+ * dashboard proxy allow-list does not include /internal. */
+async function readJsonBody(req) {
+  const text = await readBody(req, 64 * 1024);
+  if (!text.trim()) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    const err = new Error('body must be JSON');
+    err.status = 400;
+    throw err;
+  }
+}
+
+async function handleInternal(req, res, url) {
+  try {
+    const lease = url.pathname.match(/^\/internal\/lease\/([a-z0-9][a-z0-9-]{1,63})$/);
+    if (lease) {
+      if (req.method !== 'PUT') return json(res, 405, { error: 'method not allowed' });
+      const body = await readJsonBody(req);
+      const holder = String(body.holder || '').slice(0, 128);
+      if (!holder) return json(res, 400, { error: 'holder is required' });
+      return json(res, 200, await S(store.renewLease(lease[1], holder, body.ttlSeconds)));
+    }
+    if (url.pathname === '/internal/monitor-checks') {
+      if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' });
+      const body = await readJsonBody(req);
+      if (typeof body.healthy !== 'boolean') return json(res, 400, { error: 'healthy (boolean) is required' });
+      await S(store.appendMonitorCheck(body));
+      return json(res, 200, { ok: true });
+    }
+    if (url.pathname === '/internal/monitor-checks/summary') {
+      if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' });
+      return json(res, 200, await S(store.monitorSummary(url.searchParams.get('days') || 30)));
+    }
+    return json(res, 404, { error: 'not found' });
+  } catch (error) {
+    return json(res, error.status || 500, { error: error.message });
+  }
 }
 
 async function handle(req, res) {
@@ -1136,6 +1176,7 @@ async function handle(req, res) {
       res.setHeader('Retry-After', '30');
       return json(res, 503, { error: 'database unavailable', detail: storeStatus.error, attempts: storeStatus.attempts });
     }
+    if (url.pathname.startsWith('/internal/')) return handleInternal(req, res, url);
     if (req.method === 'GET' && url.pathname === '/stats') {
       const stats = typeof store.stats === 'function' ? await store.stats() : {};
       return json(res, 200, stats);
@@ -1213,10 +1254,18 @@ async function handle(req, res) {
   }
 }
 
+/* ── Scheduler, run only by the leader replica ───────────────────────────────
+ * Two replicas share the database; a session advisory lock (see the store)
+ * decides which one runs cycles. The other serves reads and takes over within
+ * LEADER_CHECK_MS when the lock is released. */
+const schedulerHandles = { interval: null, prune: null, pruneInitial: null, housekeeping: null, started: false };
+
 function startScheduler() {
+  if (schedulerHandles.started) return;
   const interval = numberParam('PREDICTION_INTERVAL_MINUTES', 10);
   const targets = parseTargets();
   if (!interval || targets.length === 0) return;
+  schedulerHandles.started = true;
 
   state.lifecycle = 'initializing';
   runCycle(process.env.PREDICTION_INIT_MODE || 'resume').catch(error => {
@@ -1226,7 +1275,7 @@ function startScheduler() {
     void S(store.append('runs', state.lastCycle));
   });
 
-  setInterval(() => {
+  schedulerHandles.interval = setInterval(() => {
     state.nextRunAt = new Date(Date.now() + interval * 60 * 1000).toISOString();
     if (state.running) {
       const health = cycleHealth(state);
@@ -1249,18 +1298,110 @@ function startScheduler() {
         .then(r => log('info', `raw_measurements prune: deleted=${r.deleted ?? 0} retentionDays=${retention}`))
         .catch(err => log('warn', `raw_measurements prune failed: ${err.message}`));
     };
-    setTimeout(runPrune, 60 * 1000);
-    setInterval(runPrune, 6 * 3600 * 1000);
+    schedulerHandles.pruneInitial = setTimeout(runPrune, 60 * 1000);
+    schedulerHandles.prune = setInterval(runPrune, 6 * 3600 * 1000);
   }
+
+  // Daily housekeeping of the monitor-check history behind the SLO panel.
+  if (typeof store.pruneMonitorChecks === 'function') {
+    const keepDays = numberParam('MONITOR_CHECKS_RETENTION_DAYS', 90);
+    schedulerHandles.housekeeping = setInterval(() => {
+      S(store.pruneMonitorChecks(keepDays))
+        .then(r => { if (r.deleted) log('info', `monitor_checks prune: deleted=${r.deleted} retentionDays=${keepDays}`); })
+        .catch(err => log('warn', `monitor_checks prune failed: ${err.message}`));
+    }, 24 * 3600 * 1000);
+  }
+}
+
+function stopScheduler() {
+  for (const key of ['interval', 'prune', 'pruneInitial', 'housekeeping']) {
+    if (schedulerHandles[key]) {
+      clearInterval(schedulerHandles[key]);
+      clearTimeout(schedulerHandles[key]);
+      schedulerHandles[key] = null;
+    }
+  }
+  schedulerHandles.started = false;
+  state.nextRunAt = null;
+}
+
+const LEADER_CHECK_MS = Math.max(5_000, numberParam('PREDICTION_LEADER_CHECK_SECONDS', 30) * 1000);
+const leadership = { leader: false, since: null, lastAttemptAt: null, error: null, replica: process.env.HOSTNAME || require('os').hostname() };
+
+async function leadershipTick() {
+  leadership.lastAttemptAt = new Date().toISOString();
+  try {
+    if (leadership.leader) {
+      const alive = typeof store.leadershipHeartbeat === 'function' ? await store.leadershipHeartbeat() : true;
+      if (!alive) {
+        leadership.leader = false;
+        leadership.since = null;
+        stopScheduler();
+        log('warn', 'leadership: lost (lock connection gone) — scheduler stopped, will retry');
+      }
+    } else {
+      const acquired = typeof store.tryAcquireLeadership === 'function' ? await store.tryAcquireLeadership('prediction-scheduler') : true;
+      if (acquired) {
+        leadership.leader = true;
+        leadership.since = new Date().toISOString();
+        log('info', `leadership: acquired by ${leadership.replica} — scheduler starts`);
+        startScheduler();
+      }
+    }
+    leadership.error = null;
+  } catch (error) {
+    leadership.error = error.message;
+    log('warn', `leadership: check failed: ${error.message}`);
+  }
+}
+
+function startLeadershipLoop() {
+  void leadershipTick();
+  setInterval(() => void leadershipTick(), LEADER_CHECK_MS);
+}
+
+/** Cluster-wide last cycle: the database row, so every replica reports the same thing. */
+async function latestRunSummary() {
+  let run = null;
+  try {
+    run = await S(store.latest('runs'));
+  } catch {
+    run = null;
+  }
+  if (!run) run = state.lastCycle;
+  if (!run) return null;
+  const results = Array.isArray(run.results) ? run.results : [];
+  const errorMarker = results.length === 1 && results[0]?.status === 'failed' && results[0]?.error && !results[0]?.target ? results[0].error : null;
+  return {
+    id: run.id,
+    reason: run.reason,
+    status: run.status,
+    startedAt: run.startedAt || null,
+    finishedAt: run.finishedAt || null,
+    okTargets: results.filter(r => r.status === 'ok').length,
+    totalTargets: errorMarker ? 0 : results.length,
+    error: run.error || errorMarker || null,
+  };
 }
 
 if (require.main === module) {
   // Cycles and the meta-cache warmer need the store; the HTTP server does not,
   // so /health and /freshness answer while PostgreSQL is still unavailable.
   storeReady.then(() => {
-    startScheduler();
+    startLeadershipLoop();
     startMeasurementsWarmer();
   });
+  // Node as PID 1 ignores SIGTERM unless handled; handing the scheduler lock
+  // back explicitly lets the other replica take over immediately instead of
+  // after the kubelet's SIGKILL.
+  for (const signal of ['SIGTERM', 'SIGINT']) {
+    process.on(signal, () => {
+      log('info', `${signal}: releasing leadership and exiting`);
+      stopScheduler();
+      const release = typeof store.releaseLeadership === 'function' ? S(store.releaseLeadership()) : Promise.resolve();
+      Promise.race([release, new Promise(r => setTimeout(r, 3000))]).finally(() => process.exit(0));
+    });
+  }
   http.createServer((req, res) => {
     const started = Date.now();
     const url = new URL(req.url, `http://${req.headers.host}`);

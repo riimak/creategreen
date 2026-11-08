@@ -108,11 +108,58 @@ function createStore(file) {
   async function latestSamples() { return []; }
   async function bucketedSeries() { return []; }
 
+  // Single-process coordination: this process is always the leader, leases
+  // live in memory, monitor checks are kept for the summary only.
+  const leases = new Map();
+  const monitorChecks = [];
+  async function tryAcquireLeadership() { return true; }
+  async function leadershipHeartbeat() { return true; }
+  async function releaseLeadership() {}
+  async function renewLease(name, holder, ttlSeconds) {
+    const now = Date.now();
+    const ttl = Math.min(3600, Math.max(5, Number(ttlSeconds) || 180)) * 1000;
+    const current = leases.get(name);
+    if (!current || current.holder === holder || current.expiresAt <= now) {
+      leases.set(name, { holder, expiresAt: now + ttl });
+      return { name, holder, held: true, expiresAt: new Date(now + ttl).toISOString() };
+    }
+    return { name, holder: current.holder, held: false, expiresAt: new Date(current.expiresAt).toISOString() };
+  }
+  async function appendMonitorCheck(check) {
+    monitorChecks.push({ ...check, checkedAt: check.checkedAt || new Date().toISOString() });
+    if (monitorChecks.length > 50_000) monitorChecks.splice(0, monitorChecks.length - 50_000);
+  }
+  async function monitorSummary(days = 30) {
+    const since = Date.now() - Math.min(365, Math.max(1, Number(days) || 30)) * 86400_000;
+    const rows = monitorChecks.filter(c => Date.parse(c.checkedAt) > since);
+    const count = (f) => rows.filter(f).length;
+    const comp = (okKey, msKey) => {
+      const withValue = rows.filter(c => c[okKey] !== null && c[okKey] !== undefined);
+      const ms = withValue.map(c => c[msKey]).filter(Number.isFinite).sort((a, b) => a - b);
+      return { ok: withValue.filter(c => c[okKey]).length, total: withValue.length, p95Ms: ms.length ? ms[Math.min(ms.length - 1, Math.floor(ms.length * 0.95))] : null };
+    };
+    const problemCounts = new Map();
+    for (const c of rows) for (const key of c.problems || []) problemCounts.set(key, (problemCounts.get(key) || 0) + 1);
+    return {
+      days: Number(days) || 30,
+      checks: rows.length,
+      firstCheckAt: rows[0]?.checkedAt || null,
+      lastCheckAt: rows[rows.length - 1]?.checkedAt || null,
+      healthy: count(c => c.healthy),
+      dataFresh: count(c => !(c.problems || []).some(k => String(k).startsWith('data.stale:'))),
+      components: { prediction: comp('predictionOk', 'predictionMs'), blockchain: comp('blockchainOk', 'blockchainMs'), database: comp('databaseOk', 'databaseMs') },
+      problems: [...problemCounts.entries()].map(([key, checks]) => ({ key, checks })).sort((a, b) => b.checks - a.checks).slice(0, 20),
+    };
+  }
+  async function pruneMonitorChecks() { return { deleted: 0 }; }
+
   return {
     read, write, append, list, latest, listPaginated, listDataQualityWindow, setMeta, checkpoint,
     persistRawRecords, listRawMeasurements, rawMeasurementsStats, pruneRawMeasurements, listKnownSources,
     ping, latestMeasurementTimestamps,
     listFeedInventory, distinctMetricsForSource, latestSamples, bucketedSeries,
+    tryAcquireLeadership, leadershipHeartbeat, releaseLeadership,
+    renewLease, appendMonitorCheck, monitorSummary, pruneMonitorChecks,
     file: storeFile,
   };
 }

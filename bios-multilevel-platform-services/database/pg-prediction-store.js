@@ -75,10 +75,13 @@ function createPgPredictionStore(databaseUrl) {
       ).then(() => artifact);
     }
     if (kind === 'runs') {
+      // A failed run has no per-target results; keep its error in the same
+      // column so a replica that did not run the cycle can still report it.
+      const results = artifact.results ?? (artifact.error ? [{ status: 'failed', error: artifact.error }] : null);
       return pool.query(
         `INSERT INTO prediction_runs (id, reason, status, results, started_at, finished_at)
          VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO UPDATE SET status=$3, results=$4, finished_at=$6 RETURNING id`,
-        [artifact.id, artifact.reason, artifact.status, JSON.stringify(artifact.results),
+        [artifact.id, artifact.reason, artifact.status, JSON.stringify(results),
          artifact.startedAt, artifact.finishedAt]
       ).then(() => artifact);
     }
@@ -695,11 +698,150 @@ function createPgPredictionStore(databaseUrl) {
     }));
   }
 
+  /* ── Leadership (two prediction replicas, one scheduler) ──────────────────
+   * A session-level advisory lock on a dedicated pooled client is the leader
+   * badge. PostgreSQL releases it the moment the holder's connection dies, so
+   * a crashed or rescheduled leader is replaced at the next attempt without
+   * any coordination code. */
+  let lockClient = null;
+
+  async function tryAcquireLeadership(name = 'prediction-scheduler') {
+    if (lockClient) return true;
+    const client = await pool.connect();
+    try {
+      const { rows } = await client.query({ text: 'SELECT pg_try_advisory_lock(hashtext($1)) AS held', values: [name], query_timeout: 5_000 });
+      if (!rows[0]?.held) {
+        client.release();
+        return false;
+      }
+      lockClient = client;
+      client.once('error', () => {
+        // Connection gone: the lock is gone with it.
+        if (lockClient === client) lockClient = null;
+        try { client.release(new Error('leadership connection lost')); } catch { /* already released */ }
+      });
+      return true;
+    } catch (error) {
+      client.release(error);
+      throw error;
+    }
+  }
+
+  /** true while the lock connection still answers; false (and releases) otherwise. */
+  async function leadershipHeartbeat() {
+    if (!lockClient) return false;
+    const client = lockClient;
+    try {
+      await client.query({ text: 'SELECT 1', query_timeout: 5_000 });
+      return true;
+    } catch (error) {
+      if (lockClient === client) lockClient = null;
+      try { client.release(error); } catch { /* already released */ }
+      return false;
+    }
+  }
+
+  async function releaseLeadership() {
+    const client = lockClient;
+    lockClient = null;
+    if (!client) return;
+    try {
+      await client.query({ text: 'SELECT pg_advisory_unlock_all()', query_timeout: 3_000 });
+      client.release();
+    } catch (error) {
+      try { client.release(error); } catch { /* already released */ }
+    }
+  }
+
+  /* ── Leases for components without their own database access ─────────────
+   * The dashboard runs two replicas but only one may post to Slack and record
+   * monitor checks; it asks here every check. A lease is held by its holder
+   * until ttl seconds pass without renewal. */
+  async function renewLease(name, holder, ttlSeconds) {
+    const ttl = Math.min(3600, Math.max(5, Number(ttlSeconds) || 180));
+    const { rows } = await pool.query(
+      `INSERT INTO service_leases (name, holder, expires_at, updated_at)
+       VALUES ($1, $2, now() + make_interval(secs => $3), now())
+       ON CONFLICT (name) DO UPDATE SET holder = EXCLUDED.holder, expires_at = EXCLUDED.expires_at, updated_at = now()
+         WHERE service_leases.holder = EXCLUDED.holder OR service_leases.expires_at < now()
+       RETURNING holder, expires_at`,
+      [name, holder, ttl],
+    );
+    if (rows.length) {
+      return { name, holder, held: true, expiresAt: rows[0].expires_at?.toISOString?.() || rows[0].expires_at };
+    }
+    const current = await pool.query('SELECT holder, expires_at FROM service_leases WHERE name = $1', [name]);
+    const row = current.rows[0];
+    return { name, holder: row?.holder || null, held: false, expiresAt: row?.expires_at?.toISOString?.() || row?.expires_at || null };
+  }
+
+  /* ── Monitor checks (SLO evidence) ────────────────────────────────────────
+   * One row per dashboard health check; summarised over a window for the
+   * operational SLO panel. Small table, pruned by the scheduler leader. */
+  async function appendMonitorCheck(check) {
+    await pool.query(
+      `INSERT INTO monitor_checks (checked_at, holder, healthy, prediction_ok, prediction_ms, blockchain_ok, blockchain_ms, database_ok, database_ms, problems, data_age)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [check.checkedAt || new Date().toISOString(), check.holder || null, Boolean(check.healthy),
+       check.predictionOk ?? null, check.predictionMs ?? null, check.blockchainOk ?? null, check.blockchainMs ?? null,
+       check.databaseOk ?? null, check.databaseMs ?? null,
+       JSON.stringify(check.problems || []), JSON.stringify(check.dataAge || {})],
+    );
+  }
+
+  async function monitorSummary(days = 30) {
+    const window = Math.min(365, Math.max(1, Number(days) || 30));
+    const { rows } = await pool.query(
+      `WITH w AS (SELECT * FROM monitor_checks WHERE checked_at > now() - make_interval(days => $1))
+       SELECT count(*)::int AS checks,
+              min(checked_at) AS first_at, max(checked_at) AS last_at,
+              count(*) FILTER (WHERE healthy)::int AS healthy,
+              count(*) FILTER (WHERE prediction_ok)::int AS prediction_ok, count(prediction_ok)::int AS prediction_total,
+              count(*) FILTER (WHERE blockchain_ok)::int AS blockchain_ok, count(blockchain_ok)::int AS blockchain_total,
+              count(*) FILTER (WHERE database_ok)::int AS database_ok, count(database_ok)::int AS database_total,
+              percentile_cont(0.95) WITHIN GROUP (ORDER BY prediction_ms) AS prediction_p95_ms,
+              percentile_cont(0.95) WITHIN GROUP (ORDER BY database_ms) AS database_p95_ms,
+              count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(problems) p WHERE p LIKE 'data.stale:%'))::int AS data_fresh
+         FROM w`,
+      [window],
+    );
+    const problems = await pool.query(
+      `SELECT p AS key, count(*)::int AS checks
+         FROM monitor_checks, jsonb_array_elements_text(problems) p
+        WHERE checked_at > now() - make_interval(days => $1)
+        GROUP BY p ORDER BY checks DESC LIMIT 20`,
+      [window],
+    );
+    const top = rows[0] || {};
+    const iso = (v) => v?.toISOString?.() || v || null;
+    return {
+      days: window,
+      checks: Number(top.checks || 0),
+      firstCheckAt: iso(top.first_at),
+      lastCheckAt: iso(top.last_at),
+      healthy: Number(top.healthy || 0),
+      dataFresh: Number(top.data_fresh || 0),
+      components: {
+        prediction: { ok: Number(top.prediction_ok || 0), total: Number(top.prediction_total || 0), p95Ms: top.prediction_p95_ms === null ? null : Number(top.prediction_p95_ms) },
+        blockchain: { ok: Number(top.blockchain_ok || 0), total: Number(top.blockchain_total || 0) },
+        database: { ok: Number(top.database_ok || 0), total: Number(top.database_total || 0), p95Ms: top.database_p95_ms === null ? null : Number(top.database_p95_ms) },
+      },
+      problems: problems.rows.map(r => ({ key: r.key, checks: Number(r.checks) })),
+    };
+  }
+
+  async function pruneMonitorChecks(days = 90) {
+    const { rowCount } = await pool.query('DELETE FROM monitor_checks WHERE checked_at < now() - make_interval(days => $1)', [Math.max(7, Number(days) || 90)]);
+    return { deleted: rowCount };
+  }
+
   return {
     init, append, list, latest, listPaginated, listDataQualityWindow, checkpoint, setMeta, read, write, stats, prune,
     persistRawRecords, listRawMeasurements, rawMeasurementsStats, pruneRawMeasurements, sourceLabels, listKnownSources,
     ping, latestMeasurementTimestamps,
     listFeedInventory, distinctMetricsForSource, latestSamples, bucketedSeries,
+    tryAcquireLeadership, leadershipHeartbeat, releaseLeadership,
+    renewLease, appendMonitorCheck, monitorSummary, pruneMonitorChecks,
     file: 'postgres',
   };
 }

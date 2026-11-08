@@ -501,6 +501,6 @@ module.exports = {
   parseFeedPlants, feedConfig, vendorOf,
   issueToken, verifyToken, isAuthorized,
   pairsForPlant, computeCurrent, computeHistory,
-  formatExportValue, formatExport, parseUtc, parseStep, parseCredentials,
+  formatExportValue, formatExport, parseUtc, parseStep, parseCredentials, readBody,
   createFeedHandler,
 };

@@ -121,6 +121,24 @@ Skipped scheduled runs are logged with the age of the cycle that blocked them.
 }
 ```
 
+### Two replicas, one scheduler
+
+The service runs with `replicaCount: 2`. On start each replica tries
+`pg_try_advisory_lock(hashtext('prediction-scheduler'))` on a dedicated pooled
+connection; the winner runs cycles, the other serves reads and retries every
+`PREDICTION_LEADER_CHECK_SECONDS` (default 30). PostgreSQL releases the lock
+when the holder's connection dies, and `SIGTERM` releases it explicitly, so a
+crashed or rescheduled leader is replaced within one check. `/status` and
+`/freshness` report `leader` and take `lastCycle` from `prediction_runs`, so
+both replicas describe the same cluster state; `running` and the wedge
+detection behind `/health` 503 are only meaningful on the leader.
+
+Cluster-internal coordination endpoints (not proxied by the dashboard):
+`PUT /internal/lease/{name}` (`{holder, ttlSeconds}` → `{held, holder,
+expiresAt}`), `POST /internal/monitor-checks`, `GET
+/internal/monitor-checks/summary?days=30`. They exist because the dashboard
+has no database driver.
+
 ### Database outages
 
 With `DATABASE_URL` set the service never falls back to the JSON file store.

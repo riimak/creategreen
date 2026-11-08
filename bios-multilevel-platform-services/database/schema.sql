@@ -78,6 +78,35 @@ CREATE TABLE IF NOT EXISTS prediction_runs (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Coordination between replicas. The prediction scheduler leader is a
+-- session advisory lock (no table); components without database access
+-- (the dashboard's Slack monitor) take a lease here through the prediction
+-- service's /internal/lease endpoint.
+CREATE TABLE IF NOT EXISTS service_leases (
+  name          TEXT PRIMARY KEY,
+  holder        TEXT NOT NULL,
+  expires_at    TIMESTAMPTZ NOT NULL,
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- One row per dashboard health check: the evidence behind the SLO panel
+-- (availability per component, freshness compliance, top problems).
+CREATE TABLE IF NOT EXISTS monitor_checks (
+  id             BIGSERIAL PRIMARY KEY,
+  checked_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  holder         TEXT,
+  healthy        BOOLEAN NOT NULL,
+  prediction_ok  BOOLEAN,
+  prediction_ms  INTEGER,
+  blockchain_ok  BOOLEAN,
+  blockchain_ms  INTEGER,
+  database_ok    BOOLEAN,
+  database_ms    INTEGER,
+  problems       JSONB NOT NULL DEFAULT '[]',
+  data_age       JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_monitor_checks_checked ON monitor_checks (checked_at DESC);
+
 -- /status reads the newest run on every call.
 CREATE INDEX IF NOT EXISTS idx_runs_created ON prediction_runs (created_at DESC);
 

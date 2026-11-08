@@ -276,13 +276,26 @@ const BLOCKCHAIN_ALLOW_EXACT = new Set<string>([
 
 // Feed API for Mars2 (prediction/feed.js): Mars2 device templates poll these
 // through the public host, so they are the one place the proxy forwards
-// Authorization / X-Feed-Key and accepts a POST (token issuance). The
-// prediction service enforces the credentials; the proxy only routes.
+// Authorization / X-Feed-Key and accepts a POST (token issuance, and the
+// Solarman-dialect token + currentData calls, which Solarman defines as
+// POST). The prediction service enforces the credentials; the proxy only
+// routes. The Solax-dialect GET carries its credential as ?tokenId=, so the
+// query string of feed requests is never logged.
 const FEED_TOKEN_PATH = "/prediction/feed/token";
+const FEED_POST_PATHS = new Set<string>([
+  FEED_TOKEN_PATH,
+  "/prediction/feed/solarman/account/v1.0/token",
+  "/prediction/feed/solarman/device/v1.0/currentData",
+]);
+const FEED_SOLAX_PATH = "/prediction/feed/solax/proxyApp/proxy/api/getRealtimeInfo.do";
 const FEED_GET_PATH = /^\/prediction\/feed\/plants(?:\/[A-Z0-9_-]+\/(?:current|history|export))?$/;
 
+function isFeedPostPath(pathname: string): boolean {
+  return FEED_POST_PATHS.has(pathname);
+}
+
 function isFeedPath(pathname: string): boolean {
-  return pathname === FEED_TOKEN_PATH || FEED_GET_PATH.test(pathname);
+  return isFeedPostPath(pathname) || pathname === FEED_SOLAX_PATH || FEED_GET_PATH.test(pathname);
 }
 
 function isProxyPathAllowed(kind: "prediction" | "blockchain", pathname: string): boolean {
@@ -930,13 +943,14 @@ function sseResponse(ip: string): Response {
 
 async function proxy(req: Request, kind: "prediction" | "blockchain", prefix: string): Promise<Response> {
   const url = new URL(req.url);
-  const feedToken = kind === "prediction" && url.pathname === FEED_TOKEN_PATH;
+  const feedPost = kind === "prediction" && isFeedPostPath(url.pathname);
 
   // Read-only proxy. Anything else is rejected before it reaches the upstream
   // so a public caller can never write to the cluster-internal services. The
-  // single exception is the feed token exchange (credentials in, token out).
-  if (feedToken ? req.method !== "POST" : (req.method !== "GET" && req.method !== "HEAD")) {
-    return json({ error: "method not allowed" }, 405, { Allow: feedToken ? "POST" : "GET, HEAD" });
+  // exceptions are the feed's credential exchanges and the Solarman-dialect
+  // read, which Solarman clients issue as POST (credentials in, data out).
+  if (feedPost ? req.method !== "POST" : (req.method !== "GET" && req.method !== "HEAD")) {
+    return json({ error: "method not allowed" }, 405, { Allow: feedPost ? "POST" : "GET, HEAD" });
   }
 
   const base = serviceUrl(kind);
@@ -971,8 +985,8 @@ async function proxy(req: Request, kind: "prediction" | "blockchain", prefix: st
   };
 
   try {
-    // The token form is tiny; buffer it so an aborted client cannot hold a stream open upstream.
-    const body = feedToken ? (await req.text()).slice(0, 16_384) : undefined;
+    // Feed POST bodies are tiny; buffer them so an aborted client cannot hold a stream open upstream.
+    const body = feedPost ? (await req.text()).slice(0, 16_384) : undefined;
     const res = await fetch(upstream, {
       method: req.method,
       headers: filteredUpstreamHeaders(req, feed),
@@ -996,7 +1010,8 @@ async function proxy(req: Request, kind: "prediction" | "blockchain", prefix: st
     return new Response(res.body, { status: res.status, headers });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    logLine("error", `proxy ${kind} ${upstream.origin}${upstream.pathname}${upstream.search}: ${msg}`);
+    // Feed queries can carry a credential (?tokenId=); never log them.
+    logLine("error", `proxy ${kind} ${upstream.origin}${upstream.pathname}${feed ? (upstream.search ? "?<redacted>" : "") : upstream.search}: ${msg}`);
     if (cacheKey) {
       const stale = staleResponse(cacheKey);
       if (stale) {

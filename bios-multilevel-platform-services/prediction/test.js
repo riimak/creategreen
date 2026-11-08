@@ -136,6 +136,78 @@ const feed = require('./feed');
   assert.strictEqual(feed.parseStep(undefined), 300);
   assert.deepStrictEqual(feed.parseCredentials('application/x-www-form-urlencoded', 'userName=a&password=b&grant_type=password'), { userName: 'a', password: 'b', grantType: 'password' });
   assert.deepStrictEqual(feed.parseCredentials('application/json', '{"userName":"a","password":"b"}'), { userName: 'a', password: 'b', grantType: 'password' });
+
+  // ── Vendor dialects: Solax Cloud getRealtimeInfo and Solarman currentData ──
+  // Every export column has a Solax field, in the genuine Solax spelling, plus yieldtotal.
+  assert.deepStrictEqual(
+    feed.LAYOUT.map(c => c.key).filter(k => !feed.SOLAX_FIELDS.some(f => f.key === k)), [],
+    'every layout column maps to a Solax field');
+  assert.strictEqual(feed.SOLAX_FIELDS.length, 16);
+  assert.ok(feed.SOLAX_FIELDS.some(f => f.field === 'yieldtotal' && f.key === 'Inverter.AC.energy.out.total'));
+  const columns = [...feed.LAYOUT, ...feed.EXTRAS];
+  const withTotal = feed.computeCurrent(huawei, inventory, [...samples,
+    { source: 'HUAWEI:NE=1', metric: 'huawei.plant.total_yield_kwh', value: 98765.4, timestamp: at(10) }], { now, columns });
+  assert.strictEqual(withTotal.values['Inverter.AC.energy.out.total'], 98765.4, 'extras are read when asked for');
+  assert.strictEqual(feed.computeCurrent(huawei, inventory, samples, { now }).values['Inverter.AC.energy.out.total'], undefined, '/current stays 15 columns');
+
+  const solax = feed.formatSolaxRealtime(huawei, withTotal, { powerUnit: 'W', empty: 'null', timeZone: 'UTC' });
+  assert.strictEqual(solax.success, true);
+  assert.strictEqual(solax.exception, 'Query success!');
+  assert.strictEqual(solax.result.sn, 'SOKO46BIOS');
+  assert.strictEqual(solax.result.inverterSN, 'HUAWEI:NE=1');
+  assert.strictEqual(solax.result.acpower, 17750, 'kW -> W like Solax Cloud');
+  assert.strictEqual(solax.result.yieldtoday, 123.4, 'energy stays kWh');
+  assert.strictEqual(solax.result.yieldtotal, 98765.4);
+  assert.strictEqual(solax.result.feedinenergy, 5000);
+  assert.strictEqual(solax.result.feedinpower, null, 'stale gauge is null, never 0');
+  assert.strictEqual(solax.result.powerdc3, null);
+  assert.strictEqual(solax.result.uploadTime, '2026-11-08 11:55:00', 'newest used sample, naive wall clock');
+  assert.strictEqual(solax.result.inverterStatus, '102');
+  assert.strictEqual(typeof solax.result.inverterType, 'string');
+  assert.strictEqual(feed.formatSolaxRealtime(huawei, withTotal, { powerUnit: 'kW', empty: 'null', timeZone: 'UTC' }).result.acpower, 17.75);
+  assert.strictEqual(feed.formatSolaxRealtime(huawei, withTotal, { empty: 'zero', timeZone: 'UTC' }).result.feedinpower, 0);
+  assert.ok(!('feedinpower' in feed.formatSolaxRealtime(huawei, withTotal, { empty: 'omit', timeZone: 'UTC' }).result), 'omit drops the field');
+  assert.strictEqual(feed.formatNaiveTime(new Date('2026-07-01T10:00:00Z'), 'Europe/Zagreb'), '2026-07-01 12:00:00', 'CEST');
+  assert.strictEqual(feed.formatNaiveTime(new Date('2026-11-08T19:45:03Z'), 'Europe/Zagreb'), '2026-11-08 20:45:03', 'CET');
+  const noData = feed.formatSolaxRealtime(huawei, feed.computeCurrent(huawei, inventory, [], { now, columns }), {});
+  assert.deepStrictEqual(noData, { success: false, exception: 'no data', result: null }, 'Solax-style query failure when nothing is fresh');
+
+  const t1 = feed.feedConfig({ FEED_USERNAME: 'mars2', FEED_PASSWORD: 'pw-secret', FEED_API_KEY: 'k-1234567890', FEED_PLANTS: '' });
+  assert.ok(feed.tokenIdAuthorized(t1, 'k-1234567890', t0), 'tokenId = static key');
+  assert.ok(feed.tokenIdAuthorized(t1, feed.issueToken(t1, t0).access_token, t0), 'tokenId = issued token');
+  assert.ok(!feed.tokenIdAuthorized(t1, 'k-123456789X', t0));
+  assert.ok(!feed.tokenIdAuthorized(t1, '', t0));
+  assert.ok(feed.solarmanLoginOk(t1, { email: 'mars2', password: 'pw-secret' }), 'plain password');
+  const digest = require('node:crypto').createHash('sha256').update('pw-secret').digest('hex');
+  assert.ok(feed.solarmanLoginOk(t1, { email: 'mars2', password: digest.toUpperCase() }), 'Solarman clients send the SHA-256 of the password');
+  assert.ok(feed.solarmanLoginOk(t1, { appSecret: 'k-1234567890' }), 'appSecret = static key');
+  assert.ok(!feed.solarmanLoginOk(t1, { email: 'mars2', password: 'wrong', appSecret: 'nope' }));
+  assert.ok(!feed.solarmanLoginOk(t1, { email: 'other', password: 'pw-secret' }));
+  assert.ok(!feed.solarmanLoginOk(feed.feedConfig({ FEED_PLANTS: '' }), { email: '', password: '' }), 'unconfigured feed never logs in');
+
+  const sm = feed.formatSolarmanCurrent(huawei, withTotal, { deviceId: 77, capacityKwp: 46, now });
+  assert.strictEqual(sm.success, true);
+  assert.strictEqual(sm.deviceSn, 'SOKO46BIOS');
+  assert.strictEqual(sm.deviceId, 77);
+  assert.strictEqual(sm.deviceState, 1);
+  assert.strictEqual(sm.collectionTime, Math.floor(Date.parse(at(5)) / 1000));
+  const byKey = Object.fromEntries(sm.dataList.map(d => [d.key, d]));
+  assert.deepStrictEqual(byKey.APo_t1, { key: 'APo_t1', value: '17.75', unit: 'kW', name: 'Total AC Output Power (Active)' }, 'values are strings like Solarman');
+  assert.strictEqual(byKey.Etdy_ge1.value, '123.4');
+  assert.strictEqual(byKey.Et_ge0.value, '98765.4');
+  assert.strictEqual(byKey.t_gc1.value, '5000');
+  assert.strictEqual(byKey.Pr1.value, '46', 'rated power from the inventory');
+  assert.ok(!('PG_Pt1' in byKey), 'absent quantities are not listed');
+  assert.strictEqual(feed.formatSolarmanCurrent(huawei, feed.computeCurrent(huawei, inventory, [], { now }), { now }).deviceState, 3, 'offline without data');
+  const smTok = feed.formatSolarmanToken(feed.issueToken(t1, t0));
+  assert.strictEqual(smTok.success, true);
+  assert.strictEqual(smTok.expires_in, String(feed.TOKEN_TTL_SECONDS), 'Solarman sends expires_in as a string');
+  assert.ok(feed.verifyToken(t1, smTok.access_token, t0));
+  assert.deepStrictEqual(feed.parseJsonOrForm('application/json', '{"deviceSn":"X","deviceId":5}'), { deviceSn: 'X', deviceId: 5 });
+  assert.deepStrictEqual(feed.parseJsonOrForm('application/x-www-form-urlencoded', 'deviceSn=X'), { deviceSn: 'X' });
+  assert.throws(() => feed.parseJsonOrForm('application/json', '[1]'), /JSON object/);
+  assert.strictEqual(feed.feedConfig({ FEED_PLANTS: '', FEED_SOLAX_POWER_UNIT: 'MW', FEED_SOLAX_EMPTY: 'x', FEED_SOLAX_TIMEZONE: 'Mars/Olympus' }).solax.powerUnit, 'W', 'bad knobs fall back');
+  assert.deepStrictEqual(feed.feedConfig({ FEED_PLANTS: '' }).solax, { powerUnit: 'W', empty: 'null', timeZone: 'Europe/Zagreb' });
 }
 
 // /measurements?bucket=… server-side downsampling parameter.
@@ -428,6 +500,42 @@ async function checkNoJsonFallback() {
     const freshAfter = await get('/freshness');
     assert.strictEqual(freshAfter.body.feed.authFailures, 2, 'bad password and anonymous call are counted');
     assert.ok(freshAfter.body.feed.lastTokenAt, 'token issuance is recorded');
+    assert.deepStrictEqual(freshAfter.body.feed.dialects, { solax: { powerUnit: 'W', empty: 'null', timeZone: 'Europe/Zagreb' }, solarman: true });
+
+    // Solax dialect: credential in the query string, Solax-shaped errors.
+    const solaxPath = '/feed/solax/proxyApp/proxy/api/getRealtimeInfo.do';
+    const solaxAnon = await get(`${solaxPath}?tokenId=wrong&sn=SOKO46BIOS`);
+    assert.strictEqual(solaxAnon.status, 401);
+    assert.deepStrictEqual(solaxAnon.body, { success: false, exception: 'invalid tokenId', result: null });
+    const solaxOk = await get(`${solaxPath}?tokenId=${encodeURIComponent(tok.body.access_token)}&sn=SOKO46BIOS`);
+    assert.strictEqual(solaxOk.status, 503, 'authenticated by tokenId, then the store guard');
+    assert.strictEqual(solaxOk.body.exception, 'database unavailable');
+    const solaxPost = await post(solaxPath, '', 'text/plain');
+    assert.strictEqual(solaxPost.status, 405);
+
+    // Solarman dialect: its own token route (plain or SHA-256 password), then a bearer POST.
+    const smBad = await post('/feed/solarman/account/v1.0/token?appId=x', JSON.stringify({ appSecret: 'x', email: 'mars2', password: 'wrong' }), 'application/json');
+    assert.strictEqual(smBad.status, 401);
+    assert.strictEqual(smBad.body.success, false);
+    const sha = require('node:crypto').createHash('sha256').update('feed-test-password').digest('hex');
+    const smTok = await post('/feed/solarman/account/v1.0/token?appId=x', JSON.stringify({ appSecret: 'x', email: 'mars2', password: sha }), 'application/json');
+    assert.strictEqual(smTok.status, 200, JSON.stringify(smTok.body));
+    assert.strictEqual(smTok.body.success, true);
+    assert.strictEqual(typeof smTok.body.expires_in, 'string');
+    const smData = await fetch(`http://127.0.0.1:${port}/feed/solarman/device/v1.0/currentData?language=en`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `bearer ${smTok.body.access_token}` }, body: JSON.stringify({ deviceSn: 'SOKO46BIOS', deviceId: 1 }),
+    });
+    assert.strictEqual(smData.status, 503, 'authenticated, then the store guard');
+    const smAnon = await post('/feed/solarman/device/v1.0/currentData?language=en', JSON.stringify({ deviceSn: 'SOKO46BIOS' }), 'application/json');
+    assert.strictEqual(smAnon.status, 401);
+    assert.strictEqual(smAnon.body.msg, 'auth invalid token');
+    const smGet = await get('/feed/solarman/device/v1.0/currentData');
+    assert.strictEqual(smGet.status, 405);
+    const smUnknown = await post('/feed/solarman/nothing', '{}', 'application/json');
+    assert.strictEqual(smUnknown.status, 404);
+    const after = await get('/freshness');
+    assert.strictEqual(after.body.feed.authFailures, 5, 'solax wrong tokenId, solarman bad login and anonymous read are counted');
+    assert.strictEqual(after.body.feed.lastRequestPath, '/feed/solarman/device/v1.0/currentData');
 
     // Retries keep going (attempt counter grows) instead of giving up.
     await new Promise((r) => setTimeout(r, 2_500));

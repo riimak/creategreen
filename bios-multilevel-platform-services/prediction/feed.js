@@ -19,9 +19,22 @@
  *   GET  /feed/plants/{code}/history?from&to&step=300
  *   GET  /feed/plants/{code}/export?fromUTC&toUTC   CustomDataExport wire format ("CODE!ts;v1;...;v15<0xa>..."), comma decimals
  *
+ * Vendor-dialect facades (docs/mars2/admin-recon.md §3, §7). Mars2's Http
+ * driver is not a generic JSON connector: it speaks the vendor clouds it was
+ * built for, and which flow it runs is decided by the device parameters. To
+ * add a plant without a Mars2 code change we answer in one of those dialects
+ * and the Mars2 device is cloned from the matching existing device:
+ *
+ *   GET  /feed/solax/proxyApp/proxy/api/getRealtimeInfo.do?tokenId=<key or token>&sn=<plant code>
+ *        -> Solax Cloud getRealtimeInfo shape (power in W, energy in kWh, uploadTime "yyyy-MM-dd HH:mm:ss")
+ *   POST /feed/solarman/account/v1.0/token?appId=...          { appSecret, email, password }      -> { access_token, ... }
+ *   POST /feed/solarman/device/v1.0/currentData?language=en   { deviceSn, deviceId } + bearer    -> { dataList: [{ key, value, unit, name }] }
+ *
  * Auth: `Authorization: Bearer <token>` from /feed/token (HMAC-signed, 24 h) or
- * a static `X-Feed-Key` header. Without FEED_USERNAME/FEED_PASSWORD (or
- * FEED_API_KEY) configured every endpoint answers 503 — the feed is never open.
+ * a static `X-Feed-Key` header; the Solax facade additionally accepts the key
+ * or token as `tokenId`, the Solarman facade issues the same tokens from its
+ * own token route. Without FEED_USERNAME/FEED_PASSWORD (or FEED_API_KEY)
+ * configured every endpoint answers 503 — the feed is never open.
  */
 
 const crypto = require('node:crypto');
@@ -76,6 +89,63 @@ const LAYOUT = Object.freeze([
     solis: { scope: 'plant', metrics: ['solis.plant.daily_yield_kwh'] } },
 ]);
 
+/* Series outside the 15 export columns that the vendor dialects can carry
+ * (SRDFARETLA has an Inverter.AC.energy.out.total counter = Solax yieldtotal). */
+const EXTRAS = Object.freeze([
+  { position: null, key: 'Inverter.AC.energy.out.total', unit: 'kWh', kind: 'cumulative',
+    huawei: { scope: 'plant', metrics: ['huawei.plant.total_yield_kwh'] },
+    solis: { scope: 'plant', metrics: ['solis.plant.total_yield_kwh'] } },
+]);
+
+/* ── Vendor dialects ──────────────────────────────────────────────────────────
+ * Solax Cloud getRealtimeInfo.do `result` fields (API v1): power in W, energy
+ * in kWh, soc in %. Mars2's SRDFARETLA counters name these fields in
+ * PascalCase as CounterCode (Feedinpower, Acpower, BatPower, ...), so the
+ * facade must use the genuine field names. `scale` converts our kW. */
+const SOLAX_FIELDS = Object.freeze([
+  { field: 'acpower', key: 'Inverter.AC.power.total', scale: 'power' },
+  { field: 'yieldtoday', key: 'Inverter.AC.energy.out.daily', scale: 'energy' },
+  { field: 'yieldtotal', key: 'Inverter.AC.energy.out.total', scale: 'energy' },
+  { field: 'feedinpower', key: 'Grid.power.total', scale: 'power' },
+  { field: 'feedinenergy', key: 'Grid.energy.toGrid.total', scale: 'energy' },
+  { field: 'consumeenergy', key: 'Grid.energy.fromGrid.total', scale: 'energy' },
+  { field: 'feedinpowerM2', key: 'Inverter.Meter2.AC.power.total', scale: 'power' },
+  { field: 'soc', key: 'BMS.energy.SOC', scale: 'percent' },
+  { field: 'peps1', key: 'Inverter.AC.EPS.power.R', scale: 'power' },
+  { field: 'peps2', key: 'Inverter.AC.EPS.power.S', scale: 'power' },
+  { field: 'peps3', key: 'Inverter.AC.EPS.power.T', scale: 'power' },
+  { field: 'batPower', key: 'Inverter.DC.Battery.power.total', scale: 'power' },
+  { field: 'powerdc1', key: 'Inverter.DC.PV.power.MPPT1', scale: 'power' },
+  { field: 'powerdc2', key: 'Inverter.DC.PV.power.MPPT2', scale: 'power' },
+  { field: 'powerdc3', key: 'Inverter.DC.PV.power.MPPT3', scale: 'power' },
+  { field: 'powerdc4', key: 'Inverter.DC.PV.power.MPPT4', scale: 'power' },
+]);
+
+/* Solarman currentData `dataList` keys as used by the CounterCodes of the
+ * Dvorana Kulturnog centra device (counters 01, 33-43 read off the admin UI;
+ * B_left_cap1, B_P1 and DP1-4 are the usual Solarman keys but were not seen
+ * on that device, so verify before relying on them). Values are strings in
+ * Solarman's API; absent quantities are simply not listed. */
+const SOLARMAN_FIELDS = Object.freeze([
+  { key: 'Pr1', unit: 'kW', name: 'Rated Power', layout: null, from: 'capacityKwp', verified: true },
+  { key: 'APo_t1', unit: 'kW', name: 'Total AC Output Power (Active)', layout: 'Inverter.AC.power.total', verified: true },
+  { key: 'Et_ge0', unit: 'kWh', name: 'Cumulative Production (Active)', layout: 'Inverter.AC.energy.out.total', verified: true },
+  { key: 'Etdy_ge1', unit: 'kWh', name: 'Daily Production (Active)', layout: 'Inverter.AC.energy.out.daily', verified: true },
+  { key: 'PG_Pt1', unit: 'kW', name: 'Total Grid Power', layout: 'Grid.power.total', verified: true },
+  { key: 't_gc1', unit: 'kWh', name: 'Cumulative Grid Feed-in', layout: 'Grid.energy.toGrid.total', verified: true },
+  { key: 'Et_pu1', unit: 'kWh', name: 'Cumulative Energy Purchased', layout: 'Grid.energy.fromGrid.total', verified: true },
+  { key: 'B_left_cap1', unit: '%', name: 'Battery SOC', layout: 'BMS.energy.SOC', verified: false },
+  { key: 'B_P1', unit: 'kW', name: 'Battery Power', layout: 'Inverter.DC.Battery.power.total', verified: false },
+  { key: 'DP1', unit: 'kW', name: 'DC Power PV1', layout: 'Inverter.DC.PV.power.MPPT1', verified: false },
+  { key: 'DP2', unit: 'kW', name: 'DC Power PV2', layout: 'Inverter.DC.PV.power.MPPT2', verified: false },
+  { key: 'DP3', unit: 'kW', name: 'DC Power PV3', layout: 'Inverter.DC.PV.power.MPPT3', verified: false },
+  { key: 'DP4', unit: 'kW', name: 'DC Power PV4', layout: 'Inverter.DC.PV.power.MPPT4', verified: false },
+]);
+
+const SOLAX_PATH = '/feed/solax/proxyApp/proxy/api/getRealtimeInfo.do';
+const SOLARMAN_TOKEN_PATH = '/feed/solarman/account/v1.0/token';
+const SOLARMAN_DATA_PATH = '/feed/solarman/device/v1.0/currentData';
+
 /* ── Configuration ────────────────────────────────────────────────────────── */
 
 /** "SOKO46BIOS=HUAWEI:NE=201410062,VETINSTBIOS=SOLIS:1298491919450654168" -> [{ code, source, vendor }] */
@@ -119,12 +189,40 @@ function feedConfig(env = process.env) {
     username, password, apiKey, secret,
     configured: Boolean((username && password) || apiKey),
     staleMinutes,
+    solax: {
+      // Solax Cloud reports power in W and Mars2 shows SOLAXBIOS in kW, so the
+      // W->kW step lives in Mars2; send W unless a live poll proves otherwise.
+      powerUnit: oneOf(env.FEED_SOLAX_POWER_UNIT, ['W', 'kW'], 'W'),
+      // What a missing quantity looks like: null (Solax does this for powerdc3/4),
+      // 0, or the field left out. Switchable without a code change because the
+      // Mars2 deserializer is a black box.
+      empty: oneOf(env.FEED_SOLAX_EMPTY, ['null', 'zero', 'omit'], 'null'),
+      // uploadTime is a naive "yyyy-MM-dd HH:mm:ss"; Mars2 showed Solax's value
+      // unshifted as "Zadnje očitanje", i.e. it reads it as local time.
+      timeZone: validTimeZone(env.FEED_SOLAX_TIMEZONE, 'Europe/Zagreb'),
+    },
   };
 }
 
 function positiveNumber(raw, fallback) {
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+function oneOf(raw, allowed, fallback) {
+  const v = String(raw || '').trim();
+  return allowed.includes(v) ? v : fallback;
+}
+
+function validTimeZone(raw, fallback) {
+  const tz = String(raw || '').trim();
+  if (!tz) return fallback;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return tz;
+  } catch {
+    return fallback;
+  }
 }
 
 /* ── Tokens ───────────────────────────────────────────────────────────────── */
@@ -177,10 +275,10 @@ function isAuthorized(config, headers, now = Date.now()) {
 /* ── Value computation ────────────────────────────────────────────────────── */
 
 /** (source, metric) pairs to read for one plant, per layout key. */
-function pairsForPlant(plant, inventory) {
+function pairsForPlant(plant, inventory, columns = LAYOUT) {
   const devices = inventory?.devices || [];
   const out = [];
-  for (const column of LAYOUT) {
+  for (const column of columns) {
     const rule = column[plant.vendor];
     if (!rule) continue;
     const sources = rule.scope === 'plant' ? [plant.source] : devices.map(d => d.source);
@@ -211,12 +309,13 @@ function round(v, digits = 3) {
 function computeCurrent(plant, inventory, samples, options = {}) {
   const now = options.now ?? Date.now();
   const staleMinutes = { ...DEFAULT_STALE_MINUTES, ...(options.staleMinutes || {}) };
+  const columns = options.columns || LAYOUT;
   const byPair = new Map(samples.map(s => [`${s.source}\u001f${s.metric}`, s]));
-  const pairs = pairsForPlant(plant, inventory);
+  const pairs = pairsForPlant(plant, inventory, columns);
   const values = {};
   const details = {};
   let newest = null;
-  for (const column of LAYOUT) {
+  for (const column of columns) {
     const rule = column[plant.vendor];
     if (!rule) {
       values[column.key] = null;
@@ -304,6 +403,96 @@ function formatExport(code, buckets) {
   return `${code}!${records.join('')}`;
 }
 
+/* ── Vendor dialect formatting ────────────────────────────────────────────── */
+
+/** Date -> "yyyy-MM-dd HH:mm:ss" wall-clock time in `timeZone` (Solax uploadTime style). */
+function formatNaiveTime(date, timeZone) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+    timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(date).filter(p => p.type !== 'literal').map(p => [p.type, p.value]));
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
+/**
+ * Solax Cloud getRealtimeInfo.do answer for one plant. `current` is a
+ * computeCurrent result over LAYOUT + EXTRAS. No fresh data at all gives the
+ * query-level failure Solax itself uses (HTTP 200, success:false).
+ */
+function formatSolaxRealtime(plant, current, options = {}) {
+  const { powerUnit = 'W', empty = 'null', timeZone = 'Europe/Zagreb' } = options;
+  if (!current.timestamp) {
+    return { success: false, exception: 'no data', result: null };
+  }
+  const result = { inverterSN: plant.source, sn: plant.code };
+  for (const f of SOLAX_FIELDS) {
+    const kw = current.values[f.key];
+    let value = kw === null || kw === undefined ? null : f.scale === 'power' && powerUnit === 'W' ? round(kw * 1000, 1) : kw;
+    if (value === null) {
+      if (empty === 'omit') continue;
+      value = empty === 'zero' ? 0 : null;
+    }
+    result[f.field] = value;
+  }
+  // Not a Solax inverter: type "0"; status "102" (Normal) means data is flowing.
+  result.inverterType = '0';
+  result.inverterStatus = '102';
+  result.uploadTime = formatNaiveTime(new Date(current.timestamp), timeZone);
+  return { success: true, exception: 'Query success!', result };
+}
+
+/** Solarman currentData answer for one plant (values as strings, absent quantities omitted). */
+function formatSolarmanCurrent(plant, current, options = {}) {
+  const { deviceId = 0, capacityKwp = null, now = Date.now() } = options;
+  const dataList = [];
+  for (const f of SOLARMAN_FIELDS) {
+    const value = f.from === 'capacityKwp' ? capacityKwp : current.values[f.layout];
+    if (value === null || value === undefined || !Number.isFinite(value)) continue;
+    dataList.push({ key: f.key, value: String(value), unit: f.unit, name: f.name });
+  }
+  const online = Boolean(current.timestamp);
+  return {
+    code: null, msg: null, success: true, requestId: crypto.randomUUID(),
+    deviceSn: plant.code, deviceId, deviceType: 'INVERTER',
+    deviceState: online ? 1 : 3,
+    collectionTime: Math.floor((online ? Date.parse(current.timestamp) : now) / 1000),
+    dataList,
+  };
+}
+
+/** Solarman token answer (expires_in is a string in Solarman's API). */
+function formatSolarmanToken(issued) {
+  return {
+    code: null, msg: null, success: true, requestId: crypto.randomUUID(),
+    access_token: issued.access_token, token_type: 'bearer', refresh_token: null,
+    expires_in: String(issued.expires_in), scope: 'read', uid: 0,
+  };
+}
+
+function sha256Hex(s) {
+  return crypto.createHash('sha256').update(String(s ?? '')).digest('hex');
+}
+
+/**
+ * Solarman-style login: { appSecret, email, password }. Email/password are the
+ * feed credentials (Solarman clients send the SHA-256 of the password, so the
+ * digest is accepted too); alternatively appSecret may be the static key.
+ */
+function solarmanLoginOk(config, creds) {
+  if (!config.configured || !creds) return false;
+  if (config.username && creds.email !== undefined && constantTimeEqual(creds.email, config.username)) {
+    if (constantTimeEqual(creds.password, config.password)) return true;
+    if (constantTimeEqual(String(creds.password ?? '').toLowerCase(), sha256Hex(config.password))) return true;
+  }
+  return Boolean(config.apiKey && creds.appSecret && constantTimeEqual(creds.appSecret, config.apiKey));
+}
+
+/** Solax-style credential: `tokenId` is the static key or a token from /feed/token. */
+function tokenIdAuthorized(config, tokenId, now = Date.now()) {
+  if (!config.configured || !tokenId) return false;
+  if (config.apiKey && constantTimeEqual(tokenId, config.apiKey)) return true;
+  return verifyToken(config, tokenId, now);
+}
+
 /* ── HTTP ─────────────────────────────────────────────────────────────────── */
 
 /** Mars2-style "yyyy-MM-dd HH:mm:ss" (UTC) or ISO 8601 -> Date */
@@ -347,6 +536,17 @@ function parseCredentials(contentType, body) {
   }
   const p = new URLSearchParams(body || '');
   return { userName: p.get('userName') ?? p.get('username'), password: p.get('password'), grantType: p.get('grant_type') ?? 'password' };
+}
+
+/** JSON object body (Solarman clients) or a form; throws on malformed JSON. */
+function parseJsonOrForm(contentType, body) {
+  const text = body || '';
+  if (/application\/json/i.test(contentType || '') || /^\s*\{/.test(text)) {
+    const o = JSON.parse(text || '{}');
+    if (!o || typeof o !== 'object' || Array.isArray(o)) throw new Error('body must be a JSON object');
+    return o;
+  }
+  return Object.fromEntries(new URLSearchParams(text));
 }
 
 /**
@@ -394,14 +594,91 @@ function createFeedHandler({ store, config, state, storeReady = () => true, log 
     };
   }
 
+  /** Newest values for a plant over `columns`; returns { full, samples, current }. */
+  async function plantCurrent(plant, columns = LAYOUT) {
+    const full = withInventory(plant, await inventory());
+    const pairs = pairsForPlant(plant, full, columns);
+    const samples = await store.latestSamples(pairs.map(p => ({ source: p.source, metric: p.metric })));
+    const current = computeCurrent(plant, full, samples, { now: now(), staleMinutes: config.staleMinutes, columns });
+    return { full, samples, current };
+  }
+
+  function unavailable(res, json, body) {
+    res.setHeader('Retry-After', '30');
+    json(res, 503, body);
+  }
+
+  /* Solax Cloud dialect: one GET, credentials in the query string. */
+  async function handleSolax(req, res, url, json) {
+    const fail = (status, exception, extra) => json(res, status, { success: false, exception, result: null, ...extra });
+    if (req.method !== 'GET') { fail(405, 'method not allowed'); return true; }
+    const tokenId = url.searchParams.get('tokenId');
+    if (!tokenIdAuthorized(config, tokenId, now()) && !isAuthorized(config, req.headers, now())) {
+      touch(url.pathname, false);
+      res.setHeader('WWW-Authenticate', 'Bearer realm="bios-feed"');
+      fail(401, 'invalid tokenId');
+      return true;
+    }
+    touch(url.pathname, true);
+    if (!storeReady()) { unavailable(res, json, { success: false, exception: 'database unavailable', result: null }); return true; }
+    const sn = (url.searchParams.get('sn') || '').trim();
+    const plant = plantByCode(sn);
+    if (!plant) { fail(404, 'unknown sn', { codes: config.plants.map(p => p.code) }); return true; }
+    const { current } = await plantCurrent(plant, [...LAYOUT, ...EXTRAS]);
+    json(res, 200, formatSolaxRealtime(plant, current, config.solax));
+    return true;
+  }
+
+  /* Solarman dialect: token POST, then currentData POST with a bearer. */
+  async function handleSolarman(req, res, url, json) {
+    const fail = (status, code, msg) => json(res, status, { code: String(code), msg, success: false });
+    if (req.method !== 'POST') { fail(405, 405, 'method not allowed'); return true; }
+    let body;
+    try {
+      body = parseJsonOrForm(req.headers['content-type'], await readBody(req));
+    } catch (error) {
+      fail(400, 400, error.message);
+      return true;
+    }
+    if (url.pathname === SOLARMAN_TOKEN_PATH) {
+      if (!solarmanLoginOk(config, body)) {
+        touch(url.pathname, false);
+        fail(401, 2101021, 'invalid credentials');
+        return true;
+      }
+      state.lastTokenAt = new Date(now()).toISOString();
+      json(res, 200, formatSolarmanToken(issueToken(config, now())));
+      return true;
+    }
+    if (url.pathname !== SOLARMAN_DATA_PATH) { fail(404, 404, 'not found'); return true; }
+    if (!isAuthorized(config, req.headers, now())) {
+      touch(url.pathname, false);
+      res.setHeader('WWW-Authenticate', 'Bearer realm="bios-feed"');
+      fail(401, 2101021, 'auth invalid token');
+      return true;
+    }
+    touch(url.pathname, true);
+    if (!storeReady()) { unavailable(res, json, { code: '503', msg: 'database unavailable', success: false }); return true; }
+    const sn = String(body.deviceSn ?? '').trim();
+    const plant = plantByCode(sn);
+    if (!plant) { fail(404, 404, `unknown deviceSn; configured: ${config.plants.map(p => p.code).join(', ')}`); return true; }
+    const { full, current } = await plantCurrent(plant, [...LAYOUT, ...EXTRAS]);
+    const deviceId = Number.isFinite(Number(body.deviceId)) ? Number(body.deviceId) : 0;
+    json(res, 200, formatSolarmanCurrent(plant, current, { deviceId, capacityKwp: full.capacityKwp, now: now() }));
+    return true;
+  }
+
   return async function handleFeed(req, res, url, json, jsonText) {
     if (!url.pathname.startsWith('/feed/') && url.pathname !== '/feed') return false;
     res.setHeader('Cache-Control', 'no-store');
 
     if (!config.configured) {
-      json(res, 503, { error: 'feed not configured', detail: 'set FEED_USERNAME/FEED_PASSWORD or FEED_API_KEY' });
+      json(res, 503, { error: 'feed not configured', detail: 'set FEED_USERNAME/FEED_PASSWORD or FEED_API_KEY', success: false });
       return true;
     }
+
+    if (url.pathname === SOLAX_PATH) return handleSolax(req, res, url, json);
+    if (url.pathname.startsWith('/feed/solarman/')) return handleSolarman(req, res, url, json);
 
     if (url.pathname === '/feed/token') {
       if (req.method !== 'POST') { json(res, 405, { error: 'method not allowed' }); return true; }
@@ -433,11 +710,7 @@ function createFeedHandler({ store, config, state, storeReady = () => true, log 
     }
     touch(url.pathname, true);
 
-    if (!storeReady()) {
-      res.setHeader('Retry-After', '30');
-      json(res, 503, { error: 'database unavailable' });
-      return true;
-    }
+    if (!storeReady()) { unavailable(res, json, { error: 'database unavailable' }); return true; }
 
     if (url.pathname === '/feed/plants') {
       const plants = await inventory();
@@ -453,13 +726,9 @@ function createFeedHandler({ store, config, state, storeReady = () => true, log 
     if (!m) { json(res, 404, { error: 'not found' }); return true; }
     const plant = plantByCode(m[1]);
     if (!plant) { json(res, 404, { error: 'unknown plant code', codes: config.plants.map(p => p.code) }); return true; }
-    const plants = await inventory();
-    const full = withInventory(plant, plants);
 
     if (m[2] === 'current') {
-      const pairs = pairsForPlant(plant, full);
-      const samples = await store.latestSamples(pairs.map(p => ({ source: p.source, metric: p.metric })));
-      const current = computeCurrent(plant, full, samples, { now: now(), staleMinutes: config.staleMinutes });
+      const { full, samples, current } = await plantCurrent(plant);
       json(res, 200, {
         code: full.code, name: full.name, vendor: full.vendor, source: full.source, capacityKwp: full.capacityKwp,
         generatedAt: new Date(now()).toISOString(),
@@ -472,6 +741,7 @@ function createFeedHandler({ store, config, state, storeReady = () => true, log 
     }
 
     // history / export share the bucketed read
+    const full = withInventory(plant, await inventory());
     const isExport = m[2] === 'export';
     const from = parseUtc(url.searchParams.get(isExport ? 'fromUTC' : 'from'));
     const to = parseUtc(url.searchParams.get(isExport ? 'toUTC' : 'to')) || new Date(now());
@@ -497,10 +767,12 @@ function createFeedHandler({ store, config, state, storeReady = () => true, log 
 }
 
 module.exports = {
-  LAYOUT, TOKEN_TTL_SECONDS,
+  LAYOUT, EXTRAS, TOKEN_TTL_SECONDS,
+  SOLAX_FIELDS, SOLARMAN_FIELDS, SOLAX_PATH, SOLARMAN_TOKEN_PATH, SOLARMAN_DATA_PATH,
   parseFeedPlants, feedConfig, vendorOf,
-  issueToken, verifyToken, isAuthorized,
+  issueToken, verifyToken, isAuthorized, tokenIdAuthorized, solarmanLoginOk,
   pairsForPlant, computeCurrent, computeHistory,
-  formatExportValue, formatExport, parseUtc, parseStep, parseCredentials, readBody,
+  formatExportValue, formatExport, parseUtc, parseStep, parseCredentials, parseJsonOrForm, readBody,
+  formatNaiveTime, formatSolaxRealtime, formatSolarmanCurrent, formatSolarmanToken,
   createFeedHandler,
 };

@@ -50,8 +50,15 @@ last and only runs when the other four succeed.
    record (artifact, 14 days).
 3. **Mars2 feed credentials**: CI variables `FEED_USERNAME`, `FEED_PASSWORD`
    (masked) or `FEED_API_KEY`; optional `FEED_TOKEN_SECRET`. Until set the
-   feed answers 503. Then `ALERT_FEED_SILENT_MINUTES=15` once the Mars2
-   devices poll. Contract: `docs/mars2/feed-contract.md`.
+   feed answers 503. For the Solax-dialect devices in Mars2 the `TokenId`
+   device parameter is `FEED_API_KEY`, so set that one (masked, 32+ random
+   characters). Then `ALERT_FEED_SILENT_MINUTES=15` once the Mars2 devices
+   poll. After the first live poll compare the counter's "Zadnje očitanje"
+   with our sample time; if it is off by the UTC offset set
+   `FEED_SOLAX_TIMEZONE=UTC` (and `FEED_SOLAX_POWER_UNIT=kW` if values are
+   1000× too large, `FEED_SOLAX_EMPTY=zero|omit` if nothing is read at all).
+   Contract: `docs/mars2/feed-contract.md`; admin model:
+   `docs/mars2/admin-recon.md`.
 4. **Zabbix** (DevOps): web scenario on `https://bios-multilevel.barrage.net/health`
    expecting HTTP 200 and the string `"healthy": true`, and on
    `/prediction/freshness` expecting `"ok": true`; 1-minute interval, alert

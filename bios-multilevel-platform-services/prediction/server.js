@@ -90,6 +90,7 @@ try {
   feedState.configured = cfg.configured;
   feedState.plants = cfg.plants.map(p => p.code);
   feedState.authMethods = [cfg.username && cfg.password ? 'bearer' : null, cfg.apiKey ? 'x-feed-key' : null].filter(Boolean);
+  feedState.dialects = { solax: { ...cfg.solax }, solarman: true };
   handleFeed = createFeedHandler({
     store: { listFeedInventory: (...a) => store.listFeedInventory(...a), latestSamples: (...a) => store.latestSamples(...a), bucketedSeries: (...a) => store.bucketedSeries(...a) },
     config: cfg, state: feedState, storeReady: () => storeStatus.ready, log,

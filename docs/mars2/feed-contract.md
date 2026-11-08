@@ -165,23 +165,151 @@ inverter temperature) are in `raw` and in the metric registries
   were not checked). Column 9 carries `verified: false` in `details` until
   it is; flip the sign in `LAYOUT` in `prediction/feed.js` if needed.
 
+## Vendor dialects (what Mars2 actually polls)
+
+The Mars2 `Http` driver is not a generic JSON connector; it speaks the vendor
+clouds it was built for and the flow is chosen by the device parameters
+([admin-recon.md](admin-recon.md) §3). The same plant values are therefore
+also served in two vendor dialects, so a Mars2 device cloned from an existing
+one can poll us without a Mars2 code change. Both use the same credentials
+and the same staleness rules as `/current`; `null` columns stay empty.
+
+### Solax Cloud dialect (primary — the `SOLAXBIOS` device uses it)
+
+```http
+GET /prediction/feed/solax/proxyApp/proxy/api/getRealtimeInfo.do?tokenId=<FEED_API_KEY or access_token>&sn=<Mars2 code>
+```
+
+```json
+{ "success": true, "exception": "Query success!",
+  "result": { "inverterSN": "HUAWEI:NE=201410062", "sn": "SOKO46BIOS",
+              "acpower": 12175, "yieldtoday": 76, "yieldtotal": 98765.4,
+              "feedinpower": -3100, "feedinenergy": 5072, "consumeenergy": 1810.5,
+              "feedinpowerM2": null, "soc": null, "peps1": null, "peps2": null, "peps3": null,
+              "batPower": null, "powerdc1": null, "powerdc2": null, "powerdc3": null, "powerdc4": null,
+              "inverterType": "0", "inverterStatus": "102", "uploadTime": "2026-11-08 20:00:12" } }
+```
+
+| Solax field | Column | Unit |
+| --- | --- | --- |
+| `feedinpower` | 1 `Grid.power.total` | W |
+| `feedinenergy` | 2 `Grid.energy.toGrid.total` | kWh |
+| `consumeenergy` | 3 `Grid.energy.fromGrid.total` | kWh |
+| `soc` | 4 `BMS.energy.SOC` | % |
+| `feedinpowerM2` | 5 `Inverter.Meter2.AC.power.total` | W |
+| `peps1` / `peps2` / `peps3` | 6–8 `Inverter.AC.EPS.power.R/S/T` | W |
+| `batPower` | 9 `Inverter.DC.Battery.power.total` | W |
+| `powerdc1` … `powerdc4` | 10–13 `Inverter.DC.PV.power.MPPT1–4` | W |
+| `acpower` | 14 `Inverter.AC.power.total` | W |
+| `yieldtoday` | 15 `Inverter.AC.energy.out.daily` | kWh |
+| `yieldtotal` | (not exported) `Inverter.AC.energy.out.total` | kWh |
+
+- Power is sent in **W** like Solax Cloud (Mars2 turns Solax's W into the kW
+  it shows for `SOLAXBIOS`); `FEED_SOLAX_POWER_UNIT=kW` switches if a live
+  poll proves otherwise.
+- `uploadTime` is the newest sample used, as a naive wall-clock time in
+  `FEED_SOLAX_TIMEZONE` (default `Europe/Zagreb`, because Mars2 displays
+  Solax's naive `uploadTime` unshifted). Verify on the first live poll that
+  "Zadnje očitanje" on the counter equals our sample time; if it is off by
+  the UTC offset set `FEED_SOLAX_TIMEZONE=UTC`.
+- Missing quantities are `null` (Solax itself sends `powerdc3: null`);
+  `FEED_SOLAX_EMPTY=zero|omit` if Mars2's deserializer objects.
+- `inverterType` is `"0"` (there is no Solax inverter), `inverterStatus`
+  `"102"` (Normal) whenever data is flowing.
+- Errors keep the Solax envelope: `401 {"success":false,"exception":"invalid
+  tokenId"}`, `404 … "unknown sn"` (with `codes`), `503 … "database
+  unavailable"`, and `200 {"success":false,"exception":"no data"}` when no
+  column has a fresh value (Solax's own query-level failure).
+
+### Solarman dialect (fallback — the `Dvorana Kulturnog centra` device uses it)
+
+```http
+POST /prediction/feed/solarman/account/v1.0/token?appId=<anything>
+Content-Type: application/json
+
+{ "appSecret": "<FEED_API_KEY or anything>", "email": "<FEED_USERNAME>", "password": "<FEED_PASSWORD or its SHA-256 hex>" }
+```
+
+```json
+{ "code": null, "msg": null, "success": true, "requestId": "…", "access_token": "…", "token_type": "bearer",
+  "refresh_token": null, "expires_in": "86400", "scope": "read", "uid": 0 }
+```
+
+Login succeeds with `email`/`password` = feed credentials (Solarman clients
+hash the password with SHA-256, so the digest is accepted too) or with
+`appSecret` = `FEED_API_KEY`. The token is the same as from `/feed/token`.
+
+```http
+POST /prediction/feed/solarman/device/v1.0/currentData?language=en
+Authorization: bearer <access_token>
+Content-Type: application/json
+
+{ "deviceSn": "<Mars2 code>", "deviceId": 0 }
+```
+
+```json
+{ "code": null, "msg": null, "success": true, "requestId": "…",
+  "deviceSn": "SOKO46BIOS", "deviceId": 0, "deviceType": "INVERTER", "deviceState": 1, "collectionTime": 1794168715,
+  "dataList": [
+    { "key": "Pr1", "value": "46", "unit": "kW", "name": "Rated Power" },
+    { "key": "APo_t1", "value": "12.175", "unit": "kW", "name": "Total AC Output Power (Active)" },
+    { "key": "Etdy_ge1", "value": "76", "unit": "kWh", "name": "Daily Production (Active)" },
+    { "key": "PG_Pt1", "value": "-3.1", "unit": "kW", "name": "Total Grid Power" },
+    { "key": "t_gc1", "value": "5072", "unit": "kWh", "name": "Cumulative Grid Feed-in" },
+    { "key": "Et_pu1", "value": "1810.5", "unit": "kWh", "name": "Cumulative Energy Purchased" } ] }
+```
+
+| `dataList.key` (= Mars2 `CounterCode`) | Column | Seen on the Dvorana device |
+| --- | --- | --- |
+| `Pr1` | rated power = plant capacity kWp | yes (01) |
+| `APo_t1` | 14 `Inverter.AC.power.total` | yes (33) |
+| `Et_ge0` | `Inverter.AC.energy.out.total` | yes (34) |
+| `Etdy_ge1` | 15 `Inverter.AC.energy.out.daily` | yes (35) |
+| `PG_Pt1` | 1 `Grid.power.total` | yes (36) |
+| `t_gc1` | 2 `Grid.energy.toGrid.total` | yes (37) |
+| `Et_pu1` | 3 `Grid.energy.fromGrid.total` | yes (38) |
+| `B_left_cap1` | 4 `BMS.energy.SOC` | not seen — verify |
+| `B_P1` | 9 `Inverter.DC.Battery.power.total` | not seen — verify |
+| `DP1`–`DP4` | 10–13 `Inverter.DC.PV.power.MPPT1–4` | not seen — verify |
+
+Values are strings and absent quantities are not listed, like Solarman;
+`deviceState` is 1 (online) with fresh data and 3 (offline) without.
+
 ## Mars2 side
 
-Per plant, in the admin UI (Upravljanje podacima, never as a root node):
+Per plant, in the admin UI (Upravljanje podacima, never as a root node). The
+model to copy is `BIOS CREATEGREEN (Solax)` → `SRDFARETLA` + `Solax MT`
+([admin-recon.md](admin-recon.md)):
 
-1. Create the plant node under **Solari**; set **Mjerno mjesto** code to the
-   Mars2 code above.
-2. Create the device from the feed template (Instalacijski alati >
-   Predlošci, then Privremeni uređaji > Kreiraj novi uređaj) with the
-   plant-specific URL `…/feed/plants/<code>/current`, and attach it with
-   "Dodaj iz privremenih uređaja".
-3. One Variable per column with `CustomExport` position 1..15 exactly as on
-   `SOLAXBIOS`, so `CustomDataExport/BIOS/<code>` has the same layout.
-4. Poll every 5 minutes (vendor data arrives every 5 minutes; Mars2 pulls of
-   the existing stations are 10 minutes).
+1. Template: Instalacijski alati > Predlošci, create a template from the
+   `SRDFARETLA` device node (Solax dialect; it carries the 16 counters with
+   their `Http/CounterCode` values and the `Solax` parameter category).
+2. Privremeni uređaji > Kreiraj novi uređaj from that template, per plant,
+   with device parameters
+   `BaseUrl = https://bios-multilevel.barrage.net/prediction/feed/solax`,
+   `RealTimeInfoEndpoint = proxyApp/proxy/api/getRealtimeInfo.do`,
+   `TokenId = <FEED_API_KEY>`, `DeviceSn = <Mars2 code>`.
+3. Create the plant node under **Solari**, add component **Mjerno mjesto**
+   with ŠIFRA = the Mars2 code, then "Dodaj iz privremenih uređaja".
+4. Add a measurement-point node (component **Mjerna točka**, UREĐAJI = the
+   new device, VRIJEDI OD = now) with one normalized variable per counter
+   (components Varijabla, Mjerna veličina/BROJAČ = the counter, Parametri →
+   category `CustomExport`, parameter `Position`). `Position` is **0-based**:
+   column 1 `Grid.power.total` = `0` … column 15 `Inverter.AC.energy.out.daily`
+   = `14`, identical to `Solax MT`.
+5. Poll every 5 minutes if the period is configurable (vendor data arrives
+   every 5 minutes; Mars2 pulls of the existing stations are 10 minutes).
+
+Fallback: the same steps with a template from the `2206239131` Solarman
+device and `BaseUrl = …/prediction/feed/solarman`,
+`AuthenticationEndpoint = account/v1.0/token?appId=`,
+`CurrentDataEndpoint = device/v1.0/currentData?language=en`,
+`Email/Password` = feed credentials, `DeviceSn` = the Mars2 code; the
+variables then have to be named after the export columns by hand.
 
 Polling is visible on our side: `GET /prediction/freshness` reports
-`feed.lastRequestAt`, `feed.lastRequestPath`, `feed.requestsTotal` and auth
+`feed.lastRequestAt`, `feed.lastRequestPath` (which dialect Mars2 uses),
+`feed.requestsTotal`, `feed.dialects` (the Solax knobs in force) and auth
 failures, and the dashboard monitor alerts when polling stops
 (`mars2.poll.silent`).
 
@@ -192,5 +320,8 @@ failures, and the dashboard monitor alerts when polling stops
 | 400 | bad credentials (`invalid_grant`), bad `from`/`to`, window over 31 days |
 | 401 | missing or expired token / wrong key |
 | 404 | unknown plant code (the body lists the configured codes) |
-| 405 | wrong method (token is POST only, data is GET only) |
+| 405 | wrong method (token and the Solarman routes are POST only, everything else GET only) |
 | 503 | feed not configured, or PostgreSQL unavailable (`Retry-After: 30`) |
+
+The dialect routes answer the same statuses inside their vendor envelope
+(`success: false` plus `exception` or `code`/`msg`).

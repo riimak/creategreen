@@ -80,6 +80,8 @@ and posts to a Slack incoming webhook when the situation changes:
 | Prediction service running on the JSON file store (no `DATABASE_URL`) | from `/freshness` |
 | Last cycle ended `degraded`/`failed` | from `/freshness` |
 | No new measurements for a configured station | 240 min (`ALERT_DATA_STALE_MINUTES`), solar 720 min (`ALERT_DATA_STALE_MINUTES_SOLAR`) — the meteo station samples at :00/:20 and Mars2 serves them 1–2 h late, so its newest row is routinely 2–3 h old |
+| Mars2 stopped polling the feed API for the vendor plants, or polls with wrong credentials | off by default; `ALERT_FEED_SILENT_MINUTES=15` once the Mars2 devices exist (see `docs/mars2/feed-contract.md`) |
+| Feed API disabled by a configuration error | from `/freshness` |
 
 The direct probe is the equivalent of `pg_isready`: it uses the dashboard's
 `DATABASE_URL` only for host, port, user and database name, sends a plaintext

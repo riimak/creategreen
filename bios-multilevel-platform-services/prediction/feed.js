@@ -33,16 +33,24 @@ const DEFAULT_STALE_MINUTES = { gauge: 30, daily: 26 * 60, cumulative: 26 * 60 }
  * scope 'plant'   -> metric lives on the plant source (HUAWEI:<code>, SOLIS:<id>)
  * scope 'devices' -> metric lives on device sources; `agg` combines devices
  * kind  gauge (avg per bucket) | daily (resets at midnight; max per bucket) | cumulative (last per bucket)
- * verified:false  -> mapping provisional until checked against vendor documentation (plan item A2) */
+ * verified:false  -> sign/direction not yet confirmed against the vendor and SOLAXBIOS conventions
+ *
+ * Sign conventions (verified 2026-11-08): SOLAXBIOS Grid.power.total is
+ * negative while importing (night: -8 kW with the fromGrid counter rising and
+ * toGrid flat) and positive while exporting. Huawei grid meters and power
+ * sensors count feed-in as positive as well (FusionSolar NBI, confirmed by the
+ * Homey and Home Assistant integrations), so active_power maps 1:1,
+ * positive_active_energy is energy fed to the grid and reverse_active_energy
+ * energy drawn from it. Solis names the direction explicitly (sell/purchased). */
 const LAYOUT = Object.freeze([
   { position: 1, key: 'Grid.power.total', unit: 'kW', kind: 'gauge',
     huawei: { scope: 'devices', agg: 'sum', metrics: ['huawei.grid_meter.active_power_kw', 'huawei.power_sensor.active_power_kw'] },
     solis: null },
   { position: 2, key: 'Grid.energy.toGrid.total', unit: 'kWh', kind: 'cumulative',
-    huawei: { scope: 'devices', agg: 'sum', verified: false, metrics: ['huawei.grid_meter.positive_active_energy_kwh', 'huawei.power_sensor.positive_active_energy_kwh'] },
+    huawei: { scope: 'devices', agg: 'sum', metrics: ['huawei.grid_meter.positive_active_energy_kwh', 'huawei.power_sensor.positive_active_energy_kwh'] },
     solis: { scope: 'plant', metrics: ['solis.plant.total_grid_sell_kwh'] } },
   { position: 3, key: 'Grid.energy.fromGrid.total', unit: 'kWh', kind: 'cumulative',
-    huawei: { scope: 'devices', agg: 'sum', verified: false, metrics: ['huawei.grid_meter.negative_active_energy_kwh', 'huawei.power_sensor.negative_active_energy_kwh'] },
+    huawei: { scope: 'devices', agg: 'sum', metrics: ['huawei.grid_meter.negative_active_energy_kwh', 'huawei.power_sensor.negative_active_energy_kwh'] },
     solis: { scope: 'plant', metrics: ['solis.plant.total_grid_purchased_kwh'] } },
   { position: 4, key: 'BMS.energy.SOC', unit: '%', kind: 'gauge',
     huawei: { scope: 'devices', agg: 'avg', metrics: ['huawei.battery.state_of_charge_percent', 'huawei.ess.state_of_charge_percent'] },
@@ -51,9 +59,11 @@ const LAYOUT = Object.freeze([
   { position: 6, key: 'Inverter.AC.EPS.power.R', unit: 'kW', kind: 'gauge', huawei: null, solis: null },
   { position: 7, key: 'Inverter.AC.EPS.power.S', unit: 'kW', kind: 'gauge', huawei: null, solis: null },
   { position: 8, key: 'Inverter.AC.EPS.power.T', unit: 'kW', kind: 'gauge', huawei: null, solis: null },
+  // Battery power: Huawei reports charging as positive; the SOLAXBIOS sign for
+  // Inverter.DC.Battery.power.total and Solis batteryPower are not confirmed.
   { position: 9, key: 'Inverter.DC.Battery.power.total', unit: 'kW', kind: 'gauge',
-    huawei: { scope: 'devices', agg: 'sum', metrics: ['huawei.battery.charge_discharge_power_kw', 'huawei.ess.charge_discharge_power_kw'] },
-    solis: { scope: 'devices', agg: 'sum', metrics: ['solis.inverter.battery_power_kw'] } },
+    huawei: { scope: 'devices', agg: 'sum', verified: false, metrics: ['huawei.battery.charge_discharge_power_kw', 'huawei.ess.charge_discharge_power_kw'] },
+    solis: { scope: 'devices', agg: 'sum', verified: false, metrics: ['solis.inverter.battery_power_kw'] } },
   { position: 10, key: 'Inverter.DC.PV.power.MPPT1', unit: 'kW', kind: 'gauge', huawei: null, solis: null },
   { position: 11, key: 'Inverter.DC.PV.power.MPPT2', unit: 'kW', kind: 'gauge', huawei: null, solis: null },
   { position: 12, key: 'Inverter.DC.PV.power.MPPT3', unit: 'kW', kind: 'gauge', huawei: null, solis: null },

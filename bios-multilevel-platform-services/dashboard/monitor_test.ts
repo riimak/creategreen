@@ -294,6 +294,47 @@ Deno.test("a single failed database probe is carried, not alerted", () => {
   assertEquals(back.action.kind, "none");
 });
 
+Deno.test("Mars2 feed polling: off by default, silence and wrong credentials once enabled", () => {
+  const feedOn: MonitorThresholds = { ...thresholds, feedSilentMinutes: 15 };
+  const feed = (overrides: Record<string, unknown>) =>
+    healthy(T0, { feed: { configured: true, plants: ["SOKO46BIOS", "VETINSTBIOS"], requestsTotal: 10, authFailures: 0, lastAuthFailureAt: null, ...overrides } });
+
+  // Disabled: nothing, even when nobody ever polled.
+  assertEquals(evaluateProblems(input(T0, feed({ lastRequestAt: null })), initialState(T0), thresholds).problems, []);
+
+  // Enabled, recent poll: fine.
+  assertEquals(evaluateProblems(input(T0, feed({ lastRequestAt: new Date(T0 - 4 * MIN).toISOString() })), initialState(T0), feedOn).problems, []);
+
+  // Enabled, last poll too old.
+  const silent = evaluateProblems(input(T0, feed({ lastRequestAt: new Date(T0 - 40 * MIN).toISOString() })), initialState(T0), feedOn).problems;
+  assertEquals(silent.map((p) => p.key), ["mars2.poll.silent"]);
+  assertStringIncludes(silent[0].text, "40 min");
+  assertStringIncludes(silent[0].text, "SOKO46BIOS, VETINSTBIOS");
+
+  // Enabled, never polled since a start long ago.
+  const never = evaluateProblems(input(T0, feed({ lastRequestAt: null })), initialState(T0), feedOn).problems;
+  assertEquals(never.map((p) => p.key), ["mars2.poll.silent"]);
+  assertStringIncludes(never[0].text, "never polled");
+
+  // Fresh start, never polled yet: not stale until the limit passes.
+  const young = healthy(T0, { processStartedAt: new Date(T0 - 5 * MIN).toISOString(), feed: { configured: true, plants: ["SOKO46BIOS"], lastRequestAt: null } });
+  assertEquals(evaluateProblems(input(T0, young), initialState(T0), feedOn).problems, []);
+
+  // Rejected calls with no accepted ones: credentials problem on the Mars2 side.
+  const wrongCreds = evaluateProblems(
+    input(T0, feed({ lastRequestAt: new Date(T0 - 40 * MIN).toISOString(), authFailures: 7, lastAuthFailureAt: new Date(T0 - 2 * MIN).toISOString() })),
+    initialState(T0), feedOn,
+  ).problems;
+  assertEquals(wrongCreds.map((p) => p.key).sort(), ["mars2.feed.auth", "mars2.poll.silent"]);
+
+  // Not configured on our side: no polling expectation.
+  assertEquals(evaluateProblems(input(T0, healthy(T0, { feed: { configured: false, plants: [] } })), initialState(T0), feedOn).problems, []);
+
+  // Misconfiguration is reported regardless of the opt-in.
+  const bad = evaluateProblems(input(T0, healthy(T0, { feed: { configured: false, plants: [], configError: 'FEED_PLANTS entry "x" must be CODE=SOURCE' } })), initialState(T0), thresholds).problems;
+  assertEquals(bad.map((p) => p.key), ["mars2.feed.misconfigured"]);
+});
+
 Deno.test("startup message says whether PostgreSQL is probed directly", () => {
   assertStringIncludes(formatStartup(ctx, thresholds, 60, true), "PostgreSQL or an upstream down 3 checks");
   assertStringIncludes(formatStartup(ctx, thresholds, 60, false), "No DATABASE_URL");

@@ -26,14 +26,51 @@ API_BASE="${API_BASE//$'\r'/}"
 USERNAME="${USERNAME//$'\r'/}"
 PASSWORD="${PASSWORD//$'\r'/}"
 
-STATION_IDS=("OS1BIOS" "OS2BIOS" "SOLAXBIOS")
 OUTPUT_DIR="$(pwd)/output"
 
-# Column headers per station (semicolon-separated, station ID and timestamp prepended automatically)
-declare -A HEADERS
-HEADERS[OS1BIOS]="Temperatura;Relativna vlaznost;Brzina vjetra;Smjer vjetra;Suncevo zracenje;UV indeks;Tlak zraka;Kisa;CO;CO2;NO;NO2;O3;SO2;Lebdece cestice PM1;Lebdece cestice PM2.5;Lebdece cestice PM10;eaqi-traffic;CAQI;Buka;cumulative"
-HEADERS[OS2BIOS]="Temperatura;Relativna vlaznost;Brzina vjetra;Smjer vjetra;Suncevo zracenje;UV indeks;Tlak zraka;Kisa;CO;CO2;NO;NO2;O3;SO2;Lebdece cestice PM1;Lebdece cestice PM2.5;Lebdece cestice PM10;eaqi-traffic;CAQI;Buka;cumulative"
-HEADERS[SOLAXBIOS]="Grid.power.total;Grid.energy.toGrid.total;Grid.energy.fromGrid.total;BMS.energy.SOC;Inverter.Meter2.AC.power.total;Inverter.AC.EPS.power.R;Inverter.AC.EPS.power.S;Inverter.AC.EPS.power.T;Inverter.DC.Battery.power.total;Inverter.DC.PV.power.MPPT1;Inverter.DC.PV.power.MPPT2;Inverter.DC.PV.power.MPPT3;Inverter.DC.PV.power.MPPT4;Inverter.AC.power.total;Inverter.AC.energy.out.daily"
+# Column layouts (semicolon-separated; station ID and timestamp are prepended
+# automatically). These two headers ARE the partner data contract.
+declare -A LAYOUT_HEADERS
+LAYOUT_HEADERS[meteo]="Temperatura;Relativna vlaznost;Brzina vjetra;Smjer vjetra;Suncevo zracenje;UV indeks;Tlak zraka;Kisa;CO;CO2;NO;NO2;O3;SO2;Lebdece cestice PM1;Lebdece cestice PM2.5;Lebdece cestice PM10;eaqi-traffic;CAQI;Buka;cumulative"
+LAYOUT_HEADERS[solar]="Grid.power.total;Grid.energy.toGrid.total;Grid.energy.fromGrid.total;BMS.energy.SOC;Inverter.Meter2.AC.power.total;Inverter.AC.EPS.power.R;Inverter.AC.EPS.power.S;Inverter.AC.EPS.power.T;Inverter.DC.Battery.power.total;Inverter.DC.PV.power.MPPT1;Inverter.DC.PV.power.MPPT2;Inverter.DC.PV.power.MPPT3;Inverter.DC.PV.power.MPPT4;Inverter.AC.power.total;Inverter.AC.energy.out.daily"
+
+# Stations come from stations.conf ("ID|layout" per line) so adding a plant is
+# a one-line change next to the specs, not an edit of this script.
+STATIONS_FILE="${BIOS_STATIONS_FILE:-${SCRIPT_DIR}/stations.conf}"
+STATION_IDS=()
+declare -A HEADERS LAYOUTS
+
+load_stations() {
+    if [[ ! -f "$STATIONS_FILE" ]]; then
+        STATION_IDS=("OS1BIOS" "OS2BIOS" "SOLAXBIOS")
+        LAYOUTS[OS1BIOS]=meteo; LAYOUTS[OS2BIOS]=meteo; LAYOUTS[SOLAXBIOS]=solar
+    else
+        local line id layout
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            line="${line%%#*}"
+            line="${line//$'\r'/}"
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            [[ -z "$line" ]] && continue
+            id="${line%%|*}"
+            layout="${line#*|}"
+            [[ "$id" == "$line" ]] && die "${STATIONS_FILE}: line '${line}' must be ID|layout"
+            [[ -z "${LAYOUT_HEADERS[$layout]:-}" ]] && die "${STATIONS_FILE}: unknown layout '${layout}' for ${id} (meteo|solar)"
+            STATION_IDS+=("$id")
+            LAYOUTS[$id]="$layout"
+        done < "$STATIONS_FILE"
+        [[ ${#STATION_IDS[@]} -eq 0 ]] && die "${STATIONS_FILE}: no stations defined"
+    fi
+    local sid
+    for sid in "${STATION_IDS[@]}"; do
+        HEADERS[$sid]="${LAYOUT_HEADERS[${LAYOUTS[$sid]}]}"
+    done
+}
+
+require_station() {
+    local sid="$1"
+    [[ -n "${LAYOUTS[$sid]:-}" ]] || die "Unknown station '${sid}'. Known stations (${STATIONS_FILE}): ${STATION_IDS[*]}"
+}
 
 MONTHLY_HEADER="Effective AC Output Time (min);Total Effective AC Output Time (min);Inverter output (kWh);Exported energy (kWh);Imported energy (kWh)"
 
@@ -43,22 +80,29 @@ usage() {
 Usage: $0 <command> [options]
 
 Commands:
-  fetch   --from "YYYY-MM-DD HH:MM:SS" --to "YYYY-MM-DD HH:MM:SS" [--station ID]
+  fetch   --from "YYYY-MM-DD HH:MM:SS" --to "YYYY-MM-DD HH:MM:SS" [--station ID]...
           Fetch measurements and produce per-station output files.
-          --station can be OS1BIOS, OS2BIOS, or SOLAXBIOS.
-          If omitted, all three stations are fetched.
+          Without --station every station in stations.conf is fetched.
+          Exit 2 when Mars2 returned no rows for any requested station.
 
-  report  --month YYYY-MM [--station SOLAXBIOS]
-          Generate the SOLAXBIOS monthly report.
+  report  --month YYYY-MM [--station ID]
+          Generate the monthly report for a solar-layout station
+          (default: SOLAXBIOS; any station with layout "solar" in stations.conf).
+
+  stations
+          List the configured stations and their layouts (no network).
 
 Options:
   -o, --output-dir DIR   Output directory (default: ./output)
   -h, --help             Show this help
 
+Stations are read from ${STATIONS_FILE} (override with BIOS_STATIONS_FILE).
+
 Examples:
   $0 fetch --from "2026-03-01 00:00:00" --to "2026-03-02 00:00:00"
   $0 fetch --from "2026-03-01 00:00:00" --to "2026-03-02 00:00:00" --station OS1BIOS
   $0 report --month 2026-03
+  $0 report --month 2026-03 --station SOKO46BIOS
 EOF
     exit 0
 }
@@ -156,6 +200,8 @@ cmd_fetch() {
     [[ -z "$from_utc" ]] && die "--from is required"
     [[ -z "$to_utc" ]]   && die "--to is required"
     [[ ${#stations[@]} -eq 0 ]] && stations=("${STATION_IDS[@]}")
+    local sid
+    for sid in "${stations[@]}"; do require_station "$sid"; done
 
     mkdir -p "$OUTPUT_DIR"
 
@@ -164,6 +210,7 @@ cmd_fetch() {
     token=$(get_token)
     log "Token acquired."
 
+    local empty=()
     for sid in "${stations[@]}"; do
         log "Fetching ${sid} from=${from_utc} to=${to_utc} ..."
         local outfile="${OUTPUT_DIR}/${sid,,}-measurements.txt"
@@ -176,17 +223,32 @@ cmd_fetch() {
         raw=$(fetch_data "$token" "$sid" "$from_utc" "$to_utc")
 
         if [[ -z "$raw" || "$raw" == '""' ]]; then
-            log "WARNING: No data returned for ${sid}."
+            log "WARNING: ${sid}: Mars2 returned no rows for ${from_utc} .. ${to_utc}; the file has only a header."
+            empty+=("$sid")
             continue
         fi
 
         echo "$raw" | parse_response "$sid" >> "$outfile"
         local count
         count=$(wc -l < "$outfile")
+        if [[ $((count - 1)) -eq 0 ]]; then
+            log "WARNING: ${sid}: response contained no records."
+            empty+=("$sid")
+        fi
         log "${sid}: $((count - 1)) data rows written to ${outfile}"
     done
 
+    if [[ ${#empty[@]} -gt 0 ]]; then
+        # A station that is silent for a whole window is a source problem, not a
+        # transport problem: Mars2 answered, it just has nothing. OS1BIOS has
+        # been like this since 2026-04-29. Say so loudly and let cron see it.
+        log "WARNING: no measurements from Mars2 for: ${empty[*]} — check the station at the source (Mars2 admin: Upravljanje podacima)."
+    fi
     log "Done. Output in ${OUTPUT_DIR}/"
+    if [[ ${#empty[@]} -eq ${#stations[@]} ]]; then
+        log "ERROR: every requested station was empty."
+        exit 2
+    fi
 }
 
 cmd_report() {
@@ -202,7 +264,8 @@ cmd_report() {
     done
 
     [[ -z "$month" ]] && die "--month YYYY-MM is required"
-    [[ "$station" != "SOLAXBIOS" ]] && die "Monthly report is only supported for SOLAXBIOS"
+    require_station "$station"
+    [[ "${LAYOUTS[$station]}" == "solar" ]] || die "Monthly report needs a solar-layout station; ${station} has layout '${LAYOUTS[$station]}'"
 
     # Validate month format
     [[ "$month" =~ ^[0-9]{4}-[0-9]{2}$ ]] || die "Month must be YYYY-MM format"
@@ -394,15 +457,25 @@ for day_str in sorted(days.keys()):
     log "Done."
 }
 
+cmd_stations() {
+    local sid
+    for sid in "${STATION_IDS[@]}"; do
+        printf '%s\t%s\t%s\n' "$sid" "${LAYOUTS[$sid]}" "$(awk -F';' '{print NF}' <<< "${HEADERS[$sid]}") columns"
+    done
+}
+
 # --- Main ---
 [[ $# -eq 0 ]] && usage
 
 COMMAND="$1"
 shift
 
+load_stations
+
 case "$COMMAND" in
-    fetch)   cmd_fetch "$@" ;;
-    report)  cmd_report "$@" ;;
+    fetch)    cmd_fetch "$@" ;;
+    report)   cmd_report "$@" ;;
+    stations) cmd_stations ;;
     -h|--help) usage ;;
-    *) die "Unknown command: $COMMAND. Use 'fetch' or 'report'." ;;
+    *) die "Unknown command: $COMMAND. Use 'fetch', 'report' or 'stations'." ;;
 esac

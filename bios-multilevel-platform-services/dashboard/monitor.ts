@@ -28,6 +28,11 @@ export interface MonitorThresholds {
   repeatMinutes: number;
   /** Suppress notifications this long after the dashboard starts. */
   startupGraceMs: number;
+  /**
+   * Minutes without a Mars2 poll of the feed API before alerting; 0 disables
+   * the rule (default, until the Mars2 devices exist and poll for real).
+   */
+  feedSilentMinutes: number;
 }
 
 // Calibrated against production: the meteo station (OS2BIOS) samples at :00
@@ -40,6 +45,7 @@ export const DEFAULT_THRESHOLDS: Readonly<MonitorThresholds> = {
   dataStaleMinutesSolar: 720,
   repeatMinutes: 240,
   startupGraceMs: 120_000,
+  feedSilentMinutes: 0,
 };
 
 export function thresholdsFromEnv(get: (name: string) => string | undefined): MonitorThresholds {
@@ -54,6 +60,7 @@ export function thresholdsFromEnv(get: (name: string) => string | undefined): Mo
     dataStaleMinutesSolar: num("ALERT_DATA_STALE_MINUTES_SOLAR", DEFAULT_THRESHOLDS.dataStaleMinutesSolar, 5),
     repeatMinutes: num("ALERT_REPEAT_MINUTES", DEFAULT_THRESHOLDS.repeatMinutes, 15),
     startupGraceMs: num("ALERT_STARTUP_GRACE_SECONDS", DEFAULT_THRESHOLDS.startupGraceMs / 1000, 0) * 1000,
+    feedSilentMinutes: num("ALERT_FEED_SILENT_MINUTES", DEFAULT_THRESHOLDS.feedSilentMinutes, 0),
   };
 }
 
@@ -83,6 +90,16 @@ export interface FreshnessPayload {
   db?: { ok: boolean; error?: string; latencyMs?: number; store?: string; initialized?: boolean };
   sources?: FreshnessSource[];
   sourcesError?: string | null;
+  /** Feed API for Mars2 (prediction/feed.js): is Mars2 actually polling us? */
+  feed?: {
+    configured?: boolean;
+    plants?: string[];
+    lastRequestAt?: string | null;
+    requestsTotal?: number;
+    authFailures?: number;
+    lastAuthFailureAt?: string | null;
+    configError?: string | null;
+  };
 }
 
 export type UpstreamResult<T> = { ok: true; body: T } | { ok: false; error: string };
@@ -263,6 +280,35 @@ export function evaluateProblems(input: CheckInput, state: MonitorState, t: Moni
           key: `data.stale:${source.source}`,
           text: `${source.source}: no new measurements for ${formatAge(source.ageMinutes * 60_000)} (latest ${source.latestTs}; limit ${limit} min)`,
         });
+      }
+    }
+
+    // Feed API: Mars2 is supposed to poll us for the vendor plants. A broken
+    // or deleted Mars2 device is invisible to Mars2's own export (the station
+    // simply stops), so we watch for the silence here. Opt-in via
+    // ALERT_FEED_SILENT_MINUTES once the Mars2 devices exist.
+    if (body.feed?.configError) {
+      problems.push({ key: "mars2.feed.misconfigured", text: `Feed API disabled by configuration error: ${body.feed.configError}` });
+    }
+    if (t.feedSilentMinutes > 0 && body.feed?.configured && (body.feed.plants?.length ?? 0) > 0) {
+      const last = body.feed.lastRequestAt ? Date.parse(body.feed.lastRequestAt) : NaN;
+      const started = body.processStartedAt ? Date.parse(body.processStartedAt) : NaN;
+      const reference = Number.isFinite(last) ? last : started;
+      const silentMs = Number.isFinite(reference) ? now - reference : Number.POSITIVE_INFINITY;
+      if (silentMs > t.feedSilentMinutes * 60_000) {
+        problems.push({
+          key: "mars2.poll.silent",
+          text: Number.isFinite(last)
+            ? `Mars2 has not polled the feed API for ${formatAge(silentMs)} (last request ${iso(last)}; limit ${t.feedSilentMinutes} min) — the partner export of ${body.feed.plants!.join(", ")} is not being refreshed`
+            : `Mars2 has never polled the feed API since the service started ${Number.isFinite(started) ? `${formatAge(silentMs)} ago` : ""} — ${body.feed.plants!.join(", ")} are not reaching the partner`,
+        });
+      }
+      // Recent rejected calls while no accepted one happened: Mars2 is polling
+      // with wrong credentials (template edited, password rotated).
+      const lastFailure = body.feed.lastAuthFailureAt ? Date.parse(body.feed.lastAuthFailureAt) : NaN;
+      const window = t.feedSilentMinutes * 60_000;
+      if (Number.isFinite(lastFailure) && now - lastFailure < window && !(Number.isFinite(last) && now - last < window)) {
+        problems.push({ key: "mars2.feed.auth", text: `Feed API is being called with wrong credentials (${body.feed.authFailures ?? "?"} failures, last ${iso(lastFailure)}) — check the Mars2 device template` });
       }
     }
   }

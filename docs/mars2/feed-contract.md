@@ -131,8 +131,8 @@ Mars2 template cannot be pointed at this API: the partner's
 | Pos | Column | Unit | Kind | Huawei | Solis |
 | --- | --- | --- | --- | --- | --- |
 | 1 | `Grid.power.total` | kW | gauge | sum of `huawei.grid_meter.active_power_kw` / `huawei.power_sensor.active_power_kw` | — |
-| 2 | `Grid.energy.toGrid.total` | kWh | cumulative | sum of `*.positive_active_energy_kwh` (direction unverified, see below) | `solis.plant.total_grid_sell_kwh` |
-| 3 | `Grid.energy.fromGrid.total` | kWh | cumulative | sum of `*.negative_active_energy_kwh` (direction unverified) | `solis.plant.total_grid_purchased_kwh` |
+| 2 | `Grid.energy.toGrid.total` | kWh | cumulative | sum of `*.positive_active_energy_kwh` (feed-in) | `solis.plant.total_grid_sell_kwh` |
+| 3 | `Grid.energy.fromGrid.total` | kWh | cumulative | sum of `*.negative_active_energy_kwh` (purchase) | `solis.plant.total_grid_purchased_kwh` |
 | 4 | `BMS.energy.SOC` | % | gauge | avg of `huawei.battery.*` / `huawei.ess.state_of_charge_percent` | avg of `solis.inverter.battery_soc_percent` |
 | 5 | `Inverter.Meter2.AC.power.total` | kW | gauge | — | — |
 | 6–8 | `Inverter.AC.EPS.power.R/S/T` | kW | gauge | — | — |
@@ -146,11 +146,24 @@ not fit the layout (monthly/total yield, consumption, battery daily energy,
 inverter temperature) are in `raw` and in the metric registries
 (`fusionsolar/metric-registry.js`, `soliscloud/metric-registry.js`).
 
-Positions 2 and 3 for Huawei carry `verified: false` in `details`: whether
-the meter's "positive active energy" is feed-in or purchase has to be
-confirmed against the FusionSolar NBI documentation before the partner
-relies on it (plan item A2). If it is the other way round, swap the two
-metric lists in `LAYOUT` in `prediction/feed.js`; nothing else changes.
+### Sign conventions (verified 2026-11-08)
+
+- `Grid.power.total` on `SOLAXBIOS` is **negative while importing** and
+  positive while exporting: at night (inverter 0 kW) Mars2 served −7 to
+  −9 kW while `Grid.energy.fromGrid.total` rose 2039 → 2042 kWh and
+  `Grid.energy.toGrid.total` stayed at 37 kWh; at midday +5 kW alongside
+  31 kW of inverter output.
+- Huawei grid meters (`devTypeId` 17) and power sensors (47) count feed-in as
+  positive as well (FusionSolar NBI reference; the Homey and Home Assistant
+  FusionSolar integrations both invert Huawei's sign to get "positive =
+  import"). So Huawei `active_power` maps to column 1 without negation,
+  `positive_active_energy` is energy fed to the grid (column 2) and
+  `reverse_active_energy` energy drawn from it (column 3).
+- Solis names the direction in the field (`gridSell*`, `gridPurchased*`).
+- Not verified: the charge/discharge sign of `Inverter.DC.Battery.power.total`
+  (Huawei reports charging as positive; the SOLAXBIOS and Solis conventions
+  were not checked). Column 9 carries `verified: false` in `details` until
+  it is; flip the sign in `LAYOUT` in `prediction/feed.js` if needed.
 
 ## Mars2 side
 

@@ -109,6 +109,9 @@ production-dashboard:
     TARGET_APP: dashboard
     APPLICATION_IMAGE_NAME_TAG: dashboard
     HELM_RELEASE_PREFIX: bios-dashboard
+    # barrage-auto-deploy passes --set replicaCount=$REPLICAS (default 1) over
+    # the values file; two replicas across nodes, see dashboard/README.md.
+    REPLICAS: "2"
   environment:
     name: production/dashboard
     url: https://bios-multilevel.barrage.net
@@ -176,6 +179,8 @@ production-prediction:
     TARGET_APP: prediction
     APPLICATION_IMAGE_NAME_TAG: prediction
     HELM_RELEASE_PREFIX: bios-prediction
+    # Two replicas; the scheduler leader is elected with a PostgreSQL advisory lock.
+    REPLICAS: "2"
   environment:
     name: production/prediction
   needs:

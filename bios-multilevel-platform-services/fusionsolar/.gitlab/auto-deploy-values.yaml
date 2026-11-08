@@ -7,7 +7,12 @@ image:
   tag: stable
   pullPolicy: IfNotPresent
   secrets:
+    # CI job token: valid only while the deploy job runs, so a pod rescheduled
+    # later cannot pull with it. The deploy-token secret below is created once
+    # by hand from a GitLab deploy token with read_registry (see
+    # docs/runbook-production.md) and keeps pulls working between pipelines.
     - name: gitlab-registry-bios-multilevel-bios-multilevel-dashboard
+    - name: bios-registry-deploy-token
 
 application:
   track: stable

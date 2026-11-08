@@ -576,10 +576,130 @@ function createPgPredictionStore(databaseUrl) {
     });
   }
 
+  /* ── Feed API support (Mars2 pulls the vendor plants from us) ─────────────
+   * Everything here is sized for a poll every few minutes per plant: index
+   * probes and short index-only range scans, never a table scan. */
+
+  // Plants and their devices from the vendor inventory tables. Each vendor is
+  // guarded separately: a deployment without that ingest has no such tables.
+  async function listFeedInventory() {
+    const plants = [];
+    const vendors = [
+      {
+        vendor: 'huawei',
+        sql: `SELECT p.source_key AS source, p.plant_code AS vendor_id, p.display_name, p.visible, p.metadata,
+                     coalesce(json_agg(json_build_object(
+                       'source', p.source_key || ':device:' || d.device_id,
+                       'id', d.device_id, 'type', d.device_type, 'model', d.model,
+                       'serial', d.serial_number, 'name', d.metadata->>'devName'
+                     ) ORDER BY d.device_id) FILTER (WHERE d.device_id IS NOT NULL), '[]'::json) AS devices
+                FROM fusionsolar_plants p
+                LEFT JOIN fusionsolar_devices d ON d.plant_code = p.plant_code
+               GROUP BY p.plant_code ORDER BY p.plant_code`,
+      },
+      {
+        vendor: 'solis',
+        sql: `SELECT p.source_key AS source, p.station_id AS vendor_id, p.display_name, p.visible, p.metadata,
+                     coalesce(json_agg(json_build_object(
+                       'source', p.source_key || ':device:' || d.device_sn,
+                       'id', d.device_sn, 'type', 'inverter', 'model', d.model,
+                       'serial', d.device_sn, 'name', d.inverter_id
+                     ) ORDER BY d.device_sn) FILTER (WHERE d.device_sn IS NOT NULL), '[]'::json) AS devices
+                FROM soliscloud_plants p
+                LEFT JOIN soliscloud_devices d ON d.station_id = p.station_id
+               GROUP BY p.station_id ORDER BY p.station_id`,
+      },
+    ];
+    for (const { vendor, sql } of vendors) {
+      try {
+        const { rows } = await pool.query(sql);
+        for (const row of rows) {
+          plants.push({
+            vendor,
+            source: row.source,
+            vendorId: row.vendor_id,
+            name: row.display_name || row.vendor_id,
+            visible: row.visible !== false,
+            capacityKwp: Number.isFinite(Number(row.metadata?.capacity)) ? Number(row.metadata.capacity) : null,
+            devices: Array.isArray(row.devices) ? row.devices : [],
+          });
+        }
+      } catch (error) {
+        if (error.code !== '42P01') console.warn(`listFeedInventory(${vendor}): ${error.message}`);
+      }
+    }
+    return plants;
+  }
+
+  // Distinct metrics stored for one source: a loose index scan over the
+  // covering key (one probe per metric), so it does not depend on row count.
+  async function distinctMetricsForSource(source) {
+    const { rows } = await pool.query(
+      `WITH RECURSIVE m AS (
+         (SELECT metric FROM raw_measurements WHERE source = $1 ORDER BY metric LIMIT 1)
+         UNION ALL
+         SELECT n.metric FROM m
+         CROSS JOIN LATERAL (
+           SELECT metric FROM raw_measurements WHERE source = $1 AND metric > m.metric ORDER BY metric LIMIT 1
+         ) n
+       )
+       SELECT metric FROM m`,
+      [source],
+    );
+    return rows.map(r => r.metric);
+  }
+
+  // Newest usable sample for each (source, metric) pair in one round trip.
+  async function latestSamples(pairs) {
+    const wanted = (pairs || []).filter(p => p && p.source && p.metric);
+    if (wanted.length === 0) return [];
+    const { rows } = await pool.query(
+      `SELECT q.source, q.metric, r.ts, r.value
+         FROM unnest($1::text[], $2::text[]) AS q(source, metric)
+         CROSS JOIN LATERAL (
+           SELECT ts, value FROM raw_measurements
+            WHERE source = q.source AND metric = q.metric AND is_missing = FALSE AND value IS NOT NULL
+            ORDER BY ts DESC LIMIT 1
+         ) r`,
+      [wanted.map(p => p.source), wanted.map(p => p.metric)],
+    );
+    return rows.map(r => ({
+      source: r.source, metric: r.metric,
+      timestamp: r.ts?.toISOString?.() || r.ts, value: Number(r.value),
+    }));
+  }
+
+  // Bucketed series for many (source, metric) pairs at once; per bucket the
+  // aggregates a gauge (avg), a daily counter (max) or a cumulative counter
+  // (last) needs. Index-only range scan per pair.
+  async function bucketedSeries({ pairs, from, to, bucketSeconds }) {
+    const wanted = (pairs || []).filter(p => p && p.source && p.metric);
+    if (wanted.length === 0) return [];
+    const step = Math.max(60, Number(bucketSeconds) || 300);
+    const { rows } = await pool.query(
+      `SELECT r.source, r.metric,
+              extract(epoch from date_bin(make_interval(secs => $5), r.ts, TIMESTAMPTZ '2000-01-01'))::bigint AS bucket,
+              avg(r.value) AS avg, max(r.value) AS max,
+              (array_agg(r.value ORDER BY r.ts DESC))[1] AS last,
+              count(r.value)::int AS count
+         FROM unnest($1::text[], $2::text[]) AS q(source, metric)
+         JOIN raw_measurements r ON r.source = q.source AND r.metric = q.metric
+        WHERE r.ts >= $3 AND r.ts < $4 AND r.is_missing = FALSE AND r.value IS NOT NULL
+        GROUP BY r.source, r.metric, 3
+        ORDER BY 3 ASC`,
+      [wanted.map(p => p.source), wanted.map(p => p.metric), from, to, step],
+    );
+    return rows.map(r => ({
+      source: r.source, metric: r.metric, bucket: Number(r.bucket),
+      avg: Number(r.avg), max: Number(r.max), last: Number(r.last), count: Number(r.count),
+    }));
+  }
+
   return {
     init, append, list, latest, listPaginated, listDataQualityWindow, checkpoint, setMeta, read, write, stats, prune,
     persistRawRecords, listRawMeasurements, rawMeasurementsStats, pruneRawMeasurements, sourceLabels, listKnownSources,
     ping, latestMeasurementTimestamps,
+    listFeedInventory, distinctMetricsForSource, latestSamples, bucketedSeries,
     file: 'postgres',
   };
 }

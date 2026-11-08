@@ -22,10 +22,20 @@ GET /measurements?source=…&metric=…&hours=24|from=…&to=…&limit=…&sort=
 GET /measurements?…&bucket=1h            # server-side downsampling (see below)
 GET /measurements?…&excludeMissing=true  # drop null/missing rows, so limit=1 is the newest usable sample
 GET /measurements/meta
+POST /feed/token                                  # Mars2 feed: bearer token (userName/password/grant_type=password)
+GET  /feed/plants                                 # Mars2 feed: vendor plants + devices
+GET  /feed/plants/{code}/current|history|export   # Mars2 feed: SOLAXBIOS-layout values; export = CustomDataExport wire format
 ```
 
 Forecast horizon is capped at 48 hours, matching the delivered technical
 solution.
+
+The `/feed/*` routes publish the Huawei and Solis plants to Mars2 in the
+SOLAXBIOS column layout so the partner can pull them from Mars2 like any other
+station; contract, mapping and Mars2 admin steps are in
+[docs/mars2/feed-contract.md](../../docs/mars2/feed-contract.md). They need
+`FEED_PLANTS` plus `FEED_USERNAME`/`FEED_PASSWORD` (or `FEED_API_KEY`) and
+answer 503 otherwise.
 
 ### Reading series from `raw_measurements`
 

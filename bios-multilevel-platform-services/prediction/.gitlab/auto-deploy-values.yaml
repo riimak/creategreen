@@ -7,7 +7,12 @@ image:
   tag: stable
   pullPolicy: IfNotPresent
   secrets:
+    # CI job token: valid only while the deploy job runs, so a pod rescheduled
+    # later cannot pull with it. The deploy-token secret below is created once
+    # by hand from a GitLab deploy token with read_registry (see
+    # docs/runbook-production.md) and keeps pulls working between pipelines.
     - name: gitlab-registry-bios-multilevel-bios-multilevel-dashboard
+    - name: bios-registry-deploy-token
 
 application:
   track: stable
@@ -124,6 +129,12 @@ extraEnv:
     value: "30"
   - name: BIOS_API_TIMEOUT_MS
     value: "30000"
+  # Feed API for Mars2 (prediction/feed.js): plant code -> our source key. The
+  # codes are the Mars2 "Mjerno mjesto" codes the partner will pull as
+  # CustomDataExport/BIOS/<code>. Credentials (FEED_USERNAME/FEED_PASSWORD or
+  # FEED_API_KEY) come from GitLab CI variables; without them the feed is 503.
+  - name: FEED_PLANTS
+    value: "SOKO46BIOS=HUAWEI:NE=201410062,SOKOBAZENBIOS=HUAWEI:NE=201791758,VETINSTBIOS=SOLIS:1298491919450654168"
   # Mars2 / BIOS API ingest. Without these three set, `loadRecords` falls back to
   # local export files which don't exist in the pod → 0 targets, no Mars2 logs, blank dashboard.
   # `BIOS_API_BASE` is committed (not a secret); `BIOS_USERNAME`/`BIOS_PASSWORD` are appended

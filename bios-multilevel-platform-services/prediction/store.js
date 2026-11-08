@@ -102,11 +102,17 @@ function createStore(file) {
   async function latestMeasurementTimestamps(sources) {
     return (sources || []).map(source => ({ source, latestTs: null }));
   }
+  // Feed API: no vendor inventory and no raw rows without PostgreSQL.
+  async function listFeedInventory() { return []; }
+  async function distinctMetricsForSource() { return []; }
+  async function latestSamples() { return []; }
+  async function bucketedSeries() { return []; }
 
   return {
     read, write, append, list, latest, listPaginated, listDataQualityWindow, setMeta, checkpoint,
     persistRawRecords, listRawMeasurements, rawMeasurementsStats, pruneRawMeasurements, listKnownSources,
     ping, latestMeasurementTimestamps,
+    listFeedInventory, distinctMetricsForSource, latestSamples, bucketedSeries,
     file: storeFile,
   };
 }

@@ -3,6 +3,7 @@ const { loadRecords, seriesFor, fieldsFor, METEO_FIELDS, SOLAX_FIELDS } = requir
 const { forecast, anomalies, isSolarNight } = require('./model');
 const { createStore: createJsonStore } = require('./store');
 const { METRICS, metricInfo, targetInfo } = require('./metrics');
+const { feedConfig, createFeedHandler } = require('./feed');
 
 const PORT = Number(process.env.PREDICTION_PORT || 8091);
 const MAX_HORIZON_HOURS = 48;
@@ -78,6 +79,25 @@ const state = {
   lastCycle: null,
   nextRunAt: null,
 };
+
+/* ── Feed API (Mars2 pulls the vendor plants from us; see feed.js) ──────────
+ * Misconfiguration must not take the prediction service down: a bad
+ * FEED_PLANTS keeps the feed disabled and reports the error on /freshness. */
+const feedState = { configured: false, plants: [], requestsTotal: 0, lastRequestAt: null, lastRequestPath: null, lastTokenAt: null, authFailures: 0, lastAuthFailureAt: null, configError: null };
+let handleFeed = async () => false;
+try {
+  const cfg = feedConfig(process.env);
+  feedState.configured = cfg.configured;
+  feedState.plants = cfg.plants.map(p => p.code);
+  feedState.authMethods = [cfg.username && cfg.password ? 'bearer' : null, cfg.apiKey ? 'x-feed-key' : null].filter(Boolean);
+  handleFeed = createFeedHandler({
+    store: { listFeedInventory: (...a) => store.listFeedInventory(...a), latestSamples: (...a) => store.latestSamples(...a), bucketedSeries: (...a) => store.bucketedSeries(...a) },
+    config: cfg, state: feedState, storeReady: () => storeStatus.ready, log,
+  });
+} catch (error) {
+  feedState.configError = error.message;
+  log('error', `feed: disabled — ${error.message}`);
+}
 
 /* ── Liveness semantics ──────────────────────────────────────────────────────
  * In production a cycle once sat in an await that never settled; `running`
@@ -646,6 +666,7 @@ async function freshnessBody() {
     sources,
     sourcesError,
     inputSource: inputSourceInfo().type,
+    feed: { ...feedState },
   };
 }
 
@@ -1106,6 +1127,9 @@ async function handle(req, res) {
     if (req.method === 'GET' && url.pathname === '/freshness') {
       return json(res, 200, await freshnessBody());
     }
+    // Feed API: token issuance needs no store; data routes authenticate first
+    // and then apply their own store-readiness check (see feed.js).
+    if (await handleFeed(req, res, url, json, jsonText)) return;
     if (!storeStatus.ready && url.pathname !== '/models') {
       // Everything below reads or writes the store. Answer plainly instead of
       // surfacing a connection error from deep inside a query.

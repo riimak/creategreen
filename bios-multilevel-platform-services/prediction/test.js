@@ -21,6 +21,121 @@ const { parseExportText, seriesFor } = require('./bios-data');
 const { forecast, anomalies } = require('./model');
 const { dataQuality, parseBucketSeconds } = require('./server');
 const { createStore } = require('./store');
+const feed = require('./feed');
+
+/* ── Feed API (Mars2 pulls the vendor plants from us) ────────────────────── */
+{
+  const plants = feed.parseFeedPlants('SOKO46BIOS=HUAWEI:NE=201410062, VETINSTBIOS=SOLIS:1298491919450654168');
+  assert.deepStrictEqual(plants, [
+    { code: 'SOKO46BIOS', source: 'HUAWEI:NE=201410062', vendor: 'huawei' },
+    { code: 'VETINSTBIOS', source: 'SOLIS:1298491919450654168', vendor: 'solis' },
+  ]);
+  assert.deepStrictEqual(feed.parseFeedPlants(''), []);
+  assert.throws(() => feed.parseFeedPlants('bad'), /CODE=SOURCE/);
+  assert.throws(() => feed.parseFeedPlants('X=HUAWEI:1'), /3-32 chars/);
+  assert.throws(() => feed.parseFeedPlants('ABC=SOLAX:1'), /HUAWEI: or SOLIS:/);
+  assert.throws(() => feed.parseFeedPlants('ABC=HUAWEI:1,ABC=HUAWEI:2'), /listed twice/);
+
+  assert.strictEqual(feed.LAYOUT.length, 15, 'SOLAXBIOS layout has 15 columns');
+  assert.deepStrictEqual(feed.LAYOUT.map(c => c.position), Array.from({ length: 15 }, (_, i) => i + 1));
+  assert.strictEqual(feed.LAYOUT[13].key, 'Inverter.AC.power.total');
+  assert.strictEqual(feed.LAYOUT[14].key, 'Inverter.AC.energy.out.daily');
+
+  // Tokens: issued for the configured user, rejected when tampered or expired.
+  const cfg = feed.feedConfig({ FEED_USERNAME: 'mars2', FEED_PASSWORD: 'pw-secret', FEED_PLANTS: '' });
+  assert.strictEqual(cfg.configured, true);
+  const t0 = Date.parse('2026-11-08T12:00:00Z');
+  const issued = feed.issueToken(cfg, t0);
+  assert.strictEqual(issued.token_type, 'bearer');
+  assert.strictEqual(issued.expires_in, feed.TOKEN_TTL_SECONDS);
+  assert.ok(feed.verifyToken(cfg, issued.access_token, t0 + 3600_000));
+  assert.ok(!feed.verifyToken(cfg, issued.access_token, t0 + (feed.TOKEN_TTL_SECONDS + 1) * 1000), 'expired');
+  assert.ok(!feed.verifyToken(cfg, issued.access_token.slice(0, -2) + 'xx', t0), 'tampered signature');
+  const other = feed.feedConfig({ FEED_USERNAME: 'mars2', FEED_PASSWORD: 'different', FEED_PLANTS: '' });
+  assert.ok(!feed.verifyToken(other, issued.access_token, t0), 'different secret');
+  assert.ok(feed.isAuthorized(cfg, { authorization: `Bearer ${issued.access_token}` }, t0));
+  assert.ok(!feed.isAuthorized(cfg, { authorization: 'Bearer nope' }, t0));
+  assert.ok(!feed.isAuthorized(cfg, { 'x-feed-key': 'anything' }, t0), 'no api key configured');
+  const keyed = feed.feedConfig({ FEED_API_KEY: 'k-1234567890', FEED_PLANTS: '' });
+  assert.ok(keyed.configured);
+  assert.ok(feed.isAuthorized(keyed, { 'x-feed-key': 'k-1234567890' }, t0));
+  assert.ok(!feed.isAuthorized(keyed, { 'x-feed-key': 'k-123456789X' }, t0));
+  assert.strictEqual(feed.feedConfig({ FEED_PLANTS: '' }).configured, false, 'no credentials -> disabled');
+
+  // Current values: plant-level metrics, device sums, staleness, unmapped columns.
+  const huawei = { code: 'SOKO46BIOS', source: 'HUAWEI:NE=1', vendor: 'huawei' };
+  const inventory = { devices: [{ source: 'HUAWEI:NE=1:device:A' }, { source: 'HUAWEI:NE=1:device:B' }, { source: 'HUAWEI:NE=1:device:M' }] };
+  const now = Date.parse('2026-11-08T12:00:00Z');
+  const at = (minAgo) => new Date(now - minAgo * 60_000).toISOString();
+  const samples = [
+    { source: 'HUAWEI:NE=1', metric: 'huawei.plant.daily_yield_kwh', value: 123.4, timestamp: at(10) },
+    { source: 'HUAWEI:NE=1:device:A', metric: 'huawei.string_inverter.active_power_kw', value: 10.5, timestamp: at(5) },
+    { source: 'HUAWEI:NE=1:device:B', metric: 'huawei.string_inverter.active_power_kw', value: 7.25, timestamp: at(6) },
+    { source: 'HUAWEI:NE=1:device:B', metric: 'huawei.residential_inverter.active_power_kw', value: 99, timestamp: at(6) }, // same device twice -> counted once
+    { source: 'HUAWEI:NE=1:device:M', metric: 'huawei.grid_meter.active_power_kw', value: -3.1, timestamp: at(200) },     // stale gauge
+    { source: 'HUAWEI:NE=1:device:M', metric: 'huawei.grid_meter.positive_active_energy_kwh', value: 5000, timestamp: at(200) }, // counters tolerate 26 h
+  ];
+  const current = feed.computeCurrent(huawei, inventory, samples, { now });
+  assert.strictEqual(current.values['Inverter.AC.energy.out.daily'], 123.4);
+  assert.strictEqual(current.values['Inverter.AC.power.total'], 17.75, 'sum across devices, one value per device');
+  assert.strictEqual(current.values['Grid.power.total'], null, 'stale gauge excluded');
+  assert.strictEqual(current.details['Grid.power.total'].stale, true);
+  assert.strictEqual(current.details['Grid.power.total'].timestamp, at(200));
+  assert.strictEqual(current.values['Grid.energy.toGrid.total'], 5000, 'cumulative counter within 26 h window');
+  assert.strictEqual(current.details['Grid.energy.toGrid.total'].verified, false, 'direction mapping is provisional');
+  assert.strictEqual(current.values['Inverter.DC.PV.power.MPPT1'], null);
+  assert.strictEqual(current.details['Inverter.DC.PV.power.MPPT1'].mapped, false);
+  assert.strictEqual(current.details['Inverter.AC.power.total'].timestamp, at(6), 'oldest used sample is the honest timestamp');
+  assert.strictEqual(current.timestamp, at(5));
+  assert.strictEqual(Object.keys(current.values).length, 15);
+
+  const solis = { code: 'VETINSTBIOS', source: 'SOLIS:9', vendor: 'solis' };
+  const solisInv = { devices: [{ source: 'SOLIS:9:device:S1' }, { source: 'SOLIS:9:device:S2' }] };
+  const solisCurrent = feed.computeCurrent(solis, solisInv, [
+    { source: 'SOLIS:9', metric: 'solis.plant.current_power_kw', value: 4.2, timestamp: at(3) },
+    { source: 'SOLIS:9', metric: 'solis.plant.total_grid_sell_kwh', value: 777, timestamp: at(3) },
+    { source: 'SOLIS:9:device:S1', metric: 'solis.inverter.battery_soc_percent', value: 40, timestamp: at(3) },
+    { source: 'SOLIS:9:device:S2', metric: 'solis.inverter.battery_soc_percent', value: 60, timestamp: at(4) },
+  ], { now });
+  assert.strictEqual(solisCurrent.values['Inverter.AC.power.total'], 4.2, 'solis uses the plant-level power');
+  assert.strictEqual(solisCurrent.values['Grid.energy.toGrid.total'], 777);
+  assert.strictEqual(solisCurrent.values['BMS.energy.SOC'], 50, 'SOC averaged across devices');
+  assert.strictEqual(solisCurrent.values['Grid.power.total'], null, 'solis has no plant grid power');
+
+  // History: gauge avg summed across devices, daily counter max, cumulative last.
+  const rows = [
+    { source: 'HUAWEI:NE=1:device:A', metric: 'huawei.string_inverter.active_power_kw', bucket: 1000, avg: 1, max: 2, last: 1.5, count: 3 },
+    { source: 'HUAWEI:NE=1:device:B', metric: 'huawei.string_inverter.active_power_kw', bucket: 1000, avg: 2, max: 3, last: 2.5, count: 3 },
+    { source: 'HUAWEI:NE=1', metric: 'huawei.plant.daily_yield_kwh', bucket: 1000, avg: 10, max: 12, last: 11, count: 3 },
+    { source: 'HUAWEI:NE=1:device:M', metric: 'huawei.grid_meter.positive_active_energy_kwh', bucket: 1000, avg: 100, max: 101, last: 101, count: 3 },
+    { source: 'HUAWEI:NE=1', metric: 'huawei.plant.daily_yield_kwh', bucket: 1300, avg: 20, max: 25, last: 24, count: 3 },
+  ];
+  const history = feed.computeHistory(huawei, inventory, rows, 300);
+  assert.strictEqual(history.buckets.length, 2);
+  assert.strictEqual(history.buckets[0].values['Inverter.AC.power.total'], 3);
+  assert.strictEqual(history.buckets[0].values['Inverter.AC.energy.out.daily'], 12);
+  assert.strictEqual(history.buckets[0].values['Grid.energy.toGrid.total'], 101);
+  assert.strictEqual(history.buckets[1].values['Inverter.AC.power.total'], null);
+  assert.strictEqual(history.buckets[1].values['Inverter.AC.energy.out.daily'], 25);
+
+  // Mars2 CustomDataExport wire format: comma decimals, empty for null, "0xa" record terminator.
+  const wire = feed.formatExport('SOKO46BIOS', history.buckets);
+  // 15 positions: toGrid at 2, AC power at 14, daily energy at 15; everything else empty.
+  const record0 = ['1000', '', '101', ...Array(11).fill(''), '3', '12'].join(';') + '0xa';
+  assert.ok(wire.startsWith(`SOKO46BIOS!${record0}1300;`), wire);
+  assert.ok(wire.endsWith(';250xa'), wire);
+  assert.strictEqual(feed.formatExportValue(-4.252), '-4,252');
+  assert.strictEqual(feed.formatExportValue(null), '');
+  assert.strictEqual(wire.split('0xa').length - 1, 2, 'one terminator per record');
+
+  assert.strictEqual(feed.parseUtc('2026-11-08 10:00:00').toISOString(), '2026-11-08T10:00:00.000Z', 'Mars2 fromUTC format is UTC');
+  assert.strictEqual(feed.parseUtc('2026-11-08T10:00:00Z').toISOString(), '2026-11-08T10:00:00.000Z');
+  assert.strictEqual(feed.parseUtc('nonsense'), null);
+  assert.strictEqual(feed.parseStep('10'), 60, 'step floor 60 s');
+  assert.strictEqual(feed.parseStep(undefined), 300);
+  assert.deepStrictEqual(feed.parseCredentials('application/x-www-form-urlencoded', 'userName=a&password=b&grant_type=password'), { userName: 'a', password: 'b', grantType: 'password' });
+  assert.deepStrictEqual(feed.parseCredentials('application/json', '{"userName":"a","password":"b"}'), { userName: 'a', password: 'b', grantType: 'password' });
+}
 
 // /measurements?bucket=… server-side downsampling parameter.
 assert.strictEqual(parseBucketSeconds('1h'), 3600);
@@ -245,6 +360,9 @@ async function checkNoJsonFallback() {
       PG_INIT_RETRY_SECONDS: '1',
       PREDICTION_ACCESS_LOG: 'false',
       PREDICTION_INTERVAL_MINUTES: '10',
+      FEED_USERNAME: 'mars2',
+      FEED_PASSWORD: 'feed-test-password',
+      FEED_PLANTS: 'SOKO46BIOS=HUAWEI:NE=201410062',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -284,6 +402,31 @@ async function checkNoJsonFallback() {
     assert.strictEqual(status.body.error, 'database unavailable');
     const models = await get('/models');
     assert.strictEqual(models.status, 200, 'static routes keep working');
+
+    // Feed API over HTTP: token exchange works without the store, data routes
+    // demand a token and then hit the database guard.
+    assert.deepStrictEqual(fresh.body.feed.plants, ['SOKO46BIOS']);
+    assert.strictEqual(fresh.body.feed.configured, true);
+    const post = async (p, body, contentType) => {
+      const res = await fetch(`http://127.0.0.1:${port}${p}`, { method: 'POST', headers: { 'Content-Type': contentType }, body });
+      return { status: res.status, body: await res.json() };
+    };
+    const bad = await post('/feed/token', 'userName=mars2&password=wrong&grant_type=password', 'application/x-www-form-urlencoded');
+    assert.strictEqual(bad.status, 400);
+    assert.strictEqual(bad.body.error, 'invalid_grant');
+    const tok = await post('/feed/token', 'userName=mars2&password=feed-test-password&grant_type=password', 'application/x-www-form-urlencoded');
+    assert.strictEqual(tok.status, 200, JSON.stringify(tok.body));
+    assert.strictEqual(tok.body.token_type, 'bearer');
+    const anon = await get('/feed/plants');
+    assert.strictEqual(anon.status, 401, 'feed data requires a token');
+    const authed = await fetch(`http://127.0.0.1:${port}/feed/plants`, { headers: { Authorization: `Bearer ${tok.body.access_token}` } });
+    assert.strictEqual(authed.status, 503, 'authenticated, but the store is unavailable');
+    assert.strictEqual((await authed.json()).error, 'database unavailable');
+    const unknown = await fetch(`http://127.0.0.1:${port}/feed/plants/NOPE/current`, { headers: { Authorization: `Bearer ${tok.body.access_token}` } });
+    assert.strictEqual(unknown.status, 503, 'guard applies before plant lookup');
+    const freshAfter = await get('/freshness');
+    assert.strictEqual(freshAfter.body.feed.authFailures, 2, 'bad password and anonymous call are counted');
+    assert.ok(freshAfter.body.feed.lastTokenAt, 'token issuance is recorded');
 
     // Retries keep going (attempt counter grows) instead of giving up.
     await new Promise((r) => setTimeout(r, 2_500));

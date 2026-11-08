@@ -274,8 +274,19 @@ const BLOCKCHAIN_ALLOW_EXACT = new Set<string>([
   "/blockchain/feeless/status",
 ]);
 
+// Feed API for Mars2 (prediction/feed.js): Mars2 device templates poll these
+// through the public host, so they are the one place the proxy forwards
+// Authorization / X-Feed-Key and accepts a POST (token issuance). The
+// prediction service enforces the credentials; the proxy only routes.
+const FEED_TOKEN_PATH = "/prediction/feed/token";
+const FEED_GET_PATH = /^\/prediction\/feed\/plants(?:\/[A-Z0-9_-]+\/(?:current|history|export))?$/;
+
+function isFeedPath(pathname: string): boolean {
+  return pathname === FEED_TOKEN_PATH || FEED_GET_PATH.test(pathname);
+}
+
 function isProxyPathAllowed(kind: "prediction" | "blockchain", pathname: string): boolean {
-  if (kind === "prediction") return PREDICTION_ALLOW_EXACT.has(pathname);
+  if (kind === "prediction") return PREDICTION_ALLOW_EXACT.has(pathname) || isFeedPath(pathname);
   if (BLOCKCHAIN_ALLOW_EXACT.has(pathname)) return true;
   // /blockchain/events/<id> and /blockchain/verify/<id> — exactly one path segment, no slashes.
   if (/^\/blockchain\/events\/[A-Za-z0-9_.:-]+$/.test(pathname)) return true;
@@ -304,10 +315,15 @@ const FORWARD_HEADER_BLOCKLIST = new Set<string>([
   "forwarded",
 ]);
 
-function filteredUpstreamHeaders(req: Request): Headers {
+function filteredUpstreamHeaders(req: Request, keepAuth = false): Headers {
   const out = new Headers();
   for (const [key, value] of req.headers) {
-    if (FORWARD_HEADER_BLOCKLIST.has(key.toLowerCase())) continue;
+    const lower = key.toLowerCase();
+    if (keepAuth && (lower === "authorization" || lower === "x-feed-key")) {
+      out.set(key, value);
+      continue;
+    }
+    if (FORWARD_HEADER_BLOCKLIST.has(lower)) continue;
     out.set(key, value);
   }
   return out;
@@ -765,10 +781,14 @@ function sseResponse(ip: string): Response {
 }
 
 async function proxy(req: Request, kind: "prediction" | "blockchain", prefix: string): Promise<Response> {
+  const url = new URL(req.url);
+  const feedToken = kind === "prediction" && url.pathname === FEED_TOKEN_PATH;
+
   // Read-only proxy. Anything else is rejected before it reaches the upstream
-  // so a public caller can never write to the cluster-internal services.
-  if (req.method !== "GET" && req.method !== "HEAD") {
-    return json({ error: "method not allowed" }, 405, { Allow: "GET, HEAD" });
+  // so a public caller can never write to the cluster-internal services. The
+  // single exception is the feed token exchange (credentials in, token out).
+  if (feedToken ? req.method !== "POST" : (req.method !== "GET" && req.method !== "HEAD")) {
+    return json({ error: "method not allowed" }, 405, { Allow: feedToken ? "POST" : "GET, HEAD" });
   }
 
   const base = serviceUrl(kind);
@@ -776,18 +796,21 @@ async function proxy(req: Request, kind: "prediction" | "blockchain", prefix: st
     return json({ error: `${kind} service is not configured` }, 502);
   }
 
-  const url = new URL(req.url);
   if (!isProxyPathAllowed(kind, url.pathname)) {
     return json({ error: "endpoint not available" }, 404);
   }
 
   const upstream = new URL(url.pathname.slice(prefix.length) || "/", base);
   upstream.search = url.search;
+  const feed = kind === "prediction" && isFeedPath(url.pathname);
 
   try {
+    // The token form is tiny; buffer it so an aborted client cannot hold a stream open upstream.
+    const body = feedToken ? (await req.text()).slice(0, 16_384) : undefined;
     const res = await fetch(upstream, {
       method: req.method,
-      headers: filteredUpstreamHeaders(req),
+      headers: filteredUpstreamHeaders(req, feed),
+      body,
       signal: AbortSignal.timeout(upstreamTimeoutMs(kind, upstream.pathname)),
     });
 

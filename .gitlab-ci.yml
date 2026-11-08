@@ -117,7 +117,9 @@ production-prediction:
         PREDICTION_STALE_AFTER_MINUTES PREDICTION_MISSING_RATIO_WARN \
         PREDICTION_DATA_API_BASE WEATHER_API_BASE WEATHER_API_KEY \
         SLA_TARGET_PERCENT NOTIFICATIONS_ENABLED NOTIFICATION_WEBHOOK_URL \
-        NOTIFICATION_STALE_AFTER_MINUTES NOTIFICATION_REPEAT_AFTER_MINUTES"
+        NOTIFICATION_STALE_AFTER_MINUTES NOTIFICATION_REPEAT_AFTER_MINUTES \
+        FEED_PLANTS FEED_USERNAME FEED_PASSWORD FEED_API_KEY FEED_TOKEN_SECRET \
+        FEED_STALE_MINUTES FEED_STALE_MINUTES_COUNTERS"
       for name in $PREDICTION_FORWARD_ENVS; do
         value="${!name:-}"
         if [ -n "$value" ]; then
@@ -133,6 +135,9 @@ production-prediction:
       done
       if [ -z "${BIOS_USERNAME:-}" ] || [ -z "${BIOS_PASSWORD:-}" ]; then
         echo "WARN: BIOS_USERNAME/BIOS_PASSWORD not set as CI variables; Mars2 ingest will be OFF."
+      fi
+      if { [ -z "${FEED_USERNAME:-}" ] || [ -z "${FEED_PASSWORD:-}" ]; } && [ -z "${FEED_API_KEY:-}" ]; then
+        echo "WARN: FEED_USERNAME/FEED_PASSWORD (or FEED_API_KEY) not set; the Mars2 feed API answers 503 until they are."
       fi
   rules:
     - !reference [.production, rules]

@@ -18,10 +18,32 @@ GET /data-quality
 GET /data-quality/latest?source=OS1BIOS&metric=PM2_5
 GET /sla
 GET /sla?window=1h|24h|7d
+GET /measurements?source=…&metric=…&hours=24|from=…&to=…&limit=…&sort=timestamp&sortDir=asc|desc
+GET /measurements?…&bucket=1h            # server-side downsampling (see below)
+GET /measurements?…&excludeMissing=true  # drop null/missing rows, so limit=1 is the newest usable sample
+GET /measurements/meta
 ```
 
 Forecast horizon is capped at 48 hours, matching the delivered technical
 solution.
+
+### Reading series from `raw_measurements`
+
+`raw_measurements` is a tall table — one row per `(source, metric, ts)` — and
+every series is interleaved with every other by arrival time. Its primary key
+therefore carries the payload columns (`INCLUDE (value, is_missing)`) so a
+series range read is an index-only scan: the 30-day read of one plant metric
+that visited 6 919 heap pages and took 44 s on network storage now reads 148
+index pages in 8 ms. Existing databases are migrated online (see the comment
+in `database/schema.sql`); small databases migrate themselves at boot.
+
+Do not pull raw rows to compute a summary. `bucket=<seconds|15m|1h|1d>`
+returns one row per time bucket with `value` (average), `min`, `max`,
+`first`, `last` and `count`, so a 30-day chart is 720 hourly rows, a monthly
+total from a daily-resetting counter is the sum of 30 daily `max` values, and
+a cumulative counter's delta is two `limit=1` probes (`sortDir=asc` / `desc`
+with `excludeMissing=true`). The raw path is capped at 5 000 rows; asking for
+8 640 rows oldest-first silently returns the wrong half of the window.
 
 ## Data Sources
 

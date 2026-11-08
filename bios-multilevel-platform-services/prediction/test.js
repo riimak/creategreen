@@ -19,8 +19,21 @@ process.env.PREDICTION_INGEST_LOG = 'false';
 
 const { parseExportText, seriesFor } = require('./bios-data');
 const { forecast, anomalies } = require('./model');
-const { dataQuality } = require('./server');
+const { dataQuality, parseBucketSeconds } = require('./server');
 const { createStore } = require('./store');
+
+// /measurements?bucket=… server-side downsampling parameter.
+assert.strictEqual(parseBucketSeconds('1h'), 3600);
+assert.strictEqual(parseBucketSeconds('15m'), 900);
+assert.strictEqual(parseBucketSeconds('1d'), 86400);
+assert.strictEqual(parseBucketSeconds('900'), 900);
+assert.strictEqual(parseBucketSeconds('0.5h'), 1800);
+assert.strictEqual(parseBucketSeconds('30s'), undefined, 'below the 60 s floor');
+assert.strictEqual(parseBucketSeconds('90d'), 31 * 86400, 'capped at 31 days');
+assert.strictEqual(parseBucketSeconds(''), undefined);
+assert.strictEqual(parseBucketSeconds(null), undefined);
+assert.strictEqual(parseBucketSeconds('1 hour'), undefined);
+assert.strictEqual(parseBucketSeconds('abc'), undefined);
 
 const sample = [
   'OS1BIOS;TIMESTAMP;Temperatura;Relativna vlaznost;Brzina vjetra;Smjer vjetra;Suncevo zracenje;UV indeks;Tlak zraka;Kisa;CO;CO2;NO;NO2;O3;SO2;Lebdece cestice PM1;Lebdece cestice PM2.5;Lebdece cestice PM10;eaqi-traffic;CAQI;Buka;cumulative',

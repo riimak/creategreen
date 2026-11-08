@@ -91,6 +91,13 @@ CREATE TABLE IF NOT EXISTS prediction_checkpoints (
 -- Tall layout: one row per (source, metric, timestamp) so the dashboard can
 -- filter by metric without unpacking JSON. Backfill plus ongoing cycle inserts
 -- both write here via INSERT ... ON CONFLICT DO UPDATE on the natural key.
+-- Tall time-series table: one row per (source, metric, ts). Every series is
+-- interleaved with every other series by arrival time, so a range read of one
+-- series through a plain key index touches about one heap page per row — in
+-- production a 30-day read of one plant metric visited 6 919 heap pages for
+-- 8 200 rows and took 44 s on network storage. The primary key therefore
+-- carries the payload (INCLUDE) so series reads are index-only range scans
+-- over contiguous leaf pages and never touch the heap.
 CREATE TABLE IF NOT EXISTS raw_measurements (
   source        TEXT NOT NULL,
   metric        TEXT NOT NULL,
@@ -98,7 +105,47 @@ CREATE TABLE IF NOT EXISTS raw_measurements (
   value         DOUBLE PRECISION,
   is_missing    BOOLEAN NOT NULL DEFAULT FALSE,
   ingested_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (source, metric, ts)
+  PRIMARY KEY (source, metric, ts) INCLUDE (value, is_missing)
+);
+
+-- Existing databases created with the plain primary key. Small ones (dev,
+-- CI) are rebuilt here in place. A production-sized table must be migrated
+-- online instead, because this rebuild holds an exclusive lock for minutes:
+--   CREATE UNIQUE INDEX CONCURRENTLY raw_measurements_pkey_covering
+--     ON raw_measurements (source, metric, ts) INCLUDE (value, is_missing);
+--   ALTER TABLE raw_measurements
+--     DROP CONSTRAINT raw_measurements_pkey,
+--     ADD CONSTRAINT raw_measurements_pkey PRIMARY KEY USING INDEX raw_measurements_pkey_covering;
+DO $$
+DECLARE
+  covering    BOOLEAN;
+  approx_rows BIGINT;
+BEGIN
+  SELECT i.indnatts > i.indnkeyatts, c.reltuples::bigint
+    INTO covering, approx_rows
+    FROM pg_index i
+    JOIN pg_class c ON c.oid = i.indrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE c.relname = 'raw_measurements' AND n.nspname = current_schema() AND i.indisprimary;
+  IF covering IS NULL OR covering THEN
+    RETURN;
+  END IF;
+  IF approx_rows > 200000 THEN
+    RAISE WARNING 'raw_measurements primary key is not covering (INCLUDE value, is_missing): series reads will hit the heap. Migrate it online with CREATE UNIQUE INDEX CONCURRENTLY — see schema.sql.';
+    RETURN;
+  END IF;
+  ALTER TABLE raw_measurements DROP CONSTRAINT raw_measurements_pkey;
+  ALTER TABLE raw_measurements ADD PRIMARY KEY (source, metric, ts) INCLUDE (value, is_missing);
+  RAISE NOTICE 'raw_measurements primary key rebuilt as a covering index';
+END $$;
+
+-- Vendor series add ~25k rows/day to a 3M-row table. With the default 10%
+-- analyze threshold the planner's row estimates drifted 30x (256 vs 8 200)
+-- before autovacuum re-sampled; re-analyze after ~1% and vacuum after ~2% of
+-- rows change so the visibility map stays current for index-only scans.
+ALTER TABLE raw_measurements SET (
+  autovacuum_analyze_scale_factor = 0.01,
+  autovacuum_vacuum_scale_factor = 0.02
 );
 
 CREATE INDEX IF NOT EXISTS idx_raw_measurements_ts ON raw_measurements (ts DESC);

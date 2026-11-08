@@ -326,12 +326,49 @@ function createPgPredictionStore(databaseUrl) {
       p += 1;
     }
     if (filters.missingOnly) where.push(`is_missing = TRUE`);
+    if (filters.excludeMissing) where.push(`is_missing = FALSE AND value IS NOT NULL`);
 
     const sortCol = ({ timestamp: 'ts', source: 'source', metric: 'metric', value: 'value' })[filters.sort] || 'ts';
     const sortDir = filters.sortDir === 'asc' ? 'ASC' : 'DESC';
     const limit = Math.min(Math.max(Number(filters.limit) || 500, 1), 5000);
     const offset = Math.max(0, Number(filters.offset) || 0);
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    const bucketSeconds = Number(filters.bucketSeconds);
+    if (Number.isFinite(bucketSeconds) && bucketSeconds >= 60) {
+      // Server-side downsampling. A 30-day chart or a counter delta does not
+      // need 8 640 raw rows; it needs one row per bucket with the aggregates
+      // that make sense for a counter (first/last/max) or a gauge (avg/min/
+      // max). `value` is the bucket average so the row shape stays compatible
+      // with raw rows for existing chart code.
+      values.push(bucketSeconds);
+      const bucket = `date_bin(make_interval(secs => $${p}), ts, TIMESTAMPTZ '2000-01-01')`;
+      const bucketQ = `SELECT source, metric,
+                              extract(epoch from ${bucket})::bigint AS timestamp,
+                              avg(value) AS value,
+                              min(value) AS min,
+                              max(value) AS max,
+                              (array_agg(value ORDER BY ts) FILTER (WHERE value IS NOT NULL))[1] AS first,
+                              (array_agg(value ORDER BY ts DESC) FILTER (WHERE value IS NOT NULL))[1] AS last,
+                              count(value)::int AS count,
+                              bool_and(is_missing) AS is_missing
+                       FROM raw_measurements ${whereSql}
+                       GROUP BY source, metric, ${bucket}
+                       ORDER BY 3 ${sortDir}
+                       LIMIT ${limit} OFFSET ${offset}`;
+      const data = await pool.query(bucketQ, values);
+      return {
+        data: data.rows.map(r => ({
+          source: r.source, metric: r.metric, timestamp: Number(r.timestamp),
+          value: r.value === null ? null : Number(r.value), isMissing: r.is_missing,
+          min: r.min === null ? null : Number(r.min), max: r.max === null ? null : Number(r.max),
+          first: r.first === null ? null : Number(r.first), last: r.last === null ? null : Number(r.last),
+          count: Number(r.count),
+        })),
+        total: null,
+        limit, offset, bucketSeconds,
+      };
+    }
 
     const dataQ = `SELECT source, metric, extract(epoch from ts)::bigint AS timestamp, value, is_missing
                    FROM raw_measurements ${whereSql}
@@ -360,18 +397,28 @@ function createPgPredictionStore(databaseUrl) {
   // full scan of raw_measurements to discover Huawei and Solis sources.
   async function listKnownSources() {
     const sources = [];
+    // source_key lives on the plant rows only; device source keys are derived
+    // through the plant join exactly as the ingest services build them.
     const queries = [
       'SELECT source_key AS source FROM fusionsolar_plants',
-      `SELECT source_key || ':device:' || device_id AS source FROM fusionsolar_devices`,
+      `SELECT p.source_key || ':device:' || d.device_id AS source
+         FROM fusionsolar_devices d
+         JOIN fusionsolar_plants p ON p.plant_code = d.plant_code`,
       'SELECT source_key AS source FROM soliscloud_plants',
-      `SELECT source_key || ':device:' || device_sn AS source FROM soliscloud_devices`,
+      `SELECT p.source_key || ':device:' || d.device_sn AS source
+         FROM soliscloud_devices d
+         JOIN soliscloud_plants p ON p.station_id = d.station_id`,
     ];
     for (const sql of queries) {
       try {
         const { rows } = await pool.query(sql);
         for (const row of rows) if (row.source) sources.push(row.source);
-      } catch {
-        // Vendor tables are absent on deployments that don't run that ingest.
+      } catch (error) {
+        // Vendor tables are absent on deployments that don't run that ingest
+        // (42P01 undefined_table). Anything else is a bug and must be visible:
+        // a wrong column name sat in this catch for months, logged only by
+        // PostgreSQL, while device sources silently dropped out of discovery.
+        if (error.code !== '42P01') console.warn(`listKnownSources: ${error.message}`);
       }
     }
     return sources;

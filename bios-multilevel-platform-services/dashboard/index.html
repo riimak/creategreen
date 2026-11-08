@@ -2787,6 +2787,35 @@ function pointsFromMeasurementRows(rows) {
     .sort((a, b) => a.x - b.x);
 }
 
+// Counters that reset at local midnight. Their monthly energy is the sum of
+// each day's maximum, never last-minus-first across days.
+const DAILY_COUNTER_KEYS = ['Inverter_AC_energy_out_daily', 'Inverter.AC.energy.out.daily', '35_Daily_Production_(Active)', '39_Daily_Grid_Feed-in'];
+
+/* Energy produced in the last 30 days from a counter metric, or null when the
+ * series has no usable samples. Daily counters: one `bucket=1d` query whose
+ * per-day `max` is that day's total (solar produces nothing around midnight,
+ * so UTC day buckets hold a whole local day's accumulation). Cumulative
+ * counters: newest and oldest valid sample, two `limit=1` index probes. */
+async function monthlyEnergyFromCounter(source, metricKey) {
+  const base = `/prediction/measurements?source=${encodeURIComponent(source)}&metric=${encodeURIComponent(metricKey)}&hours=720&excludeMissing=true`;
+  if (DAILY_COUNTER_KEYS.includes(metricKey)) {
+    const payload = await fetch(`${base}&bucket=1d&limit=31&sort=timestamp&sortDir=asc`).then(r => r.json());
+    const days = (payload?.data || []).map(row => Number(row.max)).filter(v => Number.isFinite(v) && v >= 0);
+    if (!days.length) return null;
+    return days.reduce((a, b) => a + b, 0);
+  }
+  const [oldest, newest] = await Promise.all([
+    fetch(`${base}&limit=1&sort=timestamp&sortDir=asc`).then(r => r.json()),
+    fetch(`${base}&limit=1&sort=timestamp&sortDir=desc`).then(r => r.json()),
+  ]);
+  const first = pointsFromMeasurementRows(oldest?.data)[0];
+  const last = pointsFromMeasurementRows(newest?.data)[0];
+  if (!first || !last) return null;
+  if (first.x.getTime() === last.x.getTime()) return 0;
+  const delta = last.y - first.y;
+  return Number.isFinite(delta) && delta >= 0 ? delta : null;
+}
+
 function computeDailyYield(series) {
   const energySeries = pickSeries(series, ENERGY_COUNTER_KEYS);
   const now = new Date();
@@ -2980,25 +3009,25 @@ async function loadLiveEnergyOnce(){
     energySnap.fromGrid = totalFromGrid || null;
     energySnap.lastTs = latestTs || null;
 
-    // Monthly yield: fetch 30d of energy counter and compare first/last valid values.
+    // Monthly yield over the last 30 days, read in the shape the counter has:
+    //  * a daily counter (resets at midnight) -> sum of each day's maximum;
+    //  * a cumulative counter -> newest minus oldest valid sample;
+    //  * no counter -> integrate hourly-averaged AC power.
+    // Each is a bucketed or limit=1 query (30 / 2 / 720 rows). The previous
+    // version pulled 8 640 raw rows capped at 5 000 oldest-first — so it
+    // diffed a daily counter across weeks and dropped the newest 13 days.
     try {
       const monthResults = await Promise.allSettled(
         solarPlants.map(async p => {
           const { latest: lat, series: sr } = processStationRows(p.data);
           const metricKey = pickMetricKey(lat, sr, ENERGY_COUNTER_KEYS);
           if (metricKey) {
-            const payload = await fetch(`/prediction/measurements?source=${encodeURIComponent(p.source)}&hours=720&metric=${encodeURIComponent(metricKey)}&limit=5000&sort=timestamp&sortDir=asc`)
-              .then(r => r.json());
-            const points = pointsFromMeasurementRows(payload?.data);
-            if (points.length >= 2) {
-              const delta = points[points.length - 1].y - points[0].y;
-              if (Number.isFinite(delta) && delta >= 0) return delta;
-            }
-            if (points.length === 1) return 0;
+            const kWh = await monthlyEnergyFromCounter(p.source, metricKey);
+            if (kWh !== null) return kWh;
           }
           const acMetricKey = pickMetricKey(lat, sr, AC_POWER_KEYS);
           if (!acMetricKey) return null;
-          const acPayload = await fetch(`/prediction/measurements?source=${encodeURIComponent(p.source)}&hours=720&metric=${encodeURIComponent(acMetricKey)}&limit=5000&sort=timestamp&sortDir=asc`)
+          const acPayload = await fetch(`/prediction/measurements?source=${encodeURIComponent(p.source)}&hours=720&metric=${encodeURIComponent(acMetricKey)}&bucket=1h&limit=744&sort=timestamp&sortDir=asc`)
             .then(r => r.json());
           const acPoints = pointsFromMeasurementRows(acPayload?.data);
           if (!acPoints.length) return null;

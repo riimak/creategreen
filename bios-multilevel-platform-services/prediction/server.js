@@ -682,10 +682,27 @@ async function listMeasurements(params) {
     // Overview and the cache warmer omit this. COUNT(*) is a full scan of
     // the matching rows and was exhausting the pool when every station asked.
     includeTotal: params.get('count') === '1' || params.get('count') === 'true',
+    // Drop rows the client would filter out anyway (null/missing values), so
+    // `limit=1` really returns the newest/oldest usable sample of a series.
+    excludeMissing: params.get('excludeMissing') === 'true',
+    // Server-side downsampling: `bucket=1h` / `15m` / `1d` / seconds. One row
+    // per bucket with avg (value), min, max, first, last and count.
+    bucketSeconds: parseBucketSeconds(params.get('bucket')),
   };
 
   const result = await S(store.listRawMeasurements(filters));
   return { ...result, filters: { ...filters, valueMin: filters.valueMin, valueMax: filters.valueMax } };
+}
+
+/** "900" | "15m" | "1h" | "1d" -> seconds, clamped to [60 s, 31 d]; anything else -> undefined. */
+function parseBucketSeconds(raw) {
+  if (raw === null || raw === undefined || raw === '') return undefined;
+  const match = String(raw).trim().match(/^(\d+(?:\.\d+)?)\s*([smhd]?)$/i);
+  if (!match) return undefined;
+  const unit = { '': 1, s: 1, m: 60, h: 3600, d: 86400 }[match[2].toLowerCase()];
+  const seconds = Number(match[1]) * unit;
+  if (!Number.isFinite(seconds) || seconds < 60) return undefined;
+  return Math.min(seconds, 31 * 86400);
 }
 
 // Configured stations first (stable order for the UI), then any additional
@@ -1247,5 +1264,5 @@ if (require.main === module) {
 
 module.exports = {
   handle, runForecast, runAnomalies, runCycle, dataQuality, slaSummary, mergeStationLists, observedMetricList, measurementsMeta,
-  cycleHealth, freshnessBody,
+  cycleHealth, freshnessBody, parseBucketSeconds,
 };

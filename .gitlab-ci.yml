@@ -26,6 +26,12 @@ production-dashboard:
   extends: .production
   stage: deploy
   resource_group: bios-multilevel-production
+  # The cluster's etcd loses its leader several times an hour; a single
+  # failed kubectl/helm call inside the job otherwise kills the whole rollout
+  # and skips every job that depends on it (the dashboard is last).
+  retry:
+    max: 2
+    when: [script_failure, api_failure, runner_system_failure, stuck_or_timeout_failure, unknown_failure]
   variables:
     TARGET_APP: dashboard
     APPLICATION_IMAGE_NAME_TAG: dashboard
@@ -80,6 +86,12 @@ production-prediction:
   extends: .production
   stage: deploy
   resource_group: bios-multilevel-production
+  # The cluster's etcd loses its leader several times an hour; a single
+  # failed kubectl/helm call inside the job otherwise kills the whole rollout
+  # and skips every job that depends on it (the dashboard is last).
+  retry:
+    max: 2
+    when: [script_failure, api_failure, runner_system_failure, stuck_or_timeout_failure, unknown_failure]
   variables:
     TARGET_APP: prediction
     APPLICATION_IMAGE_NAME_TAG: prediction
@@ -141,6 +153,12 @@ production-fusionsolar:
   extends: .production
   stage: deploy
   resource_group: bios-multilevel-production
+  # The cluster's etcd loses its leader several times an hour; a single
+  # failed kubectl/helm call inside the job otherwise kills the whole rollout
+  # and skips every job that depends on it (the dashboard is last).
+  retry:
+    max: 2
+    when: [script_failure, api_failure, runner_system_failure, stuck_or_timeout_failure, unknown_failure]
   variables:
     TARGET_APP: fusionsolar
     APPLICATION_IMAGE_NAME_TAG: fusionsolar
@@ -182,6 +200,12 @@ production-soliscloud:
   extends: .production
   stage: deploy
   resource_group: bios-multilevel-production
+  # The cluster's etcd loses its leader several times an hour; a single
+  # failed kubectl/helm call inside the job otherwise kills the whole rollout
+  # and skips every job that depends on it (the dashboard is last).
+  retry:
+    max: 2
+    when: [script_failure, api_failure, runner_system_failure, stuck_or_timeout_failure, unknown_failure]
   variables:
     TARGET_APP: soliscloud
     APPLICATION_IMAGE_NAME_TAG: soliscloud
@@ -224,6 +248,12 @@ production-blockchain:
   extends: .production
   stage: deploy
   resource_group: bios-multilevel-production
+  # The cluster's etcd loses its leader several times an hour; a single
+  # failed kubectl/helm call inside the job otherwise kills the whole rollout
+  # and skips every job that depends on it (the dashboard is last).
+  retry:
+    max: 2
+    when: [script_failure, api_failure, runner_system_failure, stuck_or_timeout_failure, unknown_failure]
   variables:
     TARGET_APP: blockchain
     APPLICATION_IMAGE_NAME_TAG: blockchain

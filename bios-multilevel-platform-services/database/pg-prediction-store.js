@@ -424,21 +424,59 @@ function createPgPredictionStore(databaseUrl) {
     return sources;
   }
 
+  // Distinct (source, metric) pairs by walking the primary key one probe per
+  // pair ("loose index scan") instead of GROUP BY over the whole table, plus
+  // the planner's most-common-values histogram for per-source/metric row
+  // counts. Both sides of the dashboard's station list come from here, so
+  // this used to be two full scans of ~3M rows every 5 minutes.
+  const PAIRS_CTE = `
+    WITH RECURSIVE pairs AS (
+      (SELECT source, metric FROM raw_measurements ORDER BY source, metric LIMIT 1)
+      UNION ALL
+      SELECT n.source, n.metric
+        FROM pairs p
+        CROSS JOIN LATERAL (
+          SELECT source, metric FROM raw_measurements
+           WHERE (source, metric) > (p.source, p.metric)
+           ORDER BY source, metric LIMIT 1
+        ) n
+    ),
+    total AS (SELECT greatest(reltuples, 0)::numeric AS n FROM pg_class WHERE oid = 'raw_measurements'::regclass),
+    mcv AS (
+      SELECT s.attname, v.val, v.freq
+        FROM pg_stats s
+        CROSS JOIN LATERAL unnest(s.most_common_vals::text::text[], s.most_common_freqs) AS v(val, freq)
+       WHERE s.schemaname = current_schema() AND s.tablename = 'raw_measurements' AND s.attname IN ('source', 'metric')
+    )`;
+
   async function rawMeasurementsStats() {
     const { rows } = await pool.query('SELECT * FROM raw_measurements_stats');
     const top = rows[0] || {};
     const [perStation, perMetric] = await Promise.all([
       pool.query(
-        `SELECT source, count(*)::bigint AS rows, min(ts) AS earliest, max(ts) AS latest
-         FROM raw_measurements GROUP BY source ORDER BY source`,
+        `${PAIRS_CTE}
+         SELECT s.source,
+                (SELECT round(total.n * m.freq)::bigint FROM mcv m, total WHERE m.attname = 'source' AND m.val = s.source) AS rows,
+                b.earliest, b.latest
+           FROM (SELECT DISTINCT source FROM pairs) s
+           CROSS JOIN LATERAL (
+             SELECT min(ts) AS earliest, max(ts) AS latest FROM raw_measurements WHERE source = s.source
+           ) b
+          ORDER BY s.source`,
       ),
       pool.query(
-        `SELECT metric, count(*)::bigint AS rows
-         FROM raw_measurements GROUP BY metric ORDER BY metric`,
+        `${PAIRS_CTE}
+         SELECT m.metric,
+                (SELECT round(total.n * x.freq)::bigint FROM mcv x, total WHERE x.attname = 'metric' AND x.val = m.metric) AS rows
+           FROM (SELECT DISTINCT metric FROM pairs) m
+          ORDER BY m.metric`,
       ),
     ]);
     return {
-      perMetric: perMetric.rows.map(r => ({ metric: r.metric, rows: Number(r.rows) })),
+      // Row counts are planner estimates (ANALYZE-fresh, ~1%); sources,
+      // metrics and time bounds are exact.
+      rowsEstimated: true,
+      perMetric: perMetric.rows.map(r => ({ metric: r.metric, rows: r.rows === null ? null : Number(r.rows) })),
       totalRows: Number(top.total_rows || 0),
       uniqueSources: Number(top.unique_sources || 0),
       uniqueMetrics: Number(top.unique_metrics || 0),
@@ -449,7 +487,7 @@ function createPgPredictionStore(databaseUrl) {
       latest:   top.latest?.toISOString?.()   || top.latest   || null,
       perStation: perStation.rows.map(r => ({
         source: r.source,
-        rows: Number(r.rows),
+        rows: r.rows === null ? null : Number(r.rows),
         earliest: r.earliest?.toISOString?.() || r.earliest,
         latest: r.latest?.toISOString?.() || r.latest,
       })),

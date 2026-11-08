@@ -147,6 +147,12 @@ ALTER TABLE raw_measurements SET (
   autovacuum_analyze_scale_factor = 0.01,
   autovacuum_vacuum_scale_factor = 0.02
 );
+-- raw_measurements_stats and the per-source/metric row counts read the
+-- most-common-values histogram instead of counting rows; keep it wide enough
+-- to list every source and metric (default 100 is below the metric count).
+ALTER TABLE raw_measurements
+  ALTER COLUMN source SET STATISTICS 400,
+  ALTER COLUMN metric SET STATISTICS 400;
 
 CREATE INDEX IF NOT EXISTS idx_raw_measurements_ts ON raw_measurements (ts DESC);
 -- Dashboard overview filters by source + time and does not constrain metric.
@@ -162,17 +168,43 @@ CREATE INDEX IF NOT EXISTS idx_raw_measurements_source_ts ON raw_measurements (s
 DROP INDEX IF EXISTS idx_raw_measurements_source_metric_ts;
 DROP INDEX IF EXISTS idx_raw_measurements_ingested;
 
+-- Header statistics for the measurements browser. The previous definition was
+-- count(*), two count(DISTINCT) and filtered counts over the whole table: a
+-- full scan of ~3M rows every 5 minutes (it timed out at 12 s on network
+-- storage and evicted every useful page from the buffer cache). Totals now
+-- come from the planner's statistics (ANALYZE keeps them within ~1%), the
+-- distinct sources/metrics from a loose index scan over the primary key, and
+-- the time bounds from the ts index — no table scan anywhere. Column names,
+-- types and order are unchanged so CREATE OR REPLACE works in place (four
+-- services apply this file at boot; a DROP/CREATE pair would race).
 CREATE OR REPLACE VIEW raw_measurements_stats AS
+WITH RECURSIVE pairs AS (
+  (SELECT source, metric FROM raw_measurements ORDER BY source, metric LIMIT 1)
+  UNION ALL
+  SELECT n.source, n.metric
+    FROM pairs p
+    CROSS JOIN LATERAL (
+      SELECT source, metric FROM raw_measurements
+       WHERE (source, metric) > (p.source, p.metric)
+       ORDER BY source, metric LIMIT 1
+    ) n
+),
+total AS (
+  SELECT greatest(reltuples, 0)::bigint AS n FROM pg_class WHERE oid = 'raw_measurements'::regclass
+)
 SELECT
-  count(*)                                  AS total_rows,
-  count(DISTINCT source)                    AS unique_sources,
-  count(DISTINCT metric)                    AS unique_metrics,
-  min(ts)                                   AS earliest,
-  max(ts)                                   AS latest,
-  count(*) FILTER (WHERE value IS NULL)     AS missing_rows,
-  count(*) FILTER (WHERE ts > now() - interval '24 hours') AS rows_24h,
-  count(*) FILTER (WHERE ts > now() - interval '7 days')   AS rows_7d
-FROM raw_measurements;
+  total.n                                                                 AS total_rows,
+  (SELECT count(DISTINCT source) FROM pairs)                              AS unique_sources,
+  (SELECT count(DISTINCT metric) FROM pairs)                              AS unique_metrics,
+  (SELECT min(ts) FROM raw_measurements)                                  AS earliest,
+  (SELECT max(ts) FROM raw_measurements)                                  AS latest,
+  round(total.n * coalesce((SELECT null_frac FROM pg_stats
+                             WHERE schemaname = current_schema()
+                               AND tablename = 'raw_measurements'
+                               AND attname = 'value'), 0))::bigint        AS missing_rows,
+  (SELECT count(*) FROM raw_measurements WHERE ts > now() - interval '24 hours') AS rows_24h,
+  (SELECT count(*) FROM raw_measurements WHERE ts > now() - interval '7 days')   AS rows_7d
+FROM total;
 
 -- FusionSolar OAuth, inventory, and synchronization state.
 

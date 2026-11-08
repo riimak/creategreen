@@ -3,8 +3,10 @@
 // The dashboard is the component that observes the whole platform, so it is
 // where "the app is not working / not showing data" is decided. Every check it
 // reads the prediction service's /freshness (cycle alive? PostgreSQL answers?
-// how old is the newest measurement per station?) and the blockchain /health,
-// derives a set of problems, and notifies Slack only on transitions:
+// how old is the newest measurement per station?), the blockchain /health,
+// and probes PostgreSQL directly (db-probe.ts, so a dead database is named
+// even while the services that depend on it are crash-looping), derives a set
+// of problems, and notifies Slack only on transitions:
 //
 //   * a problem set appears or changes  -> alert digest
 //   * every problem clears              -> recovery message
@@ -78,17 +80,28 @@ export interface FreshnessPayload {
     totalTargets?: number;
     error?: string | null;
   } | null;
-  db?: { ok: boolean; error?: string; latencyMs?: number };
+  db?: { ok: boolean; error?: string; latencyMs?: number; store?: string; initialized?: boolean };
   sources?: FreshnessSource[];
   sourcesError?: string | null;
 }
 
 export type UpstreamResult<T> = { ok: true; body: T } | { ok: false; error: string };
 
+/** Result of the dashboard's own PostgreSQL reachability probe (db-probe.ts). */
+export interface DatabaseProbe {
+  ok: boolean;
+  status: string;
+  /** Human-readable, already free of hostnames and credentials. */
+  detail?: string;
+  latencyMs?: number;
+}
+
 export interface CheckInput {
   now: number;
   prediction: UpstreamResult<FreshnessPayload>;
   blockchain: UpstreamResult<unknown>;
+  /** Absent when the dashboard has no DATABASE_URL. */
+  database?: DatabaseProbe;
 }
 
 export interface Problem {
@@ -101,6 +114,7 @@ export interface MonitorState {
   startedAt: number;
   predictionFailures: number;
   blockchainFailures: number;
+  databaseFailures: number;
   active: Problem[];
   problemsSince: number | null;
   lastNotifiedAt: number | null;
@@ -113,6 +127,7 @@ export function initialState(now: number): MonitorState {
     startedAt: now,
     predictionFailures: 0,
     blockchainFailures: 0,
+    databaseFailures: 0,
     active: [],
     problemsSince: null,
     lastNotifiedAt: null,
@@ -144,6 +159,18 @@ export interface Evaluation {
   problems: Problem[];
   predictionFailures: number;
   blockchainFailures: number;
+  databaseFailures: number;
+}
+
+/**
+ * Problems already active whose key starts with one of `prefixes`. Used while
+ * an upstream is failing but has not yet crossed `upstreamFailures`: not
+ * hearing from it for one check is "unknown", not "fixed". Without this, a
+ * prediction pod restarting every 30 min produced a recovered/problems pair in
+ * Slack on every restart (100+ messages in one night).
+ */
+function carryOver(state: MonitorState, prefixes: string[]): Problem[] {
+  return state.active.filter((p) => prefixes.some((prefix) => p.key.startsWith(prefix)));
 }
 
 export function evaluateProblems(input: CheckInput, state: MonitorState, t: MonitorThresholds): Evaluation {
@@ -151,6 +178,7 @@ export function evaluateProblems(input: CheckInput, state: MonitorState, t: Moni
   const now = input.now;
   let predictionFailures = state.predictionFailures;
   let blockchainFailures = state.blockchainFailures;
+  let databaseFailures = state.databaseFailures;
 
   if (!input.prediction.ok) {
     predictionFailures += 1;
@@ -159,15 +187,28 @@ export function evaluateProblems(input: CheckInput, state: MonitorState, t: Moni
         key: "prediction.unreachable",
         text: `Prediction service unreachable (${predictionFailures} consecutive checks): ${input.prediction.error}`,
       });
+    } else {
+      problems.push(...carryOver(state, ["prediction.", "data."]));
     }
   } else {
     predictionFailures = 0;
     const body = input.prediction.body;
 
-    if (body.db && body.db.ok === false) {
+    // When the service itself says PostgreSQL is down, stale cycles, failed
+    // cycles and missing measurements are consequences of that one cause;
+    // report the cause and skip the symptoms so the digest stays readable.
+    const dbDown = body.db?.ok === false;
+    if (dbDown) {
       problems.push({
         key: "prediction.db",
-        text: `Prediction service cannot reach PostgreSQL${body.db.error ? `: ${body.db.error}` : ""}`,
+        text: `Prediction service cannot reach PostgreSQL${body.db?.error ? `: ${body.db.error}` : ""}`,
+      });
+    }
+
+    if (body.db?.store === "json") {
+      problems.push({
+        key: "prediction.store",
+        text: "Prediction service is running on the JSON file store (no DATABASE_URL) — measurements are not persisted to PostgreSQL",
       });
     }
 
@@ -180,7 +221,9 @@ export function evaluateProblems(input: CheckInput, state: MonitorState, t: Moni
 
     const finished = body.lastCycle?.finishedAt ? Date.parse(body.lastCycle.finishedAt) : NaN;
     const staleMs = t.cycleStaleMinutes * 60_000;
-    if (!Number.isFinite(finished)) {
+    if (dbDown) {
+      // covered by prediction.db
+    } else if (!Number.isFinite(finished)) {
       const started = body.processStartedAt ? Date.parse(body.processStartedAt) : NaN;
       const sinceStart = Number.isFinite(started) ? now - started : Number.POSITIVE_INFINITY;
       if (sinceStart > staleMs) {
@@ -197,7 +240,7 @@ export function evaluateProblems(input: CheckInput, state: MonitorState, t: Moni
     }
 
     const status = body.lastCycle?.status;
-    if (status && status !== "ready") {
+    if (!dbDown && status && status !== "ready") {
       const ok = body.lastCycle?.okTargets ?? 0;
       const total = body.lastCycle?.totalTargets ?? 0;
       problems.push({
@@ -206,11 +249,11 @@ export function evaluateProblems(input: CheckInput, state: MonitorState, t: Moni
       });
     }
 
-    if (body.sourcesError) {
+    if (!dbDown && body.sourcesError) {
       problems.push({ key: "prediction.sources", text: `Could not read measurement freshness: ${body.sourcesError}` });
     }
 
-    for (const source of body.sources || []) {
+    for (const source of dbDown ? [] : body.sources || []) {
       if (!source?.source) continue;
       const limit = source.solar ? t.dataStaleMinutesSolar : t.dataStaleMinutes;
       if (source.latestTs == null || source.ageMinutes == null) {
@@ -231,12 +274,32 @@ export function evaluateProblems(input: CheckInput, state: MonitorState, t: Moni
         key: "blockchain.unreachable",
         text: `Blockchain service unreachable (${blockchainFailures} consecutive checks): ${input.blockchain.error}`,
       });
+    } else {
+      problems.push(...carryOver(state, ["blockchain."]));
     }
   } else {
     blockchainFailures = 0;
   }
 
-  return { problems, predictionFailures, blockchainFailures };
+  // The dashboard's own probe does not depend on any service being alive, so
+  // "PostgreSQL is down" is reported even while prediction is crash-looping.
+  if (input.database) {
+    if (!input.database.ok) {
+      databaseFailures += 1;
+      if (databaseFailures >= t.upstreamFailures) {
+        problems.push({
+          key: "database.down",
+          text: `PostgreSQL is not accepting connections (${databaseFailures} consecutive checks): ${input.database.detail || input.database.status}`,
+        });
+      } else {
+        problems.push(...carryOver(state, ["database."]));
+      }
+    } else {
+      databaseFailures = 0;
+    }
+  }
+
+  return { problems, predictionFailures, blockchainFailures, databaseFailures };
 }
 
 export type Action =
@@ -289,11 +352,12 @@ export function formatRecovery(previous: Problem[], ctx: MessageContext, now: nu
   return `:large_green_circle: *BIOS Multi-level — recovered${duration}* (${ctx.envLabel})\nAll checks passing again.${was}${latest}${footer(ctx)}`;
 }
 
-export function formatStartup(ctx: MessageContext, t: MonitorThresholds, checkSeconds: number): string {
+export function formatStartup(ctx: MessageContext, t: MonitorThresholds, checkSeconds: number, databaseProbe = false): string {
   return `:information_source: *BIOS Multi-level dashboard started* (${ctx.envLabel}) — Slack alerting active. ` +
-    `Checks every ${checkSeconds}s; alert when: upstream down ${t.upstreamFailures} checks in a row, ` +
+    `Checks every ${checkSeconds}s; alert when: ${databaseProbe ? "PostgreSQL or an " : ""}upstream down ${t.upstreamFailures} checks in a row, ` +
     `no prediction cycle for ${t.cycleStaleMinutes} min, no new data for ${t.dataStaleMinutes} min (solar ${t.dataStaleMinutesSolar} min); ` +
-    `reminders every ${Math.round(t.repeatMinutes / 60)}h while unresolved.${footer(ctx)}`;
+    `reminders every ${Math.round(t.repeatMinutes / 60)}h while unresolved.` +
+    `${databaseProbe ? "" : " No DATABASE_URL: PostgreSQL is not probed directly."}${footer(ctx)}`;
 }
 
 export function step(
@@ -302,7 +366,7 @@ export function step(
   t: MonitorThresholds,
   ctx: MessageContext,
 ): { state: MonitorState; action: Action } {
-  const { problems, predictionFailures, blockchainFailures } = evaluateProblems(input, state, t);
+  const { problems, predictionFailures, blockchainFailures, databaseFailures } = evaluateProblems(input, state, t);
   const now = input.now;
   const inGrace = now - state.startedAt < t.startupGraceMs;
 
@@ -310,7 +374,7 @@ export function step(
     // Count failures so a dead upstream trips immediately after the grace
     // period, but do not treat anything seen now as "already known".
     return {
-      state: { ...state, predictionFailures, blockchainFailures, lastCheckAt: now },
+      state: { ...state, predictionFailures, blockchainFailures, databaseFailures, lastCheckAt: now },
       action: { kind: "none" },
     };
   }
@@ -341,6 +405,7 @@ export function step(
       ...state,
       predictionFailures,
       blockchainFailures,
+      databaseFailures,
       active: problems,
       problemsSince,
       lastNotifiedAt,

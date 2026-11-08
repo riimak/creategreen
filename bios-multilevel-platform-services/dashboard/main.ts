@@ -1,5 +1,6 @@
 import { proxyFusionSolarOAuth } from "./oauth-proxy.ts";
 import { applyDashboardSecurityHeaders } from "./security-headers.ts";
+import { type DbProbeResult, probePostgres } from "./db-probe.ts";
 import {
   type CheckInput,
   formatStartup,
@@ -464,11 +465,15 @@ function startDashboardTick(): void {
 // ── Slack health monitor ───────────────────────────────────────────────────
 //
 // Decides "the platform is not working / not showing data" from the
-// prediction service's /freshness and the blockchain /health, and posts to a
-// Slack incoming webhook on transitions (see monitor.ts). Checks always run so
-// GET /monitor shows the current verdict; posting requires SLACK_WEBHOOK_URL.
+// prediction service's /freshness, the blockchain /health and a direct
+// PostgreSQL probe (DATABASE_URL, pg_isready semantics — see db-probe.ts), and
+// posts to a Slack incoming webhook on transitions (see monitor.ts). Checks
+// always run so GET /monitor shows the current verdict; posting requires
+// SLACK_WEBHOOK_URL.
 const SLACK_WEBHOOK_URL = (Deno.env.get("SLACK_WEBHOOK_URL") || "").trim();
+const DATABASE_URL = (Deno.env.get("DATABASE_URL") || "").trim();
 const ALERT_CHECK_SECONDS = Math.max(30, Number(Deno.env.get("ALERT_CHECK_SECONDS") || 60));
+const DB_PROBE_TIMEOUT_MS = Math.max(1_000, Number(Deno.env.get("ALERT_DB_PROBE_TIMEOUT_MS") || 5_000));
 const alertThresholds = thresholdsFromEnv((name) => Deno.env.get(name));
 const alertContext = {
   envLabel: Deno.env.get("ALERT_ENV_LABEL") || "production",
@@ -477,6 +482,7 @@ const alertContext = {
 let monitorState: MonitorState = initialState(Date.now());
 let monitorBusy = false;
 let lastFreshness: FreshnessPayload | null = null;
+let lastDatabaseProbe: DbProbeResult | null = null;
 
 /** Deno fetch errors embed the target URL; never surface cluster hostnames via /monitor or Slack. */
 function redactUpstreamError(message: string): string {
@@ -493,12 +499,14 @@ async function runHealthCheck(): Promise<void> {
   if (monitorBusy) return;
   monitorBusy = true;
   try {
-    const [prediction, blockchain] = await Promise.all([
+    const [prediction, blockchain, database] = await Promise.all([
       upstreamCheck<FreshnessPayload>("prediction", "/freshness"),
       upstreamCheck<unknown>("blockchain", "/health"),
+      DATABASE_URL ? probePostgres(DATABASE_URL, DB_PROBE_TIMEOUT_MS) : Promise.resolve(undefined),
     ]);
     if (prediction.ok) lastFreshness = prediction.body;
-    const input: CheckInput = { now: Date.now(), prediction, blockchain };
+    if (database) lastDatabaseProbe = database;
+    const input: CheckInput = { now: Date.now(), prediction, blockchain, database };
     const { state, action } = step(monitorState, input, alertThresholds, alertContext);
     monitorState = state;
     if (action.kind === "none") return;
@@ -527,15 +535,20 @@ function monitorSnapshot(): Record<string, unknown> {
     lastNotifiedAt: at(monitorState.lastNotifiedAt),
     notifications: monitorState.notifications,
     prediction: lastFreshness,
+    database: DATABASE_URL ? lastDatabaseProbe : null,
+    databaseProbe: Boolean(DATABASE_URL),
   };
 }
 
 function startHealthMonitor(): void {
+  if (!DATABASE_URL) {
+    logLine("warn", "monitor: DATABASE_URL not set — PostgreSQL is not probed directly, only via the prediction service");
+  }
   if (!SLACK_WEBHOOK_URL) {
     logLine("warn", "monitor: SLACK_WEBHOOK_URL not set — health checks run (see /monitor) but no Slack alerts are sent");
   } else if (Deno.env.get("ALERT_SEND_STARTUP_MESSAGE") !== "false") {
     // Doubles as a webhook self-test and a restart notification.
-    void postSlack(SLACK_WEBHOOK_URL, formatStartup(alertContext, alertThresholds, ALERT_CHECK_SECONDS)).then((posted) => {
+    void postSlack(SLACK_WEBHOOK_URL, formatStartup(alertContext, alertThresholds, ALERT_CHECK_SECONDS, Boolean(DATABASE_URL))).then((posted) => {
       if (!posted.ok) logLine("error", `monitor: Slack startup message failed: ${posted.error}`);
     });
   }

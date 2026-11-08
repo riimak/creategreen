@@ -204,6 +204,85 @@ async function checkSlaWindow() {
   assert.strictEqual(weekly.aggregate.totalCycles, 4, '7d window includes the 48h-old row');
 }
 
+// With DATABASE_URL set and PostgreSQL unreachable the service must keep
+// waiting for the database — not fall back to the JSON store. (In production
+// the fallback hid a 29 h database outage behind db.ok=true and OOM-looped the
+// pod.) Exercised in a child process because server.js picks its store at
+// require time.
+async function checkNoJsonFallback() {
+  const { spawn } = require('child_process');
+  const net = require('net');
+  const port = await new Promise((resolve) => {
+    const probe = net.createServer().listen(0, '127.0.0.1', () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+  const closedPort = await new Promise((resolve) => {
+    const probe = net.createServer().listen(0, '127.0.0.1', () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+  const child = spawn(process.execPath, [path.join(__dirname, 'server.js')], {
+    env: {
+      ...process.env,
+      PREDICTION_PORT: String(port),
+      DATABASE_URL: `postgres://u:p@127.0.0.1:${closedPort}/db?sslmode=disable`,
+      PG_INIT_RETRY_SECONDS: '1',
+      PREDICTION_ACCESS_LOG: 'false',
+      PREDICTION_INTERVAL_MINUTES: '10',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  child.stdout.on('data', (d) => { output += d; });
+  child.stderr.on('data', (d) => { output += d; });
+  const get = async (p) => {
+    const res = await fetch(`http://127.0.0.1:${port}${p}`);
+    return { status: res.status, body: await res.json() };
+  };
+  try {
+    const deadline = Date.now() + 10_000;
+    let health;
+    for (;;) {
+      try { health = await get('/health'); break; } catch (e) {
+        if (Date.now() > deadline) throw new Error(`server did not start: ${e.message}\n${output}`);
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+    assert.strictEqual(health.status, 200, 'a missing database is not a liveness failure');
+    assert.strictEqual(health.body.store, 'postgres');
+    assert.strictEqual(health.body.storeReady, false);
+
+    const fresh = await get('/freshness');
+    assert.strictEqual(fresh.status, 200);
+    assert.strictEqual(fresh.body.ok, false);
+    assert.strictEqual(fresh.body.db.ok, false);
+    assert.strictEqual(fresh.body.db.store, 'postgres', 'must not fall back to json');
+    assert.strictEqual(fresh.body.db.initialized, false);
+    assert.match(fresh.body.db.error, /ECONNREFUSED/);
+    assert.deepStrictEqual(fresh.body.sources, []);
+    assert.match(fresh.body.sourcesError, /PostgreSQL unavailable/);
+    assert.strictEqual(fresh.body.lifecycle, 'initializing', 'no cycle may run without the store');
+
+    const status = await get('/status');
+    assert.strictEqual(status.status, 503, 'store-backed routes answer 503 while disconnected');
+    assert.strictEqual(status.body.error, 'database unavailable');
+    const models = await get('/models');
+    assert.strictEqual(models.status, 200, 'static routes keep working');
+
+    // Retries keep going (attempt counter grows) instead of giving up.
+    await new Promise((r) => setTimeout(r, 2_500));
+    const again = await get('/freshness');
+    assert.ok(again.body.db.attempts >= 2, `expected repeated init attempts, got ${again.body.db.attempts}`);
+    assert.match(output, /not falling back to JSON/);
+    assert.doesNotMatch(output, /falling back to JSON:/);
+  } finally {
+    child.kill('SIGKILL');
+  }
+}
+
 (async () => {
   const [first, second] = await Promise.all([measurementsMeta(), measurementsMeta()]);
   const third = await measurementsMeta();
@@ -212,6 +291,7 @@ async function checkSlaWindow() {
   await checkSlaWindow();
   await checkPreloadedRecords();
   await checkFreshness();
+  await checkNoJsonFallback();
   console.log('prediction tests passed');
 })().catch((err) => {
   console.error(err);

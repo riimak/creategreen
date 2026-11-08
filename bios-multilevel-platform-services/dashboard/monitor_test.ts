@@ -4,6 +4,7 @@ import {
   DEFAULT_THRESHOLDS,
   evaluateProblems,
   formatAge,
+  formatStartup,
   type FreshnessPayload,
   initialState,
   type MonitorThresholds,
@@ -96,14 +97,18 @@ Deno.test("a station with no rows at all is a problem", () => {
   assertStringIncludes(problems[0].text, "no measurements stored");
 });
 
-Deno.test("database and failed-cycle conditions are reported", () => {
-  const body = healthy(T0, {
-    db: { ok: false, error: "Query read timeout" },
+Deno.test("a failed cycle is reported on its own; with PostgreSQL down it folds into the database problem", () => {
+  const failed = {
     lastCycle: { status: "degraded", finishedAt: new Date(T0 - 2 * MIN).toISOString(), okTargets: 0, totalTargets: 23 },
-  });
-  const { problems } = evaluateProblems(input(T0, body), initialState(T0), thresholds);
-  assertEquals(problems.map((p) => p.key).sort(), ["prediction.cycle.failed", "prediction.db"]);
-  assertStringIncludes(problems.find((p) => p.key === "prediction.cycle.failed")!.text, "0/23 targets ok");
+  };
+  const alone = evaluateProblems(input(T0, healthy(T0, failed)), initialState(T0), thresholds).problems;
+  assertEquals(alone.map((p) => p.key), ["prediction.cycle.failed"]);
+  assertStringIncludes(alone[0].text, "0/23 targets ok");
+
+  const withDb = healthy(T0, { ...failed, db: { ok: false, error: "Query read timeout" } });
+  const collapsed = evaluateProblems(input(T0, withDb), initialState(T0), thresholds).problems;
+  assertEquals(collapsed.map((p) => p.key), ["prediction.db"]);
+  assertStringIncludes(collapsed[0].text, "Query read timeout");
 });
 
 Deno.test("a freshly started prediction service is not stale until the limit passes", () => {
@@ -161,17 +166,20 @@ Deno.test("alerts fire on change, remind on the repeat interval, and stay quiet 
   state = result.state;
 
   // A second, different problem appears -> alert again, marking what is new.
-  const withDb = healthy(later + MIN, { db: { ok: false, error: "down" }, sources: stale(later + MIN).sources });
-  result = step(state, input(later + MIN, withDb), thresholds, ctx);
+  const withWedge = healthy(later + MIN, {
+    cycleHealth: { ok: false, reason: "cycle_deadline_exceeded", cycleRunningMinutes: 45, deadlineMinutes: 30 },
+    sources: stale(later + MIN).sources,
+  });
+  result = step(state, input(later + MIN, withWedge), thresholds, ctx);
   assertEquals(result.action.kind, "alert");
   assertStringIncludes((result.action as { text: string }).text, "update: 2 problems");
-  assertStringIncludes((result.action as { text: string }).text, "*new* Prediction service cannot reach PostgreSQL");
+  assertStringIncludes((result.action as { text: string }).text, "*new* Prediction cycle has been running for 45 min");
   state = result.state;
 
-  // Partial recovery (db back, data still stale) -> update listing what resolved.
+  // Partial recovery (cycle restarted, data still stale) -> update listing what resolved.
   result = step(state, input(later + 2 * MIN, stale(later + 2 * MIN)), thresholds, ctx);
   assertEquals(result.action.kind, "alert");
-  assertStringIncludes((result.action as { text: string }).text, "Resolved since last alert: prediction.db");
+  assertStringIncludes((result.action as { text: string }).text, "Resolved since last alert: prediction.cycle.wedged");
   assertEquals(result.state.notifications, 4);
 });
 
@@ -187,6 +195,108 @@ Deno.test("nothing is posted during the startup grace period, but it fires right
   // Third consecutive failure lands after the grace period -> alert immediately.
   result = step(state, input(T0 + 3 * MIN, null, false), graced, ctx);
   assertEquals(result.action.kind, "alert");
+});
+
+Deno.test("the Nov 7 flapping is gone: a sub-threshold prediction blip keeps the active problems", () => {
+  // Production: prediction OOM-restarted every 20-40 min; each restart made
+  // /freshness unreachable for 1-2 checks, which emptied the problem set and
+  // produced a recovered + re-detected pair in Slack (100+ messages/night).
+  const noRows = (now: number) =>
+    healthy(now, { sources: [{ source: "OS2BIOS", solar: false, latestTs: null, ageMinutes: null }] });
+  let state = initialState(T0);
+  let result = step(state, input(T0, noRows(T0)), thresholds, ctx);
+  assertEquals(result.action.kind, "alert");
+  state = result.state;
+
+  // Two failed checks (below upstreamFailures = 3): nothing changes, nothing is posted.
+  result = step(state, input(T0 + MIN, null), thresholds, ctx);
+  assertEquals(result.action.kind, "none");
+  assertEquals(result.state.active.map((p) => p.key), ["data.stale:OS2BIOS"]);
+  state = result.state;
+  result = step(state, input(T0 + 2 * MIN, null), thresholds, ctx);
+  assertEquals(result.action.kind, "none");
+  state = result.state;
+
+  // Service back with the same problem: still nothing to say.
+  result = step(state, input(T0 + 3 * MIN, noRows(T0 + 3 * MIN)), thresholds, ctx);
+  assertEquals(result.action.kind, "none");
+  assertEquals(result.state.notifications, 1);
+  state = result.state;
+
+  // A real outage (third consecutive failure) replaces the carried problems.
+  for (let i = 4; i <= 6; i += 1) {
+    result = step(state, input(T0 + i * MIN, null), thresholds, ctx);
+    state = result.state;
+  }
+  assertEquals(result.action.kind, "alert");
+  assertEquals(state.active.map((p) => p.key), ["prediction.unreachable"]);
+});
+
+Deno.test("when prediction reports PostgreSQL down, dependent symptoms collapse into that one cause", () => {
+  const body = healthy(T0, {
+    db: { ok: false, store: "postgres", initialized: false, error: "connect ECONNREFUSED 10.233.57.249:5432" },
+    lifecycle: "initializing",
+    lastCycle: null,
+    processStartedAt: new Date(T0 - 3 * 60 * MIN).toISOString(),
+    sources: [],
+    sourcesError: "store not initialized — PostgreSQL unavailable",
+  });
+  const { problems } = evaluateProblems(input(T0, body), initialState(T0), thresholds);
+  assertEquals(problems.map((p) => p.key), ["prediction.db"]);
+  assertStringIncludes(problems[0].text, "ECONNREFUSED");
+});
+
+Deno.test("running on the JSON store in production is a problem in itself", () => {
+  const body = healthy(T0, { db: { ok: true, store: "json" } });
+  const { problems } = evaluateProblems(input(T0, body), initialState(T0), thresholds);
+  assertEquals(problems.map((p) => p.key), ["prediction.store"]);
+  assertStringIncludes(problems[0].text, "not persisted");
+});
+
+Deno.test("the direct database probe names a dead PostgreSQL even while prediction is unreachable", () => {
+  const down = { ok: false, status: "refused", detail: "connection refused", latencyMs: 1 };
+  let state = initialState(T0);
+  let result = { state, action: { kind: "none" } as { kind: string; text?: string } };
+  for (let i = 1; i <= thresholds.upstreamFailures; i += 1) {
+    result = step(state, { ...input(T0 + i * MIN, null), database: down }, thresholds, ctx);
+    state = result.state;
+  }
+  // Prediction and database both crossed the threshold on the same check.
+  assertEquals(result.action.kind, "alert");
+  assertEquals(state.active.map((p) => p.key).sort(), ["database.down", "prediction.unreachable"]);
+  assertStringIncludes(result.action.text!, "PostgreSQL is not accepting connections (3 consecutive checks): connection refused");
+  assertEquals(state.databaseFailures, 3);
+
+  // Database back (crash recovery finished) but prediction still restarting -> partial update.
+  const up = { ok: true, status: "accepting", detail: "accepting connections", latencyMs: 2 };
+  result = step(state, { ...input(T0 + 4 * MIN, null), database: up }, thresholds, ctx);
+  assertEquals(result.action.kind, "alert");
+  assertStringIncludes(result.action.text!, "Resolved since last alert: database.down");
+  assertEquals(result.state.databaseFailures, 0);
+  state = result.state;
+
+  // Everything back -> recovery.
+  result = step(state, { ...input(T0 + 5 * MIN, healthy(T0 + 5 * MIN)), database: up }, thresholds, ctx);
+  assertEquals(result.action.kind, "recovered");
+});
+
+Deno.test("a single failed database probe is carried, not alerted", () => {
+  const up = { ok: true, status: "accepting", latencyMs: 2 };
+  const down = { ok: false, status: "timeout", detail: "no reply within 5000 ms", latencyMs: 5000 };
+  let state = initialState(T0);
+  state = step(state, { ...input(T0, healthy(T0)), database: up }, thresholds, ctx).state;
+  const blip = step(state, { ...input(T0 + MIN, healthy(T0 + MIN)), database: down }, thresholds, ctx);
+  assertEquals(blip.action.kind, "none");
+  assertEquals(blip.state.active, []);
+  assertEquals(blip.state.databaseFailures, 1);
+  const back = step(blip.state, { ...input(T0 + 2 * MIN, healthy(T0 + 2 * MIN)), database: up }, thresholds, ctx);
+  assertEquals(back.state.databaseFailures, 0);
+  assertEquals(back.action.kind, "none");
+});
+
+Deno.test("startup message says whether PostgreSQL is probed directly", () => {
+  assertStringIncludes(formatStartup(ctx, thresholds, 60, true), "PostgreSQL or an upstream down 3 checks");
+  assertStringIncludes(formatStartup(ctx, thresholds, 60, false), "No DATABASE_URL");
 });
 
 Deno.test("formatAge is human readable", () => {

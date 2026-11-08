@@ -66,18 +66,30 @@ can run on a VM, VPS, or other real server.
 ## Health Monitor And Slack Alerts
 
 `monitor.ts` checks the platform's data flow every `ALERT_CHECK_SECONDS`
-(default 60) by reading the prediction service's `GET /freshness` and the
-blockchain `GET /health`, and posts to a Slack incoming webhook when the
-situation changes:
+(default 60) by reading the prediction service's `GET /freshness`, the
+blockchain `GET /health`, and by probing PostgreSQL directly (`db-probe.ts`),
+and posts to a Slack incoming webhook when the situation changes:
 
 | Condition | Default |
 | --- | --- |
+| PostgreSQL not accepting connections (direct probe) | 3 consecutive checks (`ALERT_UPSTREAM_FAILURES`), probe timeout 5 s (`ALERT_DB_PROBE_TIMEOUT_MS`) |
 | Prediction or blockchain service unreachable | 3 consecutive checks (`ALERT_UPSTREAM_FAILURES`) |
 | No completed prediction cycle | 45 min (`ALERT_CYCLE_STALE_MINUTES`) |
 | Prediction cycle past its deadline (pod restart pending) | from `/freshness` |
 | Prediction service cannot reach PostgreSQL | from `/freshness` |
+| Prediction service running on the JSON file store (no `DATABASE_URL`) | from `/freshness` |
 | Last cycle ended `degraded`/`failed` | from `/freshness` |
 | No new measurements for a configured station | 240 min (`ALERT_DATA_STALE_MINUTES`), solar 720 min (`ALERT_DATA_STALE_MINUTES_SOLAR`) — the meteo station samples at :00/:20 and Mars2 serves them 1–2 h late, so its newest row is routinely 2–3 h old |
+
+The direct probe is the equivalent of `pg_isready`: it uses the dashboard's
+`DATABASE_URL` only for host, port, user and database name, sends a plaintext
+startup packet, and reads the first reply. An authentication request (or a
+`pg_hba` rejection of the plaintext session) means the server is up; SQLSTATE
+`57P03` means it is starting up or in recovery; a refused connection or
+silence means it is down. No password is sent and no session is opened, so it
+works without the TLS CA and without the Postgres driver. It exists because
+the production database once crash-looped for 29 hours (read-only Longhorn
+volume) while the services in front of it could only report "no measurements".
 
 One digest is sent when problems appear or change, a reminder every
 `ALERT_REPEAT_MINUTES` (default 240) while they persist, and a recovery message
@@ -85,6 +97,13 @@ when everything clears. Nothing is sent during the first
 `ALERT_STARTUP_GRACE_SECONDS` (default 120) after boot. With
 `ALERT_SEND_STARTUP_MESSAGE` unset, a short "dashboard started" message is
 posted at boot, which doubles as a webhook self-test and a restart signal.
+
+Two rules keep the channel readable. A service that fails fewer than
+`ALERT_UPSTREAM_FAILURES` checks in a row is "unknown", not "fixed": the
+problems last seen through it stay active, so a pod restarting every half hour
+does not produce a recovered/detected pair each time. And when the prediction
+service reports that PostgreSQL is unreachable, the stale cycle, failed cycle
+and missing measurements that follow from it are folded into that one line.
 
 Setup:
 

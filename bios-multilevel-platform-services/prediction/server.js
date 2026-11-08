@@ -16,17 +16,59 @@ function log(level, msg) {
   else console.log(line);
 }
 
-// Use PostgreSQL if DATABASE_URL is set, otherwise JSON file.
+// Use PostgreSQL if DATABASE_URL is set, otherwise the JSON file store.
+//
+// With DATABASE_URL set there is deliberately no fallback to JSON. When the
+// production database was down for 29 h the old fallback silently switched
+// this process to an in-memory store: /freshness kept saying db.ok=true, the
+// Slack monitor could only report "no measurements", and the store grew until
+// the 256 Mi limit OOM-killed the pod every 20-40 minutes. Now the service
+// keeps retrying the schema init with backoff, answers /health 200 (the
+// process is fine; restarting it cannot bring PostgreSQL back), reports
+// db.ok=false with the real error on /freshness, and runs no cycle until the
+// store is usable.
 let store;
+const storeStatus = {
+  kind: process.env.DATABASE_URL ? 'postgres' : 'json',
+  ready: false,
+  attempts: 0,
+  error: null,
+  lastAttemptAt: null,
+  readyAt: null,
+};
+let storeReady;
 if (process.env.DATABASE_URL) {
   const { createPgPredictionStore } = require('../database/pg-prediction-store');
   store = createPgPredictionStore(process.env.DATABASE_URL);
-  store.init().then(() => console.log('Prediction store: PostgreSQL')).catch(e => {
-    console.error('PostgreSQL init failed, falling back to JSON:', e.message);
-    store = createJsonStore(process.env.PREDICTION_DB_PATH);
-  });
+  storeReady = connectPostgres();
 } else {
   store = createJsonStore(process.env.PREDICTION_DB_PATH);
+  storeStatus.ready = true;
+  storeStatus.readyAt = new Date().toISOString();
+  storeReady = Promise.resolve();
+}
+
+async function connectPostgres() {
+  const minDelayMs = Math.max(1, numberParam('PG_INIT_RETRY_SECONDS', 10)) * 1000;
+  const maxDelayMs = Math.max(minDelayMs, numberParam('PG_INIT_RETRY_MAX_SECONDS', 60) * 1000);
+  let delayMs = minDelayMs;
+  for (;;) {
+    storeStatus.attempts += 1;
+    storeStatus.lastAttemptAt = new Date().toISOString();
+    try {
+      await store.init();
+      storeStatus.ready = true;
+      storeStatus.error = null;
+      storeStatus.readyAt = new Date().toISOString();
+      log('info', `store: PostgreSQL ready${storeStatus.attempts > 1 ? ` after ${storeStatus.attempts} attempts` : ''}`);
+      return;
+    } catch (error) {
+      storeStatus.error = error.message;
+      log('error', `store: PostgreSQL init failed (attempt ${storeStatus.attempts}): ${error.message} — retrying in ${Math.round(delayMs / 1000)}s, not falling back to JSON`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+      delayMs = Math.min(maxDelayMs, delayMs * 2);
+    }
+  }
 }
 const state = {
   lifecycle: 'initializing',
@@ -523,14 +565,26 @@ async function runCycle(reason = 'scheduled') {
  * Cheap, indexed, and honest: it reports whether the cycle is alive, whether
  * PostgreSQL answers, and how old the newest row per configured station is. */
 async function dbPing() {
-  const kind = store.file === 'postgres' ? 'postgres' : 'json';
-  if (typeof store.ping !== 'function') return { ok: true, store: kind };
+  const kind = storeStatus.kind;
+  if (!storeStatus.ready) {
+    // Schema init has not succeeded yet (see connectPostgres): report the
+    // last connection error instead of hitting the pool again.
+    return {
+      ok: false,
+      store: kind,
+      initialized: false,
+      error: storeStatus.error || 'PostgreSQL schema initialization pending',
+      attempts: storeStatus.attempts,
+      lastAttemptAt: storeStatus.lastAttemptAt,
+    };
+  }
+  if (typeof store.ping !== 'function') return { ok: true, store: kind, initialized: true };
   const started = Date.now();
   try {
     const result = await store.ping();
-    return { ok: result?.ok !== false, latencyMs: Date.now() - started, store: kind, error: result?.error };
+    return { ok: result?.ok !== false, initialized: true, latencyMs: Date.now() - started, store: kind, error: result?.error };
   } catch (error) {
-    return { ok: false, latencyMs: Date.now() - started, store: kind, error: error.message };
+    return { ok: false, initialized: true, latencyMs: Date.now() - started, store: kind, error: error.message };
   }
 }
 
@@ -542,23 +596,27 @@ async function freshnessBody() {
   const staleSolar = numberParam('PREDICTION_STALE_AFTER_MINUTES_SOLAR', 720);
   let sources = [];
   let sourcesError = null;
-  try {
-    const latest = typeof store.latestMeasurementTimestamps === 'function'
-      ? await S(store.latestMeasurementTimestamps(stationIds()))
-      : stationIds().map(source => ({ source, latestTs: null }));
-    sources = latest.map((row) => {
-      const solar = isSolarSource(row.source);
-      const ts = row.latestTs ? Date.parse(row.latestTs) : NaN;
-      return {
-        source: row.source,
-        solar,
-        latestTs: Number.isFinite(ts) ? new Date(ts).toISOString() : null,
-        ageMinutes: Number.isFinite(ts) ? Math.max(0, Math.round((now - ts) / 60000)) : null,
-        staleAfterMinutes: solar ? staleSolar : staleDefault,
-      };
-    });
-  } catch (error) {
-    sourcesError = error.message;
+  if (!storeStatus.ready) {
+    sourcesError = 'store not initialized — PostgreSQL unavailable';
+  } else {
+    try {
+      const latest = typeof store.latestMeasurementTimestamps === 'function'
+        ? await S(store.latestMeasurementTimestamps(stationIds()))
+        : stationIds().map(source => ({ source, latestTs: null }));
+      sources = latest.map((row) => {
+        const solar = isSolarSource(row.source);
+        const ts = row.latestTs ? Date.parse(row.latestTs) : NaN;
+        return {
+          source: row.source,
+          solar,
+          latestTs: Number.isFinite(ts) ? new Date(ts).toISOString() : null,
+          ageMinutes: Number.isFinite(ts) ? Math.max(0, Math.round((now - ts) / 60000)) : null,
+          staleAfterMinutes: solar ? staleSolar : staleDefault,
+        };
+      });
+    } catch (error) {
+      sourcesError = error.message;
+    }
   }
   const last = state.lastCycle;
   const results = Array.isArray(last?.results) ? last.results : [];
@@ -1023,11 +1081,19 @@ async function handle(req, res) {
     }
     if (req.method === 'GET' && url.pathname === '/health') {
       // Liveness: 503 once a cycle has outlived its deadline (see cycleHealth).
+      // A missing database is NOT a liveness failure: the process is healthy
+      // and a restart would not help; /freshness carries that signal.
       const health = cycleHealth(state);
-      return json(res, health.ok ? 200 : 503, { ok: health.ok, service: 'prediction', store: store.file, ...health });
+      return json(res, health.ok ? 200 : 503, { ok: health.ok, service: 'prediction', store: store.file, storeReady: storeStatus.ready, ...health });
     }
     if (req.method === 'GET' && url.pathname === '/freshness') {
       return json(res, 200, await freshnessBody());
+    }
+    if (!storeStatus.ready && url.pathname !== '/models') {
+      // Everything below reads or writes the store. Answer plainly instead of
+      // surfacing a connection error from deep inside a query.
+      res.setHeader('Retry-After', '30');
+      return json(res, 503, { error: 'database unavailable', detail: storeStatus.error, attempts: storeStatus.attempts });
     }
     if (req.method === 'GET' && url.pathname === '/stats') {
       const stats = typeof store.stats === 'function' ? await store.stats() : {};
@@ -1148,8 +1214,12 @@ function startScheduler() {
 }
 
 if (require.main === module) {
-  startScheduler();
-  startMeasurementsWarmer();
+  // Cycles and the meta-cache warmer need the store; the HTTP server does not,
+  // so /health and /freshness answer while PostgreSQL is still unavailable.
+  storeReady.then(() => {
+    startScheduler();
+    startMeasurementsWarmer();
+  });
   http.createServer((req, res) => {
     const started = Date.now();
     const url = new URL(req.url, `http://${req.headers.host}`);
@@ -1161,13 +1231,12 @@ if (require.main === module) {
       if (!res.headersSent) json(res, 500, { error: 'internal error' });
     });
   }).listen(PORT, () => {
-    const hasDb = Boolean(process.env.DATABASE_URL);
     const cfg = config();
     let mode;
     if (cfg.mars2ApiBase && cfg.mars2Username && cfg.mars2Password) mode = `mars2-api(${cfg.mars2ApiBase})`;
     else if (cfg.apiBase) mode = `prediction-data-api(${cfg.apiBase})`;
     else mode = `export-files(${cfg.dataDir || 'output'})`;
-    log('info', `listening on http://0.0.0.0:${PORT} store=${hasDb ? 'postgres' : 'json'} ingest=${mode} ACCESS_LOG=${accessLogEnabled}`);
+    log('info', `listening on http://0.0.0.0:${PORT} store=${storeStatus.kind}${storeStatus.ready ? '' : ' (connecting)'} ingest=${mode} ACCESS_LOG=${accessLogEnabled}`);
     if (mode.startsWith('export-files')) {
       log('warn', `ingest fallback: no BIOS_API_BASE/BIOS_USERNAME/BIOS_PASSWORD nor PREDICTION_DATA_API_BASE — Mars2 ingest is OFF and runCycle will see 0 targets`);
     } else if (mode.startsWith('mars2-api') && (!cfg.mars2Username || !cfg.mars2Password)) {

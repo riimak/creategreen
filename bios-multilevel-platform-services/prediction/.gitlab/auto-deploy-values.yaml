@@ -96,8 +96,11 @@ extraEnv:
     value: "10"
   - name: PREDICTION_TARGETS
     value: "auto"
+  # OS1BIOS is not listed: Mars2 has returned zero rows for it since April 2026
+  # (every cycle logged rows=0), so it only produced a permanent "no
+  # measurements" alert. Re-add it here once the station reports again.
   - name: PREDICTION_STATIONS
-    value: "OS1BIOS,OS2BIOS,SOLAXBIOS"
+    value: "OS2BIOS,SOLAXBIOS"
   - name: PREDICTION_INIT_MODE
     value: "resume"
   - name: PREDICTION_BACKFILL_HOURS

@@ -57,6 +57,11 @@ PREDICTION_TARGETS=auto
 PREDICTION_STATIONS=OS1BIOS,OS2BIOS,SOLAXBIOS
 ```
 
+Production lists only `OS2BIOS,SOLAXBIOS`: Mars2 has returned no rows for
+`OS1BIOS` since April 2026, and a configured station with no data is a
+permanent "no measurements" alert in Slack. Add it back in
+`prediction/.gitlab/auto-deploy-values.yaml` when the station reports again.
+
 The service runs one cycle on startup, then repeats on the configured interval.
 Each cycle pulls every configured station from Mars2 once and reuses those rows
 for all of that station's forecast and anomaly targets.
@@ -83,6 +88,28 @@ Skipped scheduled runs are logged with the age of the cycle that blocked them.
   "sources": [ { "source": "OS2BIOS", "solar": false, "latestTs": "...", "ageMinutes": 7, "staleAfterMinutes": 30 } ]
 }
 ```
+
+### Database outages
+
+With `DATABASE_URL` set the service never falls back to the JSON file store.
+If the schema init fails (database down, in recovery, unreachable) it keeps
+retrying with backoff (`PG_INIT_RETRY_SECONDS`, default 10, doubling up to
+`PG_INIT_RETRY_MAX_SECONDS`, default 60) and meanwhile:
+
+- `GET /health` stays 200 — the process is fine and a restart would not bring
+  PostgreSQL back — but reports `storeReady: false`;
+- `GET /freshness` reports `ok: false`, `db.ok: false`, `db.store: "postgres"`,
+  `db.initialized: false`, the last connection error and the attempt count, so
+  the dashboard's Slack monitor names the database as the cause;
+- every store-backed route answers `503 {"error":"database unavailable"}`
+  with `Retry-After: 30`;
+- no prediction cycle runs until the store is ready; the first cycle after
+  reconnecting re-pulls the full `PREDICTION_BACKFILL_HOURS` window from Mars2,
+  so a gap shorter than that window refills itself.
+
+The old fallback hid a 29-hour database outage in production: `/freshness`
+kept saying `db.ok: true` (store `json`) and the in-memory store grew until the
+pod was OOM-killed every 20–40 minutes.
 
 ## Missing Data And SLA
 

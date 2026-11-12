@@ -41,11 +41,11 @@ list. Agreed scope:
 | `OS1BIOS` | meteo | Mars2 has returned no rows since 2026-04-29; kept until the source is fixed or retired |
 | `OS2BIOS` | meteo | active |
 | `SOLAXBIOS` | solar | active |
-| `SOKO46BIOS` (SC Soko 46 kWp, Huawei) | solar | commented out until its Mars2 device exists (`docs/mars2/feed-contract.md`) |
-| `SOKOBAZENBIOS` (SC SOKO Bazen 275.4 kWp, Huawei) | solar | same |
-| `VETINSTBIOS` (Veterinarski Institut, Solis) | solar | same |
+| `SOKO46` (SC Soko 46 kWp, Huawei) | solar | commented out until its Mars2 device exists (`docs/mars2/feed-contract.md`) |
+| `SOKOBAZEN` (SC SOKO Bazen 275.4 kWp, Huawei) | solar | same |
+| `VETINST` (Veterinarski Institut, Solis) | solar | same |
 
 A station that returns no rows for the whole window is logged as a warning
 (the file keeps only its header); when every requested station is empty,
 `fetch` exits 2 so cron logs show it. The monthly report works for any
-`solar` station (`report --month YYYY-MM --station SOKO46BIOS`).
+`solar` station (`report --month YYYY-MM --station SOKO46`).

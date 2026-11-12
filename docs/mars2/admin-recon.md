@@ -55,7 +55,7 @@ three components with ŠIFRA = `Solarman`, so `CustomDataExport/BIOS/Solarman`
 is a valid station code — but see §4, nothing is exported for it.
 
 So for a new plant the node under `Solari` gets a `Mjerno mjesto` component
-with the code (`SOKO46BIOS`, `SOKOBAZENBIOS`, `VETINSTBIOS`). Screenshot 06.
+with the code (`SOKO46`, `SOKOBAZEN`, `VETINST`). Screenshot 06.
 
 ## 3. Device nodes and counters (what Mars2 polls)
 

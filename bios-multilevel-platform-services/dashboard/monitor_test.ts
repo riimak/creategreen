@@ -297,7 +297,7 @@ Deno.test("a single failed database probe is carried, not alerted", () => {
 Deno.test("Mars2 feed polling: off by default, silence and wrong credentials once enabled", () => {
   const feedOn: MonitorThresholds = { ...thresholds, feedSilentMinutes: 15 };
   const feed = (overrides: Record<string, unknown>) =>
-    healthy(T0, { feed: { configured: true, plants: ["SOKO46BIOS", "VETINSTBIOS"], requestsTotal: 10, authFailures: 0, lastAuthFailureAt: null, ...overrides } });
+    healthy(T0, { feed: { configured: true, plants: ["SOKO46", "VETINST"], requestsTotal: 10, authFailures: 0, lastAuthFailureAt: null, ...overrides } });
 
   // Disabled: nothing, even when nobody ever polled.
   assertEquals(evaluateProblems(input(T0, feed({ lastRequestAt: null })), initialState(T0), thresholds).problems, []);
@@ -309,7 +309,7 @@ Deno.test("Mars2 feed polling: off by default, silence and wrong credentials onc
   const silent = evaluateProblems(input(T0, feed({ lastRequestAt: new Date(T0 - 40 * MIN).toISOString() })), initialState(T0), feedOn).problems;
   assertEquals(silent.map((p) => p.key), ["mars2.poll.silent"]);
   assertStringIncludes(silent[0].text, "40 min");
-  assertStringIncludes(silent[0].text, "SOKO46BIOS, VETINSTBIOS");
+  assertStringIncludes(silent[0].text, "SOKO46, VETINST");
 
   // Enabled, never polled since a start long ago.
   const never = evaluateProblems(input(T0, feed({ lastRequestAt: null })), initialState(T0), feedOn).problems;
@@ -317,7 +317,7 @@ Deno.test("Mars2 feed polling: off by default, silence and wrong credentials onc
   assertStringIncludes(never[0].text, "never polled");
 
   // Fresh start, never polled yet: not stale until the limit passes.
-  const young = healthy(T0, { processStartedAt: new Date(T0 - 5 * MIN).toISOString(), feed: { configured: true, plants: ["SOKO46BIOS"], lastRequestAt: null } });
+  const young = healthy(T0, { processStartedAt: new Date(T0 - 5 * MIN).toISOString(), feed: { configured: true, plants: ["SOKO46"], lastRequestAt: null } });
   assertEquals(evaluateProblems(input(T0, young), initialState(T0), feedOn).problems, []);
 
   // Rejected calls with no accepted ones: credentials problem on the Mars2 side.

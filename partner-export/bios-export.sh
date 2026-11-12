@@ -102,7 +102,7 @@ Examples:
   $0 fetch --from "2026-03-01 00:00:00" --to "2026-03-02 00:00:00"
   $0 fetch --from "2026-03-01 00:00:00" --to "2026-03-02 00:00:00" --station OS1BIOS
   $0 report --month 2026-03
-  $0 report --month 2026-03 --station SOKO46BIOS
+  $0 report --month 2026-03 --station SOKO46
 EOF
     exit 0
 }

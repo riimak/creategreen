@@ -641,12 +641,12 @@ assert_contains "stations: OS2BIOS has the meteo layout (21 columns)" \
     $'OS2BIOS\tmeteo\t21 columns' "$STATIONS_OUT"
 
 # A custom file: comments, blank lines, CRLF and a new solar plant.
-printf '# comment\r\n\r\nOS2BIOS|meteo\r\nSOKO46BIOS|solar   # trailing comment\r\n' > "$WORK/stations.conf"
+printf '# comment\r\n\r\nOS2BIOS|meteo\r\nSOKO46|solar   # trailing comment\r\n' > "$WORK/stations.conf"
 CUSTOM_OUT=$(BIOS_STATIONS_FILE="$WORK/stations.conf" bash "$SCRIPT_DIR/bios-export.sh" stations 2>/dev/null)
 assert_eq "custom stations.conf: comments, CRLF and blanks are ignored" \
-    "OS2BIOS SOKO46BIOS" "$(echo "$CUSTOM_OUT" | awk -F'\t' '{print $1}' | tr '\n' ' ' | sed 's/ $//')"
+    "OS2BIOS SOKO46" "$(echo "$CUSTOM_OUT" | awk -F'\t' '{print $1}' | tr '\n' ' ' | sed 's/ $//')"
 assert_contains "custom stations.conf: new plant gets the solar layout" \
-    $'SOKO46BIOS\tsolar\t15 columns' "$CUSTOM_OUT"
+    $'SOKO46\tsolar\t15 columns' "$CUSTOM_OUT"
 
 # Unknown layout is a hard error.
 printf 'X|wind\n' > "$WORK/bad.conf"
@@ -667,7 +667,7 @@ assert_contains "fetch --station NOPE lists the known stations" "Known stations"
 # both decided before authentication.
 METEO_OUT=$(bash "$SCRIPT_DIR/bios-export.sh" report --month 2026-03 --station OS1BIOS 2>&1)
 assert_contains "report refuses a meteo-layout station" "needs a solar-layout station" "$METEO_OUT"
-SOLAR_OUT=$(BIOS_STATIONS_FILE="$WORK/stations.conf" BIOS_API_BASE="http://127.0.0.1:9" bash "$SCRIPT_DIR/bios-export.sh" report --month 2026-03 --station SOKO46BIOS 2>&1)
+SOLAR_OUT=$(BIOS_STATIONS_FILE="$WORK/stations.conf" BIOS_API_BASE="http://127.0.0.1:9" bash "$SCRIPT_DIR/bios-export.sh" report --month 2026-03 --station SOKO46 2>&1)
 if echo "$SOLAR_OUT" | grep -qE "Token request failed|Set BIOS_USERNAME|Authenticating"; then ok "report accepts a solar-layout station from stations.conf (fails only at authentication)"
 else fail "report accepts a solar-layout station from stations.conf (fails only at authentication)"; note "got: $SOLAR_OUT"; fi
 

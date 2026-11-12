@@ -16,9 +16,9 @@ https://bios-multilevel.barrage.net/prediction/feed
 
 | Mars2 code (Mjerno mjesto) | Plant | Vendor | Our source key |
 | --- | --- | --- | --- |
-| `SOKO46BIOS` | SC Soko 46 kWp | Huawei FusionSolar | `HUAWEI:NE=201410062` |
-| `SOKOBAZENBIOS` | SC SOKO Bazen 275.400 kWp | Huawei FusionSolar | `HUAWEI:NE=201791758` |
-| `VETINSTBIOS` | Veterinarski Institut | Solis SolisCloud | `SOLIS:1298491919450654168` |
+| `SOKO46` | SC Soko 46 kWp | Huawei FusionSolar | `HUAWEI:NE=201410062` |
+| `SOKOBAZEN` | SC SOKO Bazen 275.400 kWp | Huawei FusionSolar | `HUAWEI:NE=201791758` |
+| `VETINST` | Veterinarski Institut | Solis SolisCloud | `SOLIS:1298491919450654168` |
 
 Codes are configured with `FEED_PLANTS` (`CODE=SOURCE,...`) in
 `prediction/.gitlab/auto-deploy-values.yaml`; change them there if Mars2
@@ -60,7 +60,7 @@ Static key, for templates that can only send a fixed header:
   "generatedAt": "2026-11-08T19:02:06Z",
   "layout": [ { "position": 1, "key": "Grid.power.total", "unit": "kW", "kind": "gauge" }, "… 15 entries" ],
   "plants": [
-    { "code": "SOKO46BIOS", "source": "HUAWEI:NE=201410062", "vendor": "huawei", "name": "SC Soko 46 kWp",
+    { "code": "SOKO46", "source": "HUAWEI:NE=201410062", "vendor": "huawei", "name": "SC Soko 46 kWp",
       "capacityKwp": 46, "visible": true, "inventoryKnown": true,
       "devices": [ { "source": "HUAWEI:NE=201410062:device:…", "id": "…", "type": "1", "model": "SUN2000", "serial": "…", "name": "…" } ] }
   ]
@@ -74,7 +74,7 @@ one JSON path per counter, e.g. `$.values['Inverter.AC.power.total']`.
 
 ```json
 {
-  "code": "SOKO46BIOS", "name": "SC Soko 46 kWp", "vendor": "huawei", "source": "HUAWEI:NE=201410062",
+  "code": "SOKO46", "name": "SC Soko 46 kWp", "vendor": "huawei", "source": "HUAWEI:NE=201410062",
   "capacityKwp": 46,
   "generatedAt": "2026-11-08T19:02:06Z",
   "timestamp": "2026-11-08T19:00:12Z",
@@ -113,7 +113,7 @@ default 300). Gauges are bucket averages, daily counters bucket maxima,
 cumulative counters the last value in the bucket.
 
 ```json
-{ "code": "SOKO46BIOS", "from": "…", "to": "…", "stepSeconds": 300,
+{ "code": "SOKO46", "from": "…", "to": "…", "stepSeconds": 300,
   "series": { "Inverter.AC.power.total": [ { "timestamp": "2026-11-07T19:00:00Z", "value": 12.175 } ], "…": [] } }
 ```
 
@@ -182,7 +182,7 @@ GET /prediction/feed/solax/proxyApp/proxy/api/getRealtimeInfo.do?tokenId=<FEED_A
 
 ```json
 { "success": true, "exception": "Query success!",
-  "result": { "inverterSN": "HUAWEI:NE=201410062", "sn": "SOKO46BIOS",
+  "result": { "inverterSN": "HUAWEI:NE=201410062", "sn": "SOKO46",
               "acpower": 12175, "yieldtoday": 76, "yieldtotal": 98765.4,
               "feedinpower": -3100, "feedinenergy": 5072, "consumeenergy": 1810.5,
               "feedinpowerM2": null, "soc": null, "peps1": null, "peps2": null, "peps3": null,
@@ -249,7 +249,7 @@ Content-Type: application/json
 
 ```json
 { "code": null, "msg": null, "success": true, "requestId": "…",
-  "deviceSn": "SOKO46BIOS", "deviceId": 0, "deviceType": "INVERTER", "deviceState": 1, "collectionTime": 1794168715,
+  "deviceSn": "SOKO46", "deviceId": 0, "deviceType": "INVERTER", "deviceState": 1, "collectionTime": 1794168715,
   "dataList": [
     { "key": "Pr1", "value": "46", "unit": "kW", "name": "Rated Power" },
     { "key": "APo_t1", "value": "12.175", "unit": "kW", "name": "Total AC Output Power (Active)" },

@@ -145,7 +145,7 @@ extraEnv:
   # CustomDataExport/BIOS/<code>. Credentials (FEED_USERNAME/FEED_PASSWORD or
   # FEED_API_KEY) come from GitLab CI variables; without them the feed is 503.
   - name: FEED_PLANTS
-    value: "SOKO46BIOS=HUAWEI:NE=201410062,SOKOBAZENBIOS=HUAWEI:NE=201791758,VETINSTBIOS=SOLIS:1298491919450654168"
+    value: "SOKO46=HUAWEI:NE=201410062,SOKOBAZEN=HUAWEI:NE=201791758,VETINST=SOLIS:1298491919450654168"
   # Mars2 / BIOS API ingest. Without these three set, `loadRecords` falls back to
   # local export files which don't exist in the pod → 0 targets, no Mars2 logs, blank dashboard.
   # `BIOS_API_BASE` is committed (not a secret); `BIOS_USERNAME`/`BIOS_PASSWORD` are appended

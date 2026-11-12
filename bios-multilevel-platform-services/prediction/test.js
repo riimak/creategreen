@@ -25,10 +25,10 @@ const feed = require('./feed');
 
 /* ── Feed API (Mars2 pulls the vendor plants from us) ────────────────────── */
 {
-  const plants = feed.parseFeedPlants('SOKO46BIOS=HUAWEI:NE=201410062, VETINSTBIOS=SOLIS:1298491919450654168');
+  const plants = feed.parseFeedPlants('SOKO46=HUAWEI:NE=201410062, VETINST=SOLIS:1298491919450654168');
   assert.deepStrictEqual(plants, [
-    { code: 'SOKO46BIOS', source: 'HUAWEI:NE=201410062', vendor: 'huawei' },
-    { code: 'VETINSTBIOS', source: 'SOLIS:1298491919450654168', vendor: 'solis' },
+    { code: 'SOKO46', source: 'HUAWEI:NE=201410062', vendor: 'huawei' },
+    { code: 'VETINST', source: 'SOLIS:1298491919450654168', vendor: 'solis' },
   ]);
   assert.deepStrictEqual(feed.parseFeedPlants(''), []);
   assert.throws(() => feed.parseFeedPlants('bad'), /CODE=SOURCE/);
@@ -63,7 +63,7 @@ const feed = require('./feed');
   assert.strictEqual(feed.feedConfig({ FEED_PLANTS: '' }).configured, false, 'no credentials -> disabled');
 
   // Current values: plant-level metrics, device sums, staleness, unmapped columns.
-  const huawei = { code: 'SOKO46BIOS', source: 'HUAWEI:NE=1', vendor: 'huawei' };
+  const huawei = { code: 'SOKO46', source: 'HUAWEI:NE=1', vendor: 'huawei' };
   const inventory = { devices: [{ source: 'HUAWEI:NE=1:device:A' }, { source: 'HUAWEI:NE=1:device:B' }, { source: 'HUAWEI:NE=1:device:M' }] };
   const now = Date.parse('2026-11-08T12:00:00Z');
   const at = (minAgo) => new Date(now - minAgo * 60_000).toISOString();
@@ -90,7 +90,7 @@ const feed = require('./feed');
   assert.strictEqual(current.timestamp, at(5));
   assert.strictEqual(Object.keys(current.values).length, 15);
 
-  const solis = { code: 'VETINSTBIOS', source: 'SOLIS:9', vendor: 'solis' };
+  const solis = { code: 'VETINST', source: 'SOLIS:9', vendor: 'solis' };
   const solisInv = { devices: [{ source: 'SOLIS:9:device:S1' }, { source: 'SOLIS:9:device:S2' }] };
   const solisCurrent = feed.computeCurrent(solis, solisInv, [
     { source: 'SOLIS:9', metric: 'solis.plant.current_power_kw', value: 4.2, timestamp: at(3) },
@@ -120,10 +120,10 @@ const feed = require('./feed');
   assert.strictEqual(history.buckets[1].values['Inverter.AC.energy.out.daily'], 25);
 
   // Mars2 CustomDataExport wire format: comma decimals, empty for null, "0xa" record terminator.
-  const wire = feed.formatExport('SOKO46BIOS', history.buckets);
+  const wire = feed.formatExport('SOKO46', history.buckets);
   // 15 positions: toGrid at 2, AC power at 14, daily energy at 15; everything else empty.
   const record0 = ['1000', '', '101', ...Array(11).fill(''), '3', '12'].join(';') + '0xa';
-  assert.ok(wire.startsWith(`SOKO46BIOS!${record0}1300;`), wire);
+  assert.ok(wire.startsWith(`SOKO46!${record0}1300;`), wire);
   assert.ok(wire.endsWith(';250xa'), wire);
   assert.strictEqual(feed.formatExportValue(-4.252), '-4,252');
   assert.strictEqual(feed.formatExportValue(null), '');
@@ -153,7 +153,7 @@ const feed = require('./feed');
   const solax = feed.formatSolaxRealtime(huawei, withTotal, { powerUnit: 'W', empty: 'null', timeZone: 'UTC' });
   assert.strictEqual(solax.success, true);
   assert.strictEqual(solax.exception, 'Query success!');
-  assert.strictEqual(solax.result.sn, 'SOKO46BIOS');
+  assert.strictEqual(solax.result.sn, 'SOKO46');
   assert.strictEqual(solax.result.inverterSN, 'HUAWEI:NE=1');
   assert.strictEqual(solax.result.acpower, 17750, 'kW -> W like Solax Cloud');
   assert.strictEqual(solax.result.yieldtoday, 123.4, 'energy stays kWh');
@@ -187,7 +187,7 @@ const feed = require('./feed');
 
   const sm = feed.formatSolarmanCurrent(huawei, withTotal, { deviceId: 77, capacityKwp: 46, now });
   assert.strictEqual(sm.success, true);
-  assert.strictEqual(sm.deviceSn, 'SOKO46BIOS');
+  assert.strictEqual(sm.deviceSn, 'SOKO46');
   assert.strictEqual(sm.deviceId, 77);
   assert.strictEqual(sm.deviceState, 1);
   assert.strictEqual(sm.collectionTime, Math.floor(Date.parse(at(5)) / 1000));
@@ -435,7 +435,7 @@ async function checkNoJsonFallback() {
       PREDICTION_INTERVAL_MINUTES: '10',
       FEED_USERNAME: 'mars2',
       FEED_PASSWORD: 'feed-test-password',
-      FEED_PLANTS: 'SOKO46BIOS=HUAWEI:NE=201410062',
+      FEED_PLANTS: 'SOKO46=HUAWEI:NE=201410062',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -478,7 +478,7 @@ async function checkNoJsonFallback() {
 
     // Feed API over HTTP: token exchange works without the store, data routes
     // demand a token and then hit the database guard.
-    assert.deepStrictEqual(fresh.body.feed.plants, ['SOKO46BIOS']);
+    assert.deepStrictEqual(fresh.body.feed.plants, ['SOKO46']);
     assert.strictEqual(fresh.body.feed.configured, true);
     const post = async (p, body, contentType) => {
       const res = await fetch(`http://127.0.0.1:${port}${p}`, { method: 'POST', headers: { 'Content-Type': contentType }, body });
@@ -504,10 +504,10 @@ async function checkNoJsonFallback() {
 
     // Solax dialect: credential in the query string, Solax-shaped errors.
     const solaxPath = '/feed/solax/proxyApp/proxy/api/getRealtimeInfo.do';
-    const solaxAnon = await get(`${solaxPath}?tokenId=wrong&sn=SOKO46BIOS`);
+    const solaxAnon = await get(`${solaxPath}?tokenId=wrong&sn=SOKO46`);
     assert.strictEqual(solaxAnon.status, 401);
     assert.deepStrictEqual(solaxAnon.body, { success: false, exception: 'invalid tokenId', result: null });
-    const solaxOk = await get(`${solaxPath}?tokenId=${encodeURIComponent(tok.body.access_token)}&sn=SOKO46BIOS`);
+    const solaxOk = await get(`${solaxPath}?tokenId=${encodeURIComponent(tok.body.access_token)}&sn=SOKO46`);
     assert.strictEqual(solaxOk.status, 503, 'authenticated by tokenId, then the store guard');
     assert.strictEqual(solaxOk.body.exception, 'database unavailable');
     const solaxPost = await post(solaxPath, '', 'text/plain');
@@ -523,10 +523,10 @@ async function checkNoJsonFallback() {
     assert.strictEqual(smTok.body.success, true);
     assert.strictEqual(typeof smTok.body.expires_in, 'string');
     const smData = await fetch(`http://127.0.0.1:${port}/feed/solarman/device/v1.0/currentData?language=en`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `bearer ${smTok.body.access_token}` }, body: JSON.stringify({ deviceSn: 'SOKO46BIOS', deviceId: 1 }),
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `bearer ${smTok.body.access_token}` }, body: JSON.stringify({ deviceSn: 'SOKO46', deviceId: 1 }),
     });
     assert.strictEqual(smData.status, 503, 'authenticated, then the store guard');
-    const smAnon = await post('/feed/solarman/device/v1.0/currentData?language=en', JSON.stringify({ deviceSn: 'SOKO46BIOS' }), 'application/json');
+    const smAnon = await post('/feed/solarman/device/v1.0/currentData?language=en', JSON.stringify({ deviceSn: 'SOKO46' }), 'application/json');
     assert.strictEqual(smAnon.status, 401);
     assert.strictEqual(smAnon.body.msg, 'auth invalid token');
     const smGet = await get('/feed/solarman/device/v1.0/currentData');

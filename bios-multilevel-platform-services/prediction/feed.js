@@ -148,7 +148,7 @@ const SOLARMAN_DATA_PATH = '/feed/solarman/device/v1.0/currentData';
 
 /* ── Configuration ────────────────────────────────────────────────────────── */
 
-/** "SOKO46BIOS=HUAWEI:NE=201410062,VETINSTBIOS=SOLIS:1298491919450654168" -> [{ code, source, vendor }] */
+/** "SOKO46=HUAWEI:NE=201410062,VETINST=SOLIS:1298491919450654168" -> [{ code, source, vendor }] */
 function parseFeedPlants(raw) {
   const out = [];
   for (const part of String(raw || '').split(',')) {

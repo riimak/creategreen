@@ -17,7 +17,7 @@ delete process.env.BIOS_PASSWORD;
 delete process.env.PREDICTION_DATA_API_BASE;
 process.env.PREDICTION_INGEST_LOG = 'false';
 
-const { parseExportText, seriesFor } = require('./bios-data');
+const { parseExportText, seriesFor, clipRows, MARS2_WINDOW_SLACK_MS } = require('./bios-data');
 const { forecast, anomalies } = require('./model');
 const { dataQuality, parseBucketSeconds } = require('./server');
 const { createStore } = require('./store');
@@ -169,6 +169,12 @@ const feed = require('./feed');
   assert.ok(!('feedinpower' in feed.formatSolaxRealtime(huawei, withTotal, { empty: 'omit', timeZone: 'UTC' }).result), 'omit drops the field');
   assert.strictEqual(feed.formatNaiveTime(new Date('2026-07-01T10:00:00Z'), 'Europe/Zagreb'), '2026-07-01 12:00:00', 'CEST');
   assert.strictEqual(feed.formatNaiveTime(new Date('2026-11-08T19:45:03Z'), 'Europe/Zagreb'), '2026-11-08 20:45:03', 'CET');
+  // Mars2 reads uploadTime as fixed UTC+2 (what Solax Cloud sends): a sample at
+  // 21:16:49Z must be sent as 23:16:49 in winter too, or Mars2 stamps it an hour early.
+  assert.strictEqual(feed.formatNaiveTime(new Date('2026-11-12T21:16:49Z'), 'Etc/GMT-2'), '2026-11-12 23:16:49', 'UTC+2 in winter');
+  assert.strictEqual(feed.formatNaiveTime(new Date('2026-07-01T10:00:00Z'), 'Etc/GMT-2'), '2026-07-01 12:00:00', 'UTC+2 in summer = CEST');
+  assert.strictEqual(feed.formatSolaxRealtime(huawei, withTotal, {}).result.uploadTime,
+    feed.formatNaiveTime(new Date(withTotal.timestamp), 'Etc/GMT-2'), 'default uploadTime zone is UTC+2');
   const noData = feed.formatSolaxRealtime(huawei, feed.computeCurrent(huawei, inventory, [], { now, columns }), {});
   assert.deepStrictEqual(noData, { success: false, exception: 'no data', result: null }, 'Solax-style query failure when nothing is fresh');
 
@@ -207,7 +213,8 @@ const feed = require('./feed');
   assert.deepStrictEqual(feed.parseJsonOrForm('application/x-www-form-urlencoded', 'deviceSn=X'), { deviceSn: 'X' });
   assert.throws(() => feed.parseJsonOrForm('application/json', '[1]'), /JSON object/);
   assert.strictEqual(feed.feedConfig({ FEED_PLANTS: '', FEED_SOLAX_POWER_UNIT: 'MW', FEED_SOLAX_EMPTY: 'x', FEED_SOLAX_TIMEZONE: 'Mars/Olympus' }).solax.powerUnit, 'W', 'bad knobs fall back');
-  assert.deepStrictEqual(feed.feedConfig({ FEED_PLANTS: '' }).solax, { powerUnit: 'W', empty: 'null', timeZone: 'Europe/Zagreb' });
+  assert.deepStrictEqual(feed.feedConfig({ FEED_PLANTS: '' }).solax, { powerUnit: 'W', empty: 'null', timeZone: 'Etc/GMT-2' });
+  assert.strictEqual(feed.feedConfig({ FEED_PLANTS: '', FEED_SOLAX_TIMEZONE: 'Europe/Zagreb' }).solax.timeZone, 'Europe/Zagreb', 'the zone stays switchable');
 }
 
 /* ── Feed request log: every poll is written to the store once the response
@@ -314,6 +321,17 @@ assert.strictEqual(records[0].Temperatura, 20.1);
 
 const series = seriesFor(records, 'PM2_5');
 assert.strictEqual(series.length, 6);
+
+// Mars2 reads fromUTC/toUTC as local time; the ingest asks for 2 h more on
+// each side and keeps only the rows inside the range it wanted.
+assert.strictEqual(MARS2_WINDOW_SLACK_MS, 7200000);
+{
+  const from = new Date('2026-11-12T18:00:00Z');
+  const to = new Date('2026-11-12T20:00:00Z');
+  const rows = [1794506399, 1794506400, 1794510000, 1794513600, 1794513601].map(timestamp => ({ source: 'SOLAXBIOS', timestamp }));
+  assert.deepStrictEqual(clipRows(rows, from, to).map(r => r.timestamp), [1794506400, 1794510000, 1794513600], 'both bounds inclusive, outside dropped');
+  assert.deepStrictEqual(clipRows([], from, to), []);
+}
 
 const result = forecast(series, 2);
 assert.ok(result.points.length >= 2);
@@ -575,7 +593,7 @@ async function checkNoJsonFallback() {
     const freshAfter = await get('/freshness');
     assert.strictEqual(freshAfter.body.feed.authFailures, 2, 'bad password and anonymous call are counted');
     assert.ok(freshAfter.body.feed.lastTokenAt, 'token issuance is recorded');
-    assert.deepStrictEqual(freshAfter.body.feed.dialects, { solax: { powerUnit: 'W', empty: 'null', timeZone: 'Europe/Zagreb' }, solarman: true });
+    assert.deepStrictEqual(freshAfter.body.feed.dialects, { solax: { powerUnit: 'W', empty: 'null', timeZone: 'Etc/GMT-2' }, solarman: true });
 
     // Solax dialect: credential in the query string, Solax-shaped errors.
     const solaxPath = '/feed/solax/proxyApp/proxy/api/getRealtimeInfo.do';

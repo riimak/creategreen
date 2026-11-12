@@ -217,9 +217,12 @@ function feedConfig(env = process.env) {
       // 0, or the field left out. Switchable without a code change because the
       // Mars2 deserializer is a black box.
       empty: oneOf(env.FEED_SOLAX_EMPTY, ['null', 'zero', 'omit'], 'null'),
-      // uploadTime is a naive "yyyy-MM-dd HH:mm:ss"; Mars2 showed Solax's value
-      // unshifted as "Zadnje očitanje", i.e. it reads it as local time.
-      timeZone: validTimeZone(env.FEED_SOLAX_TIMEZONE, 'Europe/Zagreb'),
+      // uploadTime is a naive "yyyy-MM-dd HH:mm:ss". Mars2 stamps the reading
+      // with it assuming the fixed UTC+2 that Solax Cloud sends for SOLAXBIOS
+      // (measured 2026-11-12: Europe/Zagreb, UTC+1 in winter, came out one
+      // hour early in CustomDataExport while SOLAXBIOS was right). Etc/GMT-2
+      // is the IANA name for UTC+2 all year; Europe/Zagreb only in summer.
+      timeZone: validTimeZone(env.FEED_SOLAX_TIMEZONE, 'Etc/GMT-2'),
     },
   };
 }
@@ -439,7 +442,7 @@ function formatNaiveTime(date, timeZone) {
  * query-level failure Solax itself uses (HTTP 200, success:false).
  */
 function formatSolaxRealtime(plant, current, options = {}) {
-  const { powerUnit = 'W', empty = 'null', timeZone = 'Europe/Zagreb' } = options;
+  const { powerUnit = 'W', empty = 'null', timeZone = 'Etc/GMT-2' } = options;
   if (!current.timestamp) {
     return { success: false, exception: 'no data', result: null };
   }

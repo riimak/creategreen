@@ -129,6 +129,18 @@ function fmtMars2Utc(d) {
   return d.toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
 }
 
+// Mars2 reads fromUTC/toUTC as Croatian local time, so a request that ends
+// "now" comes back without the newest hour (two in summer). Every request is
+// widened by this much on both sides and the rows are clipped to the range
+// that was asked for, which is correct whichever way Mars2 reads the bounds.
+const MARS2_WINDOW_SLACK_MS = 2 * 3600000;
+
+function clipRows(rows, fromDate, toDate) {
+  const lo = Math.floor(fromDate.getTime() / 1000);
+  const hi = Math.floor(toDate.getTime() / 1000);
+  return rows.filter(r => r.timestamp >= lo && r.timestamp <= hi);
+}
+
 function parseMars2Payload(raw, source) {
   const fields = fieldsFor(source);
   let text = raw;
@@ -152,11 +164,13 @@ async function loadFromMars2Range(apiBase, username, password, source, from, to)
   if (!Number.isFinite(fromDate.getTime()) || !Number.isFinite(toDate.getTime())) {
     throw new Error(`invalid Mars2 range for ${source}`);
   }
+  const reqFrom = new Date(fromDate.getTime() - MARS2_WINDOW_SLACK_MS);
+  const reqTo = new Date(toDate.getTime() + MARS2_WINDOW_SLACK_MS);
   const url = `${apiBase}/api/public/CustomDataExport/BIOS/${encodeURIComponent(source)}`
-    + `?fromUTC=${encodeURIComponent(fmtMars2Utc(fromDate))}&toUTC=${encodeURIComponent(fmtMars2Utc(toDate))}`;
+    + `?fromUTC=${encodeURIComponent(fmtMars2Utc(reqFrom))}&toUTC=${encodeURIComponent(fmtMars2Utc(reqTo))}`;
   if (ingestLogEnabled()) {
     console.log(
-      `${new Date().toISOString()} prediction mars2: GET CustomDataExport station=${source} fromUTC=${fmtMars2Utc(fromDate)} toUTC=${fmtMars2Utc(toDate)} host=${mars2Host(apiBase)}`,
+      `${new Date().toISOString()} prediction mars2: GET CustomDataExport station=${source} fromUTC=${fmtMars2Utc(reqFrom)} toUTC=${fmtMars2Utc(reqTo)} (asked ${fmtMars2Utc(fromDate)} .. ${fmtMars2Utc(toDate)}, widened 2 h each side, rows clipped) host=${mars2Host(apiBase)}`,
     );
   }
   const res = await fetchWithDeadline(url, { headers: { Authorization: `Bearer ${token}` } }, `Mars2 export for ${source}`);
@@ -180,7 +194,7 @@ async function loadFromMars2Range(apiBase, username, password, source, from, to)
     }
     return [];
   }
-  const rows = parseMars2Payload(raw, source);
+  const rows = clipRows(parseMars2Payload(raw, source), fromDate, toDate);
   if (rows.length === 0 && ingestLogEnabled()) {
     const trimmed = String(raw).replace(/^"|"$/g, '');
     if (!trimmed.includes('!')) {
@@ -275,4 +289,6 @@ module.exports = {
   loadRecords,
   loadFromMars2Range,
   seriesFor,
+  clipRows,
+  MARS2_WINDOW_SLACK_MS,
 };

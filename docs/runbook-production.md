@@ -55,10 +55,13 @@ last and only runs when the other four succeed.
    characters). `ALERT_FEED_SILENT_MINUTES` is `15` in the committed
    dashboard values (Mars2 polls every 5 minutes; a CI variable of the same
    name overrides it, `0` disables the rule).
-   After the first live poll compare the counter's "Zadnje očitanje"
-   with our sample time; if it is off by the UTC offset set
-   `FEED_SOLAX_TIMEZONE=UTC` (and `FEED_SOLAX_POWER_UNIT=kW` if values are
-   1000× too large, `FEED_SOLAX_EMPTY=zero|omit` if nothing is read at all).
+   `uploadTime` is sent in fixed UTC+2 (`FEED_SOLAX_TIMEZONE=Etc/GMT-2`),
+   the convention Mars2 applies to Solax readings; with `Europe/Zagreb` the
+   winter export timestamps were one hour early. Check after a change: the
+   `CustomDataExport` row timestamp must equal our sample time
+   (`/prediction/feed/plants/<code>/current` → `timestamp`).
+   `FEED_SOLAX_POWER_UNIT=kW` if values are 1000× too large,
+   `FEED_SOLAX_EMPTY=zero|omit` if nothing is read at all.
    Contract: `docs/mars2/feed-contract.md`; admin model:
    `docs/mars2/admin-recon.md`.
 4. **Zabbix** (DevOps): web scenario on `https://bios-multilevel.barrage.net/health`

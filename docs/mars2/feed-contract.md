@@ -208,10 +208,13 @@ GET /prediction/feed/solax/proxyApp/proxy/api/getRealtimeInfo.do?tokenId=<FEED_A
   it shows for `SOLAXBIOS`); `FEED_SOLAX_POWER_UNIT=kW` switches if a live
   poll proves otherwise.
 - `uploadTime` is the newest sample used, as a naive wall-clock time in
-  `FEED_SOLAX_TIMEZONE` (default `Europe/Zagreb`, because Mars2 displays
-  Solax's naive `uploadTime` unshifted). Verify on the first live poll that
-  "Zadnje očitanje" on the counter equals our sample time; if it is off by
-  the UTC offset set `FEED_SOLAX_TIMEZONE=UTC`.
+  `FEED_SOLAX_TIMEZONE`, default **`Etc/GMT-2` = fixed UTC+2**. Mars2 stamps
+  the stored reading with `uploadTime` assuming the fixed UTC+2 that Solax
+  Cloud sends for `SOLAXBIOS`. Measured 2026-11-12 with `Europe/Zagreb`
+  (UTC+1 in winter): our SOKO46 sample of 21:16:49Z (`consumeenergy`
+  36851.72) appeared in `CustomDataExport` as 20:16:49Z with the same value,
+  while the SOLAXBIOS rows matched daylight; with UTC+2 the export timestamp
+  equals the sample time. In summer `Europe/Zagreb` and `Etc/GMT-2` agree.
 - Missing quantities are `null` (Solax itself sends `powerdc3: null`);
   `FEED_SOLAX_EMPTY=zero|omit` if Mars2's deserializer objects.
 - `inverterType` is `"0"` (there is no Solax inverter), `inverterStatus`

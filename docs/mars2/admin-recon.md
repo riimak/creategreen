@@ -309,6 +309,18 @@ Findings from the first live run:
   only places that show the truth are the export itself and our own side:
   `GET /prediction/freshness` → `feed.requestsTotal`, `feed.lastRequestAt`,
   `feed.recent`, and the dashboard access log (`GET <path> -> <status>`).
+- **Two time conventions, both constant (measured 2026-11-12):**
+  (a) `CustomDataExport` reads `fromUTC`/`toUTC` as Croatian local time, so
+  a window ending "now" lacks the newest hour (two in summer) and a request
+  for `[F, T]` returns `[F-1h, T-1h]`; every client of ours (prediction
+  ingest, partner tool) therefore asks for 2 h more on each side and clips
+  the rows to the window it wanted. (b) The Solax dialect stamps a reading
+  with `uploadTime` read as fixed UTC+2 (what Solax Cloud sends for
+  `SOLAXBIOS`); a naive time in `Europe/Zagreb` came out one hour early in
+  winter, so the feed sends `uploadTime` in `Etc/GMT-2`. Proof: our SOKO46
+  sample 21:16:49Z (`consumeenergy` 36851.72) was exported as 20:16:49Z with
+  the same value; SOLAXBIOS rows match daylight (production 06:25Z–15:00Z
+  against sunrise 05:55Z / sunset 15:25Z).
 - `CounterCode` matching is case-insensitive in practice (PascalCase codes,
   camelCase JSON — values arrive).
 - A template made from `SRDFARETLA` keeps the `Solax` category and the flow.

@@ -42,6 +42,27 @@ write_file($dir, 'solaxbios-monthly-report.txt',
     "SOLAXBIOS;1772409600;5,0;20,0;4,0;0,5;0,3\n",
 );
 
+# A vendor plant published through the BIOS feed (same 15-column layout),
+# as bios-export.sh wrote it on 2026-11-12.
+write_file($dir, 'soko46-measurements.txt',
+    "SOKO46;TIMESTAMP;Grid.power.total;Grid.energy.toGrid.total;Grid.energy.fromGrid.total;BMS.energy.SOC;Inverter.Meter2.AC.power.total;Inverter.AC.EPS.power.R;Inverter.AC.EPS.power.S;Inverter.AC.EPS.power.T;Inverter.DC.Battery.power.total;Inverter.DC.PV.power.MPPT1;Inverter.DC.PV.power.MPPT2;Inverter.DC.PV.power.MPPT3;Inverter.DC.PV.power.MPPT4;Inverter.AC.power.total;Inverter.AC.energy.out.daily\n",
+    "SOKO46;1794504619;-9,262;16831,66;36829,68;;;;;;;;;;;0;27,32\n",
+    "SOKO46;1794504920;-14,734;16831,66;36830,82;;;;;;;;;;;0;27,32\n",
+);
+write_file($dir, 'soko46-monthly-report.txt',
+    "SOKO46;TIMESTAMP;Effective AC Output Time (min);Total Effective AC Output Time (min);Inverter output (kWh);Exported energy (kWh);Imported energy (kWh)\n",
+    "SOKO46;1794441600;0;0;27,32;0,0;19,71\n",
+);
+
+# A station nobody listed in the module (mixed-case Mars2 code), solar layout.
+write_file($dir, 'solarman-measurements.txt',
+    "Solarman;TIMESTAMP;Grid.power.total;Grid.energy.toGrid.total;Grid.energy.fromGrid.total;BMS.energy.SOC;Inverter.Meter2.AC.power.total;Inverter.AC.EPS.power.R;Inverter.AC.EPS.power.S;Inverter.AC.EPS.power.T;Inverter.DC.Battery.power.total;Inverter.DC.PV.power.MPPT1;Inverter.DC.PV.power.MPPT2;Inverter.DC.PV.power.MPPT3;Inverter.DC.PV.power.MPPT4;Inverter.AC.power.total;Inverter.AC.energy.out.daily\n",
+    "Solarman;1794504619;-1,5;10;20;;;;;;;;;;;3,25;7\n",
+);
+
+# Not an export file: must be ignored by read_all.
+write_file($dir, 'notes-measurements.txt', "just a note\n");
+
 
 # ── basics ───────────────────────────────────────────────────────────
 
@@ -50,8 +71,23 @@ isa_ok($cg, 'BIOS::CreateGreen');
 
 is_deeply(
     [ $cg->station_ids ],
-    [ qw(OS1BIOS OS2BIOS SOLAXBIOS) ],
-    'station_ids',
+    [ qw(OS1BIOS OS2BIOS SOLAXBIOS SOKO46 SOKOBAZEN VETINST) ],
+    'station_ids: two meteo stations and four solar plants',
+);
+is_deeply(
+    [ $cg->solar_station_ids ],
+    [ qw(SOLAXBIOS SOKO46 SOKOBAZEN VETINST) ],
+    'solar_station_ids',
+);
+is_deeply(
+    [ $cg->fields_for('SOKO46') ],
+    [ $cg->solax_fields ],
+    'fields_for(SOKO46) = solax layout',
+);
+is_deeply(
+    [ $cg->fields_for('Solarman') ],
+    [ $cg->solax_fields ],
+    'fields_for(unknown station) = solax layout',
 );
 
 is(scalar $cg->meteo_fields,  21, '21 meteo fields');
@@ -164,6 +200,30 @@ subtest 'report' => sub {
         [ 6.0, 4.0 ],
         'column extraction',
     );
+
+    # the same reader for a vendor plant's report
+    my $soko = $cg->read_monthly_report('SOKO46');
+    is($soko->count, 1, 'SOKO46 report: 1 day-row');
+    my ($day) = $soko->records;
+    is($day->{station_id},          'SOKO46', 'SOKO46 report: station_id');
+    is($day->{inverter_output_kwh}, 27.32,    'SOKO46 report: inverter output');
+    is($day->{imported_energy_kwh}, 19.71,    'SOKO46 report: imported');
+    is($day->{exported_energy_kwh}, 0,        'SOKO46 report: exported 0,0 -> 0');
+};
+
+
+# ── vendor plant measurements ────────────────────────────────────────
+
+subtest 'SOKO46' => sub {
+    my $rs = $cg->read_measurements('SOKO46');
+    is($rs->count, 2, '2 records');
+    is(scalar $rs->field_names, 15, 'solar layout, 15 fields');
+    my $r = ($rs->records)[1];
+    is($r->{station_id},                   'SOKO46', 'station_id');
+    is($r->{Grid_power_total},             -14.734,  'grid power (import negative)');
+    is($r->{Grid_energy_fromGrid_total},   36830.82, 'cumulative import');
+    is($r->{Inverter_AC_energy_out_daily}, 27.32,    'daily yield');
+    is($r->{BMS_energy_SOC},               undef,    'battery column empty for Huawei');
 };
 
 
@@ -214,6 +274,21 @@ subtest 'read_all' => sub {
     ok(exists $all->{SOLAXBIOS},        'has SOLAXBIOS');
     ok(exists $all->{SOLAXBIOS_REPORT}, 'has SOLAXBIOS_REPORT');
     is($all->{OS1BIOS}->count, 3,       'OS1BIOS count');
+
+    # files of other stations are discovered, keyed by the ID in their header
+    ok(exists $all->{SOKO46},        'has SOKO46 (vendor plant)');
+    ok(exists $all->{SOKO46_REPORT}, 'has SOKO46_REPORT');
+    is($all->{SOKO46}->count, 2,     'SOKO46 count');
+    is($all->{SOKO46_REPORT}->count, 1, 'SOKO46_REPORT count');
+    ok(exists $all->{Solarman},      'has Solarman (not in station_ids, mixed case kept)');
+    is(($all->{Solarman}->records)[0]->{Inverter_AC_power_total}, 3.25, 'Solarman parsed with the solar layout');
+    ok(!exists $all->{SOKOBAZEN},    'no entry for a station without a file');
+    ok(!(grep { /notes/i } keys %$all), 'a stray *-measurements.txt without an export header is ignored');
+    is_deeply(
+        [ grep { !/_REPORT$/ } sort keys %$all ],
+        [ sort qw(OS1BIOS OS2BIOS SOLAXBIOS SOKO46 Solarman) ],
+        'exactly the stations that have files',
+    );
 };
 
 

@@ -379,13 +379,13 @@ OS1_EXPECTED_HEADER="OS1BIOS;TIMESTAMP;Temperatura;Relativna vlaznost;Brzina vje
 OS2_EXPECTED_HEADER="OS2BIOS;TIMESTAMP;Temperatura;Relativna vlaznost;Brzina vjetra;Smjer vjetra;Suncevo zracenje;UV indeks;Tlak zraka;Kisa;CO;CO2;NO;NO2;O3;SO2;Lebdece cestice PM1;Lebdece cestice PM2.5;Lebdece cestice PM10;eaqi-traffic;CAQI;Buka;cumulative"
 SOLAX_EXPECTED_HEADER="SOLAXBIOS;TIMESTAMP;Grid.power.total;Grid.energy.toGrid.total;Grid.energy.fromGrid.total;BMS.energy.SOC;Inverter.Meter2.AC.power.total;Inverter.AC.EPS.power.R;Inverter.AC.EPS.power.S;Inverter.AC.EPS.power.T;Inverter.DC.Battery.power.total;Inverter.DC.PV.power.MPPT1;Inverter.DC.PV.power.MPPT2;Inverter.DC.PV.power.MPPT3;Inverter.DC.PV.power.MPPT4;Inverter.AC.power.total;Inverter.AC.energy.out.daily"
 
-# Source the headers from bios-export.sh
-declare -A HEADERS
-eval "$(grep '^HEADERS\[' "$SCRIPT_DIR/bios-export.sh")"
+# Source the layout headers from bios-export.sh (stations map onto them via stations.conf)
+declare -A LAYOUT_HEADERS
+eval "$(grep '^LAYOUT_HEADERS\[' "$SCRIPT_DIR/bios-export.sh")"
 
-SCRIPT_OS1_HEADER="OS1BIOS;TIMESTAMP;${HEADERS[OS1BIOS]}"
-SCRIPT_OS2_HEADER="OS2BIOS;TIMESTAMP;${HEADERS[OS2BIOS]}"
-SCRIPT_SOLAX_HEADER="SOLAXBIOS;TIMESTAMP;${HEADERS[SOLAXBIOS]}"
+SCRIPT_OS1_HEADER="OS1BIOS;TIMESTAMP;${LAYOUT_HEADERS[meteo]}"
+SCRIPT_OS2_HEADER="OS2BIOS;TIMESTAMP;${LAYOUT_HEADERS[meteo]}"
+SCRIPT_SOLAX_HEADER="SOLAXBIOS;TIMESTAMP;${LAYOUT_HEADERS[solar]}"
 
 assert_eq "OS1BIOS header matches PMF NS spec" \
     "$OS1_EXPECTED_HEADER" "$SCRIPT_OS1_HEADER"
@@ -627,6 +627,62 @@ bash "$SCRIPT_DIR/bios-export.sh" report --month "2026/03" 2>/dev/null
 BAD_RC=$?
 if [ "$BAD_RC" -ne 0 ]; then ok "report with YYYY/MM format exits non-zero"
 else fail "report with YYYY/MM format exits non-zero"; fi
+
+
+# ── 22. STATION CONFIGURATION (stations.conf) ────────────────────────
+note "── Section 22: stations.conf ──"
+
+STATIONS_OUT=$(bash "$SCRIPT_DIR/bios-export.sh" stations 2>/dev/null)
+assert_eq "stations: two meteo stations and four solar plants are active by default" \
+    "OS1BIOS OS2BIOS SOLAXBIOS SOKO46 SOKOBAZEN VETINST" "$(echo "$STATIONS_OUT" | awk -F'\t' '{print $1}' | tr '\n' ' ' | sed 's/ $//')"
+assert_contains "stations: SOLAXBIOS has the solar layout (15 columns)" \
+    $'SOLAXBIOS\tsolar\t15 columns' "$STATIONS_OUT"
+assert_contains "stations: OS2BIOS has the meteo layout (21 columns)" \
+    $'OS2BIOS\tmeteo\t21 columns' "$STATIONS_OUT"
+for sid in SOKO46 SOKOBAZEN VETINST; do
+    assert_contains "stations: ${sid} (vendor plant via the BIOS feed) has the solar layout (15 columns)" \
+        "${sid}"$'\tsolar\t15 columns' "$STATIONS_OUT"
+done
+assert_eq "stations: the unmapped Dvorana Kulturnog centra code stays disabled" \
+    "" "$(echo "$STATIONS_OUT" | awk -F'\t' '$1 == "Solarman"')"
+# bios-cron.sh produces one monthly report per solar-layout station.
+assert_eq "cron: one monthly report per solar-layout station (4)" \
+    "4" "$(echo "$STATIONS_OUT" | awk -F'\t' '$2 == "solar"' | wc -l | tr -d ' ')"
+
+# A custom file: comments, blank lines, CRLF and a new solar plant.
+printf '# comment\r\n\r\nOS2BIOS|meteo\r\nSOKO46|solar   # trailing comment\r\n' > "$WORK/stations.conf"
+CUSTOM_OUT=$(BIOS_STATIONS_FILE="$WORK/stations.conf" bash "$SCRIPT_DIR/bios-export.sh" stations 2>/dev/null)
+assert_eq "custom stations.conf: comments, CRLF and blanks are ignored" \
+    "OS2BIOS SOKO46" "$(echo "$CUSTOM_OUT" | awk -F'\t' '{print $1}' | tr '\n' ' ' | sed 's/ $//')"
+assert_contains "custom stations.conf: new plant gets the solar layout" \
+    $'SOKO46\tsolar\t15 columns' "$CUSTOM_OUT"
+
+# Unknown layout is a hard error.
+printf 'X|wind\n' > "$WORK/bad.conf"
+BAD_OUT=$(BIOS_STATIONS_FILE="$WORK/bad.conf" bash "$SCRIPT_DIR/bios-export.sh" stations 2>&1)
+BAD_RC=$?
+if [ "$BAD_RC" -ne 0 ]; then ok "unknown layout in stations.conf exits non-zero"
+else fail "unknown layout in stations.conf exits non-zero"; fi
+assert_contains "unknown layout names the offending station" "unknown layout 'wind' for X" "$BAD_OUT"
+
+# Unknown station on the command line is rejected before any network call.
+UNK_OUT=$(bash "$SCRIPT_DIR/bios-export.sh" fetch --from "2026-03-01 00:00:00" --to "2026-03-02 00:00:00" --station NOPE 2>&1)
+UNK_RC=$?
+if [ "$UNK_RC" -ne 0 ]; then ok "fetch --station NOPE exits non-zero"
+else fail "fetch --station NOPE exits non-zero"; fi
+assert_contains "fetch --station NOPE lists the known stations" "Known stations" "$UNK_OUT"
+
+# The monthly report accepts any solar-layout station and refuses meteo ones,
+# both decided before authentication.
+METEO_OUT=$(bash "$SCRIPT_DIR/bios-export.sh" report --month 2026-03 --station OS1BIOS 2>&1)
+assert_contains "report refuses a meteo-layout station" "needs a solar-layout station" "$METEO_OUT"
+SOLAR_OUT=$(BIOS_STATIONS_FILE="$WORK/stations.conf" BIOS_API_BASE="http://127.0.0.1:9" bash "$SCRIPT_DIR/bios-export.sh" report --month 2026-03 --station SOKO46 2>&1)
+if echo "$SOLAR_OUT" | grep -qE "Token request failed|Set BIOS_USERNAME|Authenticating"; then ok "report accepts a solar-layout station from stations.conf (fails only at authentication)"
+else fail "report accepts a solar-layout station from stations.conf (fails only at authentication)"; note "got: $SOLAR_OUT"; fi
+
+# bios-cron.sh must stay parseable
+bash -n "$SCRIPT_DIR/bios-cron.sh" 2>/dev/null
+assert_eq "bios-cron.sh passes bash -n syntax check" "0" "$?"
 
 
 # ═══════════════════════════════════════════════════════════════════════

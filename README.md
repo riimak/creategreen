@@ -33,7 +33,8 @@ bash bios-export.sh fetch --from "2026-03-01 00:00:00" --to "2026-03-02 00:00:00
 .env.example                    credentials template (tracked)
 .env                            your credentials (NOT tracked in git)
 bios-export.sh                  fetch script (producer)
-bios-cron.sh                    daily cron wrapper (72 h window)
+bios-cron.sh                    daily cron wrapper (72 h window, one monthly report per solar station)
+stations.conf                   the stations to pull: one "ID|layout" line per station
 test_bios_export.sh             bash test suite for the export script
 lib/
   BIOS/
@@ -48,12 +49,39 @@ worker/                         Cloudflare Worker API proxy
   worker.js                     auth + parse + CORS proxy
   wrangler.toml                 Worker config
   README.md                     Worker deploy instructions
-os1bios-measurements.txt        column spec -- meteo station 1
+os1bios-measurements.txt        column spec -- meteo stations (OS1BIOS, OS2BIOS)
 os2bios-measurements.txt        column spec -- meteo station 2
-solaxbios-measurements.txt      column spec -- FNE (solar inverter)
-solaxbios-monthly-report.txt    column spec -- monthly report
+solaxbios-measurements.txt      column spec -- solar plants (SOLAXBIOS, SOKO46, SOKOBAZEN, VETINST)
+solaxbios-monthly-report.txt    column spec -- monthly report (one per solar plant)
 Mars2 REST API.html             API reference (Redoc)
 ```
+
+
+## Stations
+
+`stations.conf` lists what is pulled from Mars2 (`CustomDataExport/BIOS/<ID>`),
+one `ID|layout` line per station; `bash bios-export.sh stations` prints the
+active list.
+
+| Station     | Layout | What it is                                   | Status |
+|-------------|--------|----------------------------------------------|--------|
+| `OS1BIOS`   | meteo  | meteo station 1                              | Mars2 has returned no rows since 2026-04-29; kept until the source is fixed or retired |
+| `OS2BIOS`   | meteo  | meteo station 2                              | active |
+| `SOLAXBIOS` | solar  | BIOS CREATEGREEN (Solax inverter)            | active |
+| `SOKO46`    | solar  | SC Soko 46 kWp (Huawei)                      | active since 2026-11-12 |
+| `SOKOBAZEN` | solar  | SC SOKO Bazen 275.4 kWp (Huawei)             | active since 2026-11-12 |
+| `VETINST`   | solar  | Veterinarski Institut (Solis)                | active since 2026-11-12 |
+| `Solarman`  | solar  | Dvorana Kulturnog centra (Solarman logger)   | disabled in `stations.conf`: Mars2 exports no columns for it yet |
+
+All solar stations use the same 15-column layout (`solaxbios-measurements.txt`);
+the station ID in column 1 and in the file name tells them apart. Columns a
+vendor does not provide (battery, EPS, per-MPPT DC power) stay empty, as they
+do for `SOLAXBIOS`. The Huawei and Solis plants are published to Mars2 every
+5 minutes through the BIOS feed API.
+
+A station that returns no rows for the whole window is logged as a warning
+(its file keeps only the header); when every requested station is empty,
+`fetch` exits 2 so the cron log shows it.
 
 
 ## 1. Fetching data
@@ -61,7 +89,7 @@ Mars2 REST API.html             API reference (Redoc)
 ### Fetch measurements
 
 ```sh
-# all three stations, one day
+# every station in stations.conf, one day
 bash bios-export.sh fetch \
     --from "2026-03-01 00:00:00" \
     --to   "2026-03-02 00:00:00"
@@ -82,7 +110,8 @@ bash bios-export.sh fetch \
 ### Generate the monthly report
 
 ```sh
-bash bios-export.sh report --month 2026-03
+bash bios-export.sh report --month 2026-03                     # SOLAXBIOS
+bash bios-export.sh report --month 2026-03 --station SOKO46    # any solar station
 ```
 
 ### Output files
@@ -94,18 +123,25 @@ All files are written to `./output/` (override with `-o`):
 | `os1bios-measurements.txt`        | OS1BIOS   | 21      |
 | `os2bios-measurements.txt`        | OS2BIOS   | 21      |
 | `solaxbios-measurements.txt`      | SOLAXBIOS | 15      |
+| `soko46-measurements.txt`         | SOKO46    | 15      |
+| `sokobazen-measurements.txt`      | SOKOBAZEN | 15      |
+| `vetinst-measurements.txt`        | VETINST   | 15      |
 | `solaxbios-monthly-report.txt`    | SOLAXBIOS | 5       |
+| `soko46-monthly-report.txt`       | SOKO46    | 5       |
+| `sokobazen-monthly-report.txt`    | SOKOBAZEN | 5       |
+| `vetinst-monthly-report.txt`      | VETINST   | 5       |
 
 
 ## 2. Automated daily export (cron)
 
 Per the CREATEGREEN data contract, each file contains the **last 72
 hours** of measurements and is regenerated **every day at 00:00 UTC**.
-The monthly report for the current month is also regenerated daily.
+The monthly report for the current month is also regenerated daily,
+one per solar station.
 
 `bios-cron.sh` handles this.  It computes the 72-hour window
-automatically and calls `bios-export.sh` for all stations plus
-the report.
+automatically and calls `bios-export.sh` for every station in
+`stations.conf` plus the reports.
 
 ### Install the cron job
 
@@ -152,8 +188,14 @@ After each run, `BIOS_OUTPUT_DIR` contains:
 ```
 os1bios-measurements.txt        last 72 h, meteo station 1
 os2bios-measurements.txt        last 72 h, meteo station 2
-solaxbios-measurements.txt      last 72 h, solar inverter
+solaxbios-measurements.txt      last 72 h, BIOS CREATEGREEN (Solax)
+soko46-measurements.txt         last 72 h, SC Soko 46 kWp (Huawei)
+sokobazen-measurements.txt      last 72 h, SC SOKO Bazen 275.4 kWp (Huawei)
+vetinst-measurements.txt        last 72 h, Veterinarski Institut (Solis)
 solaxbios-monthly-report.txt    current month, one row per day
+soko46-monthly-report.txt       current month, one row per day
+sokobazen-monthly-report.txt    current month, one row per day
+vetinst-monthly-report.txt      current month, one row per day
 ```
 
 These files are overwritten on each run.  PMF NS fetches them once
@@ -214,7 +256,7 @@ Every file follows the same conventions:
 | 20 | Buka                   | Buka                 |
 | 21 | cumulative             | cumulative           |
 
-### SOLAXBIOS (FNE / solar inverter, 15 columns)
+### SOLAXBIOS, SOKO46, SOKOBAZEN, VETINST (solar plants, 15 columns)
 
 | #  | File header                       | Perl key                         |
 |----|-----------------------------------|----------------------------------|
@@ -268,10 +310,11 @@ for my $rec ($os1->records) {
 }
 ```
 
-### Read the solar inverter
+### Read a solar plant
 
 ```perl
 my $solax = $cg->read_measurements('SOLAXBIOS');
+my $soko  = $cg->read_measurements('SOKO46');     # same 15 fields
 
 for my $rec ($solax->records) {
     printf "%d  grid=%s  pv1=%s  ac=%s\n",
@@ -285,7 +328,8 @@ for my $rec ($solax->records) {
 ### Read the monthly report
 
 ```perl
-my $rpt = $cg->read_monthly_report;
+my $rpt  = $cg->read_monthly_report;            # SOLAXBIOS
+my $soko = $cg->read_monthly_report('SOKO46');  # any solar station
 
 for my $day ($rpt->records) {
     printf "%d  inv=%.1f kWh  exp=%.2f  imp=%.2f\n",
@@ -326,10 +370,11 @@ close $fh;
 
 ```perl
 my $all = $cg->read_all;
-# $all->{OS1BIOS}          -- ResultSet
-# $all->{OS2BIOS}          -- ResultSet
-# $all->{SOLAXBIOS}        -- ResultSet
-# $all->{SOLAXBIOS_REPORT} -- ResultSet
+# one entry per file found in the directory:
+# $all->{OS1BIOS}, $all->{OS2BIOS}                       -- meteo ResultSets
+# $all->{SOLAXBIOS}, $all->{SOKO46}, $all->{SOKOBAZEN},
+# $all->{VETINST}                                        -- solar ResultSets
+# $all->{SOLAXBIOS_REPORT}, $all->{SOKO46_REPORT}, ...  -- monthly reports
 ```
 
 

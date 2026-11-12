@@ -58,7 +58,28 @@ A station that returns no rows for the whole window is logged as a warning
 `solar` station (`report --month YYYY-MM --station SOKO46`) and
 `bios-cron.sh` produces one per solar station.
 
-Mars2 note (observed 2026-11-12 evening): the export currently interprets
-`fromUTC`/`toUTC` as Croatian local time, so a window ending "now" comes back
-without the newest hour. This is on the Mars2 side; the tool passes the
-parameters through unchanged.
+## File format (what the partner receives)
+
+Measurement files: first line is the header (`ID;TIMESTAMP;<column names>`),
+then one record per line, `ID;UNIX_TIMESTAMP;v1;...;vN`, fields separated by
+`;`, unix EOL (`0x0a`), decimal comma, empty field = no measurement, ASCII.
+Values are passed through from Mars2 untouched. The file holds exactly the
+window asked for (`--from` .. `--to`, both inclusive, UTC): Mars2 has been
+seen to read `fromUTC`/`toUTC` as Croatian local time, so the tool requests
+two hours more on each side and drops the rows outside the window.
+
+Monthly report: one row per UTC day, timestamp = that day at 00:00:00 UTC,
+rows outside the month are ignored. Columns:
+
+| Column | Rule |
+| --- | --- |
+| Effective AC Output Time (min) | minutes with `Inverter.AC.power.total` > 0, counted between consecutive samples at most 10 min apart; one decimal |
+| Total Effective AC Output Time (min) | running total of the printed day values; one decimal |
+| Inverter output (kWh) | last `Inverter.AC.energy.out.daily` of the day; two decimals; empty when the day has no value (Mars2 writes the SOLAXBIOS daily value once a day at 22:00 UTC) |
+| Exported energy (kWh) | increase of `Grid.energy.toGrid.total` over the day; two decimals |
+| Imported energy (kWh) | increase of `Grid.energy.fromGrid.total` over the day; two decimals |
+
+The two energy columns come from cumulative meter registers: the increase is
+summed between consecutive samples and a decrease is treated as a meter
+reset and not counted (SOLAXBIOS reset `fromGrid` on 2026-11-02 and `toGrid`
+on 2026-11-06; a plain last-minus-first would print -815 and -9013 kWh).

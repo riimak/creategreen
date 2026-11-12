@@ -51,147 +51,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-# ── extract parse_response() as a standalone helper ──────────────────
-# We source only the python parsing logic from bios-export.sh so tests
-# stay decoupled from the network/auth layer.
-cat > "$WORK/parse.py" << 'PYEOF'
-#!/usr/bin/env python3
-"""Standalone record parser — same logic as bios-export.sh parse_response()."""
-import sys, re
-
-raw = sys.stdin.read().strip()
-if raw.startswith('"') and raw.endswith('"'):
-    raw = raw[1:-1]
-
-parts = raw.split('!', 1)
-if len(parts) < 2:
-    sys.exit(0)
-
-station_id = parts[0]
-data_blob  = parts[1]
-records    = re.split(r'0xa|\n', data_blob)
-
-for rec in records:
-    rec = rec.strip()
-    if not rec:
-        continue
-    print(f'{station_id};{rec}')
-PYEOF
-
-cat > "$WORK/report.py" << 'PYEOF'
-#!/usr/bin/env python3
-"""Standalone monthly-report aggregator — same logic as bios-export.sh cmd_report()."""
-import sys, re
-from datetime import datetime, timezone
-from collections import defaultdict
-
-raw = sys.stdin.read().strip()
-if raw.startswith('"') and raw.endswith('"'):
-    raw = raw[1:-1]
-
-parts = raw.split('!', 1)
-if len(parts) < 2:
-    print('No data', file=sys.stderr)
-    sys.exit(1)
-
-station_id = parts[0]
-data_blob  = parts[1]
-records    = re.split(r'0xa|\n', data_blob)
-
-IDX_TO_GRID   = 1
-IDX_FROM_GRID = 2
-IDX_AC_POWER  = 13
-IDX_AC_ENERGY = 14
-
-def parse_val(s):
-    s = s.strip()
-    if not s:
-        return None
-    try:
-        return float(s.replace(',', '.'))
-    except ValueError:
-        return None
-
-days = defaultdict(list)
-for rec in records:
-    rec = rec.strip()
-    if not rec:
-        continue
-    fields = rec.split(';')
-    if len(fields) < 2:
-        continue
-    try:
-        ts = int(fields[0])
-    except ValueError:
-        continue
-    dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-    day_key = dt.strftime('%Y-%m-%d')
-    days[day_key].append((ts, fields[1:]))
-
-header = f'{station_id};TIMESTAMP;Effective AC Output Time (min);Total Effective AC Output Time (min);Inverter output (kWh);Exported energy (kWh);Imported energy (kWh)'
-print(header)
-
-cumulative_ac_minutes = 0
-
-for day_str in sorted(days.keys()):
-    entries = sorted(days[day_str], key=lambda x: x[0])
-
-    day_dt = datetime.strptime(day_str, '%Y-%m-%d').replace(tzinfo=timezone.utc)
-    day_ts = int(day_dt.timestamp())
-
-    ac_minutes = 0
-    prev_ts = None
-    for ts, vals in entries:
-        ac_power = parse_val(vals[IDX_AC_POWER]) if len(vals) > IDX_AC_POWER else None
-        if ac_power is not None and ac_power > 0:
-            if prev_ts is not None:
-                delta_min = (ts - prev_ts) / 60.0
-                if delta_min <= 10:
-                    ac_minutes += delta_min
-            prev_ts = ts
-        else:
-            prev_ts = None
-
-    ac_minutes = round(ac_minutes, 1)
-    cumulative_ac_minutes += ac_minutes
-    cumulative_rounded = round(cumulative_ac_minutes, 1)
-
-    inverter_output = ''
-    for ts, vals in reversed(entries):
-        v = parse_val(vals[IDX_AC_ENERGY]) if len(vals) > IDX_AC_ENERGY else None
-        if v is not None:
-            inverter_output = str(v).replace('.', ',')
-            break
-
-    exported = ''
-    first_to_grid = None
-    last_to_grid = None
-    for ts, vals in entries:
-        v = parse_val(vals[IDX_TO_GRID]) if len(vals) > IDX_TO_GRID else None
-        if v is not None:
-            if first_to_grid is None:
-                first_to_grid = v
-            last_to_grid = v
-    if first_to_grid is not None and last_to_grid is not None:
-        exported = str(round(last_to_grid - first_to_grid, 2)).replace('.', ',')
-
-    imported = ''
-    first_from_grid = None
-    last_from_grid = None
-    for ts, vals in entries:
-        v = parse_val(vals[IDX_FROM_GRID]) if len(vals) > IDX_FROM_GRID else None
-        if v is not None:
-            if first_from_grid is None:
-                first_from_grid = v
-            last_from_grid = v
-    if first_from_grid is not None and last_from_grid is not None:
-        imported = str(round(last_from_grid - first_from_grid, 2)).replace('.', ',')
-
-    ac_min_str = str(ac_minutes).replace('.', ',')
-    cum_str    = str(cumulative_rounded).replace('.', ',')
-
-    print(f'{station_id};{day_ts};{ac_min_str};{cum_str};{inverter_output};{exported};{imported}')
-PYEOF
+# ── the parser and the report aggregator under test ──────────────────
+# bios-export.sh emits its embedded Python from two functions; sourcing the
+# script in a subshell (it returns before running any command) gives us the
+# very same code the partner runs, not a copy.
+( . "$SCRIPT_DIR/bios-export.sh"; parse_py )  > "$WORK/parse.py"
+( . "$SCRIPT_DIR/bios-export.sh"; report_py ) > "$WORK/report.py"
+[ -s "$WORK/parse.py" ]  || { echo "could not extract parse_py from bios-export.sh" >&2; exit 1; }
+[ -s "$WORK/report.py" ] || { echo "could not extract report_py from bios-export.sh" >&2; exit 1; }
 
 # ── fixture data ─────────────────────────────────────────────────────
 # Real API sample (from the Barrage deployment email)
@@ -471,20 +338,33 @@ assert_eq "day 1: cumulative AC time = 15,0" \
 assert_eq "day 2: cumulative AC time = 20,0 (15 + 5)" \
     "20,0" "$DAY2_CUM"
 
+# Real samples are 299-301 s apart; the running total must still be the sum
+# of the printed day values (each day rounded before it is added).
+MARCH3_00=$((MARCH2_00 + 86400))
+ODD_FIX='"SOLAXBIOS!'
+for d0 in "$MARCH1_00" "$MARCH2_00" "$MARCH3_00"; do
+    ODD_FIX+="$((d0+300));500;1000;5000;;;;;;;;;;;500;1,00xa"
+    ODD_FIX+="$((d0+599));500;1000;5000;;;;;;;;;;;500;1,00xa"   # 299 s = 4,98 min -> 5,0
+done
+ODD_FIX+='"'
+ODD_ROWS=$(echo "$ODD_FIX" | python3 "$WORK/report.py" | tail -n +2)
+assert_eq "299 s intervals: each day 5,0 and the total 15,0 (3 x 4,98 unrounded would print 14,9)" \
+    "5,0 5,0 5,0 10,0 5,0 15,0" "$(echo "$ODD_ROWS" | awk -F';' '{printf "%s %s ", $3, $4}' | sed 's/ $//')"
+
 
 # ── 14. MONTHLY REPORT: INVERTER OUTPUT ──────────────────────────────
 note "── Section 14: Monthly report — inverter output ──"
 
-# Last Inverter.AC.energy.out.daily of day 1 = 6,0
+# Last Inverter.AC.energy.out.daily of day 1 = 6,0 -> printed with two decimals
 # Last Inverter.AC.energy.out.daily of day 2 = 4,0
 DAY1_INV=$(echo "$DAY1_ROW" | cut -d';' -f5)
 DAY2_INV=$(echo "$DAY2_ROW" | cut -d';' -f5)
 
-assert_eq "day 1: inverter output = 6,0 kWh" \
-    "6,0" "$DAY1_INV"
+assert_eq "day 1: inverter output = 6,00 kWh" \
+    "6,00" "$DAY1_INV"
 
-assert_eq "day 2: inverter output = 4,0 kWh" \
-    "4,0" "$DAY2_INV"
+assert_eq "day 2: inverter output = 4,00 kWh" \
+    "4,00" "$DAY2_INV"
 
 
 # ── 15. MONTHLY REPORT: EXPORTED ENERGY ──────────────────────────────
@@ -495,11 +375,11 @@ note "── Section 15: Monthly report — exported energy (toGrid delta) ─�
 DAY1_EXP=$(echo "$DAY1_ROW" | cut -d';' -f6)
 DAY2_EXP=$(echo "$DAY2_ROW" | cut -d';' -f6)
 
-assert_eq "day 1: exported energy = 0,9 kWh" \
-    "0,9" "$DAY1_EXP"
+assert_eq "day 1: exported energy = 0,90 kWh" \
+    "0,90" "$DAY1_EXP"
 
-assert_eq "day 2: exported energy = 0,5 kWh" \
-    "0,5" "$DAY2_EXP"
+assert_eq "day 2: exported energy = 0,50 kWh" \
+    "0,50" "$DAY2_EXP"
 
 
 # ── 16. MONTHLY REPORT: IMPORTED ENERGY ──────────────────────────────
@@ -510,11 +390,18 @@ note "── Section 16: Monthly report — imported energy (fromGrid delta) ─
 DAY1_IMP=$(echo "$DAY1_ROW" | cut -d';' -f7)
 DAY2_IMP=$(echo "$DAY2_ROW" | cut -d';' -f7)
 
-assert_eq "day 1: imported energy = 0,6 kWh" \
-    "0,6" "$DAY1_IMP"
+assert_eq "day 1: imported energy = 0,60 kWh" \
+    "0,60" "$DAY1_IMP"
 
-assert_eq "day 2: imported energy = 0,3 kWh" \
-    "0,3" "$DAY2_IMP"
+assert_eq "day 2: imported energy = 0,30 kWh" \
+    "0,30" "$DAY2_IMP"
+
+# Every number in the report has a fixed number of decimals: minutes one,
+# kWh two (no "0" next to "515,0", no "32,4" next to "27,32").
+assert_match "report numbers: minutes have exactly one decimal, kWh exactly two" \
+    '^[A-Z0-9]+;[0-9]+;-?[0-9]+,[0-9];-?[0-9]+,[0-9];(-?[0-9]+,[0-9]{2})?;(-?[0-9]+,[0-9]{2})?;(-?[0-9]+,[0-9]{2})?$' "$DAY1_ROW"
+assert_match "report numbers: day 2 row has the same shape" \
+    '^[A-Z0-9]+;[0-9]+;-?[0-9]+,[0-9];-?[0-9]+,[0-9];(-?[0-9]+,[0-9]{2})?;(-?[0-9]+,[0-9]{2})?;(-?[0-9]+,[0-9]{2})?$' "$DAY2_ROW"
 
 
 # ── 17. MONTHLY REPORT: FIELD COUNT PER ROW ──────────────────────────
@@ -554,12 +441,12 @@ IDLE_FIXTURE='"SOLAXBIOS!'"$((MARCH1_00+300))"';0;1000;5000;50;;;;;;;;;;0;00xa'"
 IDLE_REPORT=$(echo "$IDLE_FIXTURE" | python3 "$WORK/report.py")
 IDLE_DAY=$(echo "$IDLE_REPORT" | tail -1)
 IDLE_AC=$(echo "$IDLE_DAY" | cut -d';' -f3)
-assert_eq "idle-only day: AC output time = 0" \
-    "0" "$IDLE_AC"
+assert_eq "idle-only day: AC output time = 0,0" \
+    "0,0" "$IDLE_AC"
 
 IDLE_EXP=$(echo "$IDLE_DAY" | cut -d';' -f6)
-assert_eq "idle-only day: exported energy = 0,0" \
-    "0,0" "$IDLE_EXP"
+assert_eq "idle-only day: exported energy = 0,00" \
+    "0,00" "$IDLE_EXP"
 
 
 # ── 19. AC TIME: GAP ACROSS IDLE PERIODS ─────────────────────────────
@@ -594,8 +481,92 @@ LARGE_GAP+='"'
 
 LGAP_REPORT=$(echo "$LARGE_GAP" | python3 "$WORK/report.py")
 LGAP_AC=$(echo "$LGAP_REPORT" | tail -1 | cut -d';' -f3)
-assert_eq "15-min gap between producing samples: AC time = 0 (gap > 10 min)" \
-    "0" "$LGAP_AC"
+assert_eq "15-min gap between producing samples: AC time = 0,0 (gap > 10 min)" \
+    "0,0" "$LGAP_AC"
+
+
+# ── 20a. ENERGY: METER RESET INSIDE A DAY ────────────────────────────
+note "── Section 20a: Energy counters — a meter reset is not a negative delta ──"
+
+# Seen on SOLAXBIOS 2026-11-02 (fromGrid 1232 -> 2) and 2026-11-06
+# (toGrid 9021 -> 1). last-first would give -815 / -9013 kWh; the report
+# sums the increases and skips the drop.
+RESET_FIX='"SOLAXBIOS!'
+RESET_FIX+="$((MARCH1_00+300));-10;9021;1195;;;;;;;;;;;0;0xa"
+RESET_FIX+="$((MARCH1_00+600));-10;9021;1232;;;;;;;;;;;0;0xa"
+RESET_FIX+="$((MARCH1_00+900));-10;9021;2;;;;;;;;;;;0;0xa"
+RESET_FIX+="$((MARCH1_00+1200));-10;9021;380;;;;;;;;;;;0;0xa"
+RESET_FIX+="$((MARCH1_00+1500));-10;1;380,5;;;;;;;;;;;0;0xa"
+RESET_FIX+="$((MARCH1_00+1800));-10;3;381;;;;;;;;;;;0;0xa"
+RESET_FIX+='"'
+RESET_ROW=$(echo "$RESET_FIX" | python3 "$WORK/report.py" | tail -1)
+assert_eq "imported energy over a reset = (1232-1195) + (380-2) + 0,5 + 0,5 = 416,00" \
+    "416,00" "$(echo "$RESET_ROW" | cut -d';' -f7)"
+assert_eq "exported energy over a reset = 0 + (3-1) = 2,00" \
+    "2,00" "$(echo "$RESET_ROW" | cut -d';' -f6)"
+
+# A counter that never has a value that day leaves the cell empty; a single
+# sample gives 0,00.
+ONE_FIX='"SOLAXBIOS!'"$((MARCH1_00+300))"';-10;;17838;;;;;;;;;;;0;0xa"'
+ONE_ROW=$(echo "$ONE_FIX" | python3 "$WORK/report.py" | tail -1)
+assert_eq "toGrid never sampled: exported cell empty" "" "$(echo "$ONE_ROW" | cut -d';' -f6)"
+assert_eq "fromGrid sampled once: imported 0,00" "0,00" "$(echo "$ONE_ROW" | cut -d';' -f7)"
+assert_eq "no daily value that day: inverter output cell empty" "" "$(echo "$ONE_ROW" | cut -d';' -f5)"
+
+
+# ── 20b. WINDOW CLIPPING ─────────────────────────────────────────────
+note "── Section 20b: Rows outside the requested window are dropped ──"
+
+# Mars2 may answer a wider (shifted) window than asked; the parser gets the
+# requested bounds and keeps only [from, to].
+CLIP_FIX='"SOKO46!'
+CLIP_FIX+="$((MARCH1_00-300));1;2;3;;;;;;;;;;;0;10xa"     # before the window
+CLIP_FIX+="$((MARCH1_00));1;2;3;;;;;;;;;;;0;10xa"         # exactly at from (kept)
+CLIP_FIX+="$((MARCH1_00+300));1;2;3;;;;;;;;;;;0;10xa"
+CLIP_FIX+="$((MARCH2_00));1;2;3;;;;;;;;;;;0;10xa"         # exactly at to (kept)
+CLIP_FIX+="$((MARCH2_00+300));1;2;3;;;;;;;;;;;0;10xa"     # after the window
+CLIP_FIX+='"'
+CLIPPED=$(echo "$CLIP_FIX" | python3 "$WORK/parse.py" "$MARCH1_00" "$MARCH2_00")
+assert_eq "parse: 3 of 5 rows inside [from, to]" "3" "$(echo "$CLIPPED" | wc -l | tr -d ' ')"
+assert_eq "parse: first kept row is the one at from" "$MARCH1_00" "$(echo "$CLIPPED" | head -1 | cut -d';' -f2)"
+assert_eq "parse: last kept row is the one at to" "$MARCH2_00" "$(echo "$CLIPPED" | tail -1 | cut -d';' -f2)"
+UNCLIPPED=$(echo "$CLIP_FIX" | python3 "$WORK/parse.py")
+assert_eq "parse without bounds keeps every row (as before)" "5" "$(echo "$UNCLIPPED" | wc -l | tr -d ' ')"
+
+# The monthly report ignores rows outside [first day, first day of next month):
+# the row at the next month's 00:00:00 belongs to the next month.
+APRIL1_00=$(python3 -c "from datetime import datetime,timezone; print(int(datetime(2026,4,1,tzinfo=timezone.utc).timestamp()))")
+MONTH_FIX='"SOLAXBIOS!'
+MONTH_FIX+="$((MARCH1_00-3600));0;1000;5000;;;;;;;;;;;0;00xa"   # 28 Feb 23:00 (Mars2 shift artefact)
+MONTH_FIX+="$((MARCH1_00+300));0;1000;5000;;;;;;;;;;;0;00xa"
+MONTH_FIX+="$((APRIL1_00));0;1000;5000;;;;;;;;;;;0;00xa"        # 1 Apr 00:00:00
+MONTH_FIX+='"'
+MONTH_DAYS=$(echo "$MONTH_FIX" | python3 "$WORK/report.py" "$MARCH1_00" "$APRIL1_00" | tail -n +2 | cut -d';' -f2)
+assert_eq "report with month bounds: only the March day remains" "$MARCH1_00" "$MONTH_DAYS"
+assert_eq "report without bounds: three days (as before)" "3" "$(echo "$MONTH_FIX" | python3 "$WORK/report.py" | tail -n +2 | wc -l | tr -d ' ')"
+
+
+# ── 20c. WINDOW HELPERS ──────────────────────────────────────────────
+note "── Section 20c: UTC window helpers ──"
+
+assert_eq "utc_epoch: 2026-03-01 00:00:00 -> ${MARCH1_00}" \
+    "$MARCH1_00" "$( . "$SCRIPT_DIR/bios-export.sh"; utc_epoch '2026-03-01 00:00:00' )"
+assert_eq "utc_str: ${MARCH1_00} -> 2026-03-01 00:00:00" \
+    "2026-03-01 00:00:00" "$( . "$SCRIPT_DIR/bios-export.sh"; utc_str "$MARCH1_00" )"
+if ( . "$SCRIPT_DIR/bios-export.sh"; utc_epoch '2026-03-01' ) >/dev/null 2>&1; then
+    fail "utc_epoch rejects a date without time"
+else
+    ok "utc_epoch rejects a date without time"
+fi
+assert_eq "request window is widened by 2 h on each side (WINDOW_SLACK)" \
+    "7200" "$( . "$SCRIPT_DIR/bios-export.sh"; echo "$WINDOW_SLACK" )"
+BAD_FROM=$(bash "$SCRIPT_DIR/bios-export.sh" fetch --from "01.03.2026" --to "2026-03-02 00:00:00" --station OS2BIOS 2>&1)
+assert_contains "fetch rejects --from that is not YYYY-MM-DD HH:MM:SS before any network call" \
+    "must be \"YYYY-MM-DD HH:MM:SS\"" "$BAD_FROM"
+BAD_ORDER=$(bash "$SCRIPT_DIR/bios-export.sh" fetch --from "2026-03-02 00:00:00" --to "2026-03-01 00:00:00" --station OS2BIOS 2>&1)
+assert_contains "fetch rejects --to before --from" "later than --from" "$BAD_ORDER"
+BAD_MONTH=$(bash "$SCRIPT_DIR/bios-export.sh" report --month 2026-13 2>&1)
+assert_contains "report rejects month 13" "Month must be YYYY-MM" "$BAD_MONTH"
 
 
 # ── 21. SCRIPT PLUMBING ──────────────────────────────────────────────

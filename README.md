@@ -226,6 +226,27 @@ Every file follows the same conventions:
 - decimal separator is `,` (European)
 - empty field = no measurement for that timestamp
 - each line starts with `STATION_ID;UNIX_TIMESTAMP;values...`
+- plain ASCII; measurement values are passed through from Mars2 untouched
+
+A measurement file holds exactly the window that was asked for (`--from` ..
+`--to`, both inclusive, UTC). Mars2 has been seen to read `fromUTC`/`toUTC`
+as Croatian local time, so the tool requests two hours more on each side and
+drops the rows outside the window.
+
+The monthly report has one row per UTC day (timestamp = that day at
+00:00:00 UTC) and ignores rows outside the month:
+
+| Column | Rule |
+|--------|------|
+| Effective AC Output Time (min) | minutes with `Inverter.AC.power.total` > 0, counted between consecutive samples at most 10 min apart; one decimal |
+| Total Effective AC Output Time (min) | running total of the printed day values; one decimal |
+| Inverter output (kWh) | last `Inverter.AC.energy.out.daily` of the day; two decimals; empty when the day has no value (Mars2 writes the SOLAXBIOS daily value once a day, at 22:00 UTC) |
+| Exported energy (kWh) | increase of `Grid.energy.toGrid.total` over the day; two decimals |
+| Imported energy (kWh) | increase of `Grid.energy.fromGrid.total` over the day; two decimals |
+
+The two energy columns come from cumulative meter registers: the increase is
+summed between consecutive samples and a decrease is treated as a meter reset
+and not counted, so a reset day does not come out negative.
 
 
 ## 4. Measurement fields

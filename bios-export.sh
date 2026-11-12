@@ -40,6 +40,13 @@ STATIONS_FILE="${BIOS_STATIONS_FILE:-${SCRIPT_DIR}/stations.conf}"
 STATION_IDS=()
 declare -A HEADERS LAYOUTS
 
+# Mars2 has been seen to read fromUTC/toUTC as Croatian local time, which
+# shifts the rows it returns by the UTC offset (1-2 h). Every request is
+# therefore widened by this many seconds on both sides and the rows are
+# clipped to the window that was asked for, so a file holds exactly that
+# window whichever way Mars2 reads the parameters.
+WINDOW_SLACK=7200
+
 load_stations() {
     if [[ ! -f "$STATIONS_FILE" ]]; then
         STATION_IDS=("OS1BIOS" "OS2BIOS" "SOLAXBIOS")
@@ -81,7 +88,8 @@ Usage: $0 <command> [options]
 
 Commands:
   fetch   --from "YYYY-MM-DD HH:MM:SS" --to "YYYY-MM-DD HH:MM:SS" [--station ID]...
-          Fetch measurements and produce per-station output files.
+          Fetch measurements (times in UTC) and produce per-station output
+          files holding exactly that window.
           Without --station every station in stations.conf is fetched.
           Exit 2 when Mars2 returned no rows for any requested station.
 
@@ -111,6 +119,18 @@ EOF
 log()  { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >&2; }
 die()  { log "ERROR: $*"; exit 1; }
 
+# "YYYY-MM-DD HH:MM:SS" (UTC) -> seconds since the epoch; fails on any other form.
+utc_epoch() {
+    local s="$1"
+    [[ "$s" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2}$ ]] || return 1
+    date -u -d "$s" '+%s' 2>/dev/null
+}
+
+# seconds since the epoch -> "YYYY-MM-DD HH:MM:SS" (UTC)
+utc_str() {
+    date -u -d "@$1" '+%Y-%m-%d %H:%M:%S'
+}
+
 get_token() {
     [[ -z "${USERNAME}" ]] && die "Set BIOS_USERNAME in .env"
     [[ -z "${PASSWORD}" ]] && die "Set BIOS_PASSWORD in .env"
@@ -128,59 +148,186 @@ get_token() {
     echo "$token"
 }
 
+# GET CustomDataExport for [from, to] widened by WINDOW_SLACK on both sides.
 fetch_data() {
-    local token="$1" station="$2" from_utc="$3" to_utc="$4"
+    local token="$1" station="$2" from_epoch="$3" to_epoch="$4"
     local url="${API_BASE}/api/public/CustomDataExport/BIOS/${station}"
-    local request_url from_wire to_wire
+    local from_utc to_utc request_url
+    from_utc=$(utc_str $((from_epoch - WINDOW_SLACK)))
+    to_utc=$(utc_str $((to_epoch + WINDOW_SLACK)))
     # Keep request format as plain datetime string (yyyy-MM-dd HH:mm:ss).
     # Only spaces are escaped for HTTP transport.
-    from_wire="${from_utc// /%20}"
-    to_wire="${to_utc// /%20}"
-    request_url="${url}?fromUTC=${from_wire}&toUTC=${to_wire}"
+    request_url="${url}?fromUTC=${from_utc// /%20}&toUTC=${to_utc// /%20}"
 
-    log "GET ${url}?fromUTC=${from_utc}&toUTC=${to_utc}"
+    log "GET ${url}?fromUTC=${from_utc}&toUTC=${to_utc} (window widened by $((WINDOW_SLACK / 3600)) h; rows are clipped to the window asked for)"
 
     curl -sS --connect-timeout 30 --max-time 120 \
         -H "Authorization: Bearer ${token}" \
         "${request_url}"
 }
 
-# Parse the API response into semicolon-delimited lines:
-#   STATION_ID;TIMESTAMP;val1;val2;...
-# API format: "STATION_ID!ts;v1;v2<0x0a>ts;v1;v2<0x0a>..."
-# Quoted string wraps the whole response.
-parse_response() {
-    local station="$1"
-    python3 -c "
+# --- Embedded Python ---------------------------------------------------------
+# The two programs below are emitted by functions so that test_bios_export.sh
+# runs the very same code:  ( . bios-export.sh; parse_py ) > parse.py
+
+# Turn one CustomDataExport response into "STATION_ID;TIMESTAMP;v1;...;vN"
+# lines. Wire format: one quoted string, "STATION_ID!ts;v1;...<0xa>ts;v1;..."
+# where the record separator is the literal text 0xa (a real newline is
+# accepted too). argv: [from_epoch] [to_epoch] - when given, rows whose
+# timestamp is outside [from, to] are dropped.
+parse_py() {
+cat <<'PY'
+import re
 import sys
 
+lo = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1] else None
+hi = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2] else None
+
 raw = sys.stdin.read().strip()
-# Strip surrounding quotes
-if raw.startswith('\"') and raw.endswith('\"'):
+if raw.startswith('"') and raw.endswith('"'):
     raw = raw[1:-1]
 
-# Split on '!' — first part is station ID, rest is data
 parts = raw.split('!', 1)
 if len(parts) < 2:
     sys.exit(0)
+station_id, data_blob = parts
 
-station_id = parts[0]
-data_blob = parts[1]
-
-# Records are separated by 0x0a (\\n in the decoded string)
-# but the API encodes it literally as the bytes 0x0a at the end of each record
-# Looking at the example: records end with '0xa' then next timestamp
-# Actually the separator is the literal string '0xa'
-# Let's handle both: real newlines and literal '0xa'
-import re
-records = re.split(r'0xa|\n', data_blob)
-
-for rec in records:
+for rec in re.split(r'0xa|\n', data_blob):
     rec = rec.strip()
     if not rec:
         continue
+    if lo is not None or hi is not None:
+        try:
+            ts = int(rec.split(';', 1)[0])
+        except ValueError:
+            continue
+        if (lo is not None and ts < lo) or (hi is not None and ts > hi):
+            continue
     print(f'{station_id};{rec}')
-"
+PY
+}
+
+parse_response() {   # [from_epoch] [to_epoch]
+    python3 -c "$(parse_py)" "${1:-}" "${2:-}"
+}
+
+# Monthly report from one CustomDataExport response in the solar layout.
+# argv: [from_epoch] [to_epoch] - rows outside [from, to) are ignored, so the
+# report holds exactly the requested month whatever window Mars2 answered.
+# One row per UTC day, timestamp = that day at 00:00:00 UTC:
+#   Effective AC Output Time (min)        minutes with Inverter.AC.power.total > 0,
+#                                         counted between consecutive samples
+#                                         at most 10 min apart
+#   Total Effective AC Output Time (min)  running total since the first day
+#   Inverter output (kWh)                 last Inverter.AC.energy.out.daily of the day
+#   Exported energy (kWh)                 increase of Grid.energy.toGrid.total over the day
+#   Imported energy (kWh)                 increase of Grid.energy.fromGrid.total over the day
+# The two energy columns are cumulative meter registers: the increase is
+# summed between consecutive samples and a decrease (meter reset) is not
+# counted, so a day with a reset does not come out negative.
+# Numbers: minutes with one decimal, kWh with two, decimal comma; a column
+# with no sample at all that day is left empty.
+report_py() {
+cat <<'PY'
+import re
+import sys
+from collections import defaultdict
+from datetime import datetime, timezone
+
+lo = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1] else None
+hi = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2] else None
+
+raw = sys.stdin.read().strip()
+if raw.startswith('"') and raw.endswith('"'):
+    raw = raw[1:-1]
+
+parts = raw.split('!', 1)
+if len(parts) < 2:
+    print('No data', file=sys.stderr)
+    sys.exit(1)
+station_id, data_blob = parts
+
+# 0-based value positions after the timestamp (solar layout)
+IDX_TO_GRID = 1      # Grid.energy.toGrid.total
+IDX_FROM_GRID = 2    # Grid.energy.fromGrid.total
+IDX_AC_POWER = 13    # Inverter.AC.power.total
+IDX_AC_ENERGY = 14   # Inverter.AC.energy.out.daily
+
+def parse_val(s):
+    s = s.strip()
+    if not s:
+        return None
+    try:
+        return float(s.replace(',', '.'))
+    except ValueError:
+        return None
+
+def fmt(value, decimals):
+    return f'{value:.{decimals}f}'.replace('.', ',')
+
+def column(entries, idx):
+    out = []
+    for _, vals in entries:
+        v = parse_val(vals[idx]) if len(vals) > idx else None
+        if v is not None:
+            out.append(v)
+    return out
+
+def increase(values):
+    """Sum of the non-negative steps of a cumulative counter; '' when it had no sample."""
+    if not values:
+        return ''
+    total = 0.0
+    for prev, cur in zip(values, values[1:]):
+        if cur >= prev:
+            total += cur - prev
+    return fmt(total, 2)
+
+days = defaultdict(list)
+for rec in re.split(r'0xa|\n', data_blob):
+    rec = rec.strip()
+    if not rec:
+        continue
+    fields = rec.split(';')
+    if len(fields) < 2:
+        continue
+    try:
+        ts = int(fields[0])
+    except ValueError:
+        continue
+    if (lo is not None and ts < lo) or (hi is not None and ts >= hi):
+        continue
+    day = datetime.fromtimestamp(ts, tz=timezone.utc).strftime('%Y-%m-%d')
+    days[day].append((ts, fields[1:]))
+
+print(f'{station_id};TIMESTAMP;Effective AC Output Time (min);Total Effective AC Output Time (min);Inverter output (kWh);Exported energy (kWh);Imported energy (kWh)')
+
+cumulative = 0.0
+for day in sorted(days):
+    entries = sorted(days[day], key=lambda e: e[0])
+    day_ts = int(datetime.strptime(day, '%Y-%m-%d').replace(tzinfo=timezone.utc).timestamp())
+
+    minutes = 0.0
+    prev_ts = None
+    for ts, vals in entries:
+        power = parse_val(vals[IDX_AC_POWER]) if len(vals) > IDX_AC_POWER else None
+        if power is not None and power > 0:
+            if prev_ts is not None and ts - prev_ts <= 600:
+                minutes += (ts - prev_ts) / 60.0
+            prev_ts = ts
+        else:
+            prev_ts = None
+    # Round the day first so the running total is the sum of the printed day values.
+    minutes = round(minutes, 1)
+    cumulative = round(cumulative + minutes, 1)
+
+    daily = column(entries, IDX_AC_ENERGY)
+    inverter_output = fmt(daily[-1], 2) if daily else ''
+    exported = increase(column(entries, IDX_TO_GRID))
+    imported = increase(column(entries, IDX_FROM_GRID))
+
+    print(f'{station_id};{day_ts};{fmt(minutes, 1)};{fmt(cumulative, 1)};{inverter_output};{exported};{imported}')
+PY
 }
 
 # --- Commands ---
@@ -199,6 +346,10 @@ cmd_fetch() {
 
     [[ -z "$from_utc" ]] && die "--from is required"
     [[ -z "$to_utc" ]]   && die "--to is required"
+    local from_epoch to_epoch
+    from_epoch=$(utc_epoch "$from_utc") || die "--from must be \"YYYY-MM-DD HH:MM:SS\" (UTC), got '${from_utc}'"
+    to_epoch=$(utc_epoch "$to_utc")     || die "--to must be \"YYYY-MM-DD HH:MM:SS\" (UTC), got '${to_utc}'"
+    (( to_epoch > from_epoch )) || die "--to must be later than --from"
     [[ ${#stations[@]} -eq 0 ]] && stations=("${STATION_IDS[@]}")
     local sid
     for sid in "${stations[@]}"; do require_station "$sid"; done
@@ -220,7 +371,7 @@ cmd_fetch() {
         echo "$header_line" > "$outfile"
 
         local raw
-        raw=$(fetch_data "$token" "$sid" "$from_utc" "$to_utc")
+        raw=$(fetch_data "$token" "$sid" "$from_epoch" "$to_epoch")
 
         if [[ -z "$raw" || "$raw" == '""' ]]; then
             log "WARNING: ${sid}: Mars2 returned no rows for ${from_utc} .. ${to_utc}; the file has only a header."
@@ -228,11 +379,11 @@ cmd_fetch() {
             continue
         fi
 
-        echo "$raw" | parse_response "$sid" >> "$outfile"
+        echo "$raw" | parse_response "$from_epoch" "$to_epoch" >> "$outfile"
         local count
         count=$(wc -l < "$outfile")
         if [[ $((count - 1)) -eq 0 ]]; then
-            log "WARNING: ${sid}: response contained no records."
+            log "WARNING: ${sid}: response contained no records inside ${from_utc} .. ${to_utc}."
             empty+=("$sid")
         fi
         log "${sid}: $((count - 1)) data rows written to ${outfile}"
@@ -268,7 +419,7 @@ cmd_report() {
     [[ "${LAYOUTS[$station]}" == "solar" ]] || die "Monthly report needs a solar-layout station; ${station} has layout '${LAYOUTS[$station]}'"
 
     # Validate month format
-    [[ "$month" =~ ^[0-9]{4}-[0-9]{2}$ ]] || die "Month must be YYYY-MM format"
+    [[ "$month" =~ ^[0-9]{4}-(0[1-9]|1[0-2])$ ]] || die "Month must be YYYY-MM format"
 
     local year="${month%-*}"
     local mon="${month#*-}"
@@ -280,24 +431,21 @@ cmd_report() {
     token=$(get_token)
     log "Token acquired."
 
-    # Determine first and last day of month
+    # [first day 00:00:00, first day of the next month 00:00:00) in UTC
     local first_day="${year}-${mon}-01"
-    local next_month_ts
+    local next_month
     if [[ "$mon" == "12" ]]; then
-        next_month_ts="$((year + 1))-01-01"
+        next_month="$((10#$year + 1))-01-01"
     else
-        next_month_ts="${year}-$(printf '%02d' $((10#$mon + 1)))-01"
+        next_month="${year}-$(printf '%02d' $((10#$mon + 1)))-01"
     fi
-    local last_day
-    last_day=$(date -d "${next_month_ts} - 1 day" '+%Y-%m-%d' 2>/dev/null) \
-        || last_day=$(date -d "${next_month_ts} -1 day" '+%Y-%m-%d')
+    local from_epoch to_epoch
+    from_epoch=$(utc_epoch "${first_day} 00:00:00")
+    to_epoch=$(utc_epoch "${next_month} 00:00:00")
 
-    local from_utc="${first_day} 00:00:00"
-    local to_utc="${next_month_ts} 00:00:00"
-
-    log "Fetching ${station} for month ${month} (${from_utc} to ${to_utc}) ..."
+    log "Fetching ${station} for month ${month} (${first_day} 00:00:00 to ${next_month} 00:00:00 UTC) ..."
     local raw
-    raw=$(fetch_data "$token" "$station" "$from_utc" "$to_utc")
+    raw=$(fetch_data "$token" "$station" "$from_epoch" "$to_epoch")
 
     if [[ -z "$raw" || "$raw" == '""' ]]; then
         die "No data returned for ${station} in ${month}."
@@ -305,154 +453,11 @@ cmd_report() {
 
     local outfile="${OUTPUT_DIR}/${station,,}-monthly-report.txt"
 
-    # Generate the monthly report using Python for date math and aggregation.
-    # Report columns:
-    #   SOLAXBIOS;UNIX_TIMESTAMP_AT_00:00:00_FOR_EACH_DAY;
-    #   Effective AC Output Time (min) — minutes in day where Inverter.AC.power.total > 0
-    #   Total Effective AC Output Time (min) — cumulative from start of month
-    #   Inverter output (kWh) — last Inverter.AC.energy.out.daily of the day
-    #   Exported energy (kWh) — delta of Grid.energy.toGrid.total across the day
-    #   Imported energy (kWh) — delta of Grid.energy.fromGrid.total across the day
-    echo "$raw" | python3 -c "
-import sys, re
-from datetime import datetime, timezone, timedelta
-from collections import defaultdict
-
-raw = sys.stdin.read().strip()
-if raw.startswith('\"') and raw.endswith('\"'):
-    raw = raw[1:-1]
-
-parts = raw.split('!', 1)
-if len(parts) < 2:
-    print('No data', file=sys.stderr)
-    sys.exit(1)
-
-station_id = parts[0]
-data_blob = parts[1]
-records = re.split(r'0xa|\n', data_blob)
-
-# Column indices in SOLAXBIOS response (0-based after timestamp):
-#  0: Grid.power.total
-#  1: Grid.energy.toGrid.total
-#  2: Grid.energy.fromGrid.total
-#  3: BMS.energy.SOC
-#  4: Inverter.Meter2.AC.power.total
-#  5: Inverter.AC.EPS.power.R
-#  6: Inverter.AC.EPS.power.S
-#  7: Inverter.AC.EPS.power.T
-#  8: Inverter.DC.Battery.power.total
-#  9: Inverter.DC.PV.power.MPPT1
-# 10: Inverter.DC.PV.power.MPPT2
-# 11: Inverter.DC.PV.power.MPPT3
-# 12: Inverter.DC.PV.power.MPPT4
-# 13: Inverter.AC.power.total
-# 14: Inverter.AC.energy.out.daily
-
-IDX_TO_GRID   = 1
-IDX_FROM_GRID = 2
-IDX_AC_POWER  = 13
-IDX_AC_ENERGY = 14
-
-def parse_val(s):
-    s = s.strip()
-    if not s:
-        return None
-    try:
-        return float(s.replace(',', '.'))
-    except ValueError:
-        return None
-
-# Group records by calendar day (UTC)
-days = defaultdict(list)
-for rec in records:
-    rec = rec.strip()
-    if not rec:
-        continue
-    fields = rec.split(';')
-    if len(fields) < 2:
-        continue
-    try:
-        ts = int(fields[0])
-    except ValueError:
-        continue
-    dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-    day_key = dt.strftime('%Y-%m-%d')
-    days[day_key].append((ts, fields[1:]))
-
-header = f'{station_id};TIMESTAMP;Effective AC Output Time (min);Total Effective AC Output Time (min);Inverter output (kWh);Exported energy (kWh);Imported energy (kWh)'
-print(header)
-
-cumulative_ac_minutes = 0
-
-for day_str in sorted(days.keys()):
-    entries = sorted(days[day_str], key=lambda x: x[0])
-
-    # Timestamp at 00:00:00 for this day
-    day_dt = datetime.strptime(day_str, '%Y-%m-%d').replace(tzinfo=timezone.utc)
-    day_ts = int(day_dt.timestamp())
-
-    # Effective AC Output Time: count sample intervals where AC power > 0
-    # Samples are ~5 min apart (300s); count intervals between consecutive
-    # timestamps where AC power > 0
-    ac_minutes = 0
-    prev_ts = None
-    for ts, vals in entries:
-        ac_power = parse_val(vals[IDX_AC_POWER]) if len(vals) > IDX_AC_POWER else None
-        if ac_power is not None and ac_power > 0:
-            if prev_ts is not None:
-                delta_min = (ts - prev_ts) / 60.0
-                if delta_min <= 10:
-                    ac_minutes += delta_min
-            prev_ts = ts
-        else:
-            prev_ts = None
-
-    ac_minutes = round(ac_minutes, 1)
-    cumulative_ac_minutes += ac_minutes
-    cumulative_rounded = round(cumulative_ac_minutes, 1)
-
-    # Inverter output: last non-empty Inverter.AC.energy.out.daily of the day
-    inverter_output = ''
-    for ts, vals in reversed(entries):
-        v = parse_val(vals[IDX_AC_ENERGY]) if len(vals) > IDX_AC_ENERGY else None
-        if v is not None:
-            inverter_output = str(v).replace('.', ',')
-            break
-
-    # Exported energy: delta of Grid.energy.toGrid.total (last - first non-empty)
-    exported = ''
-    first_to_grid = None
-    last_to_grid = None
-    for ts, vals in entries:
-        v = parse_val(vals[IDX_TO_GRID]) if len(vals) > IDX_TO_GRID else None
-        if v is not None:
-            if first_to_grid is None:
-                first_to_grid = v
-            last_to_grid = v
-    if first_to_grid is not None and last_to_grid is not None:
-        exported = str(round(last_to_grid - first_to_grid, 2)).replace('.', ',')
-
-    # Imported energy: delta of Grid.energy.fromGrid.total (last - first non-empty)
-    imported = ''
-    first_from_grid = None
-    last_from_grid = None
-    for ts, vals in entries:
-        v = parse_val(vals[IDX_FROM_GRID]) if len(vals) > IDX_FROM_GRID else None
-        if v is not None:
-            if first_from_grid is None:
-                first_from_grid = v
-            last_from_grid = v
-    if first_from_grid is not None and last_from_grid is not None:
-        imported = str(round(last_from_grid - first_from_grid, 2)).replace('.', ',')
-
-    ac_min_str = str(ac_minutes).replace('.', ',')
-    cum_str = str(cumulative_rounded).replace('.', ',')
-
-    print(f'{station_id};{day_ts};{ac_min_str};{cum_str};{inverter_output};{exported};{imported}')
-" > "$outfile"
+    echo "$raw" | python3 -c "$(report_py)" "$from_epoch" "$to_epoch" > "$outfile"
 
     local count
     count=$(wc -l < "$outfile")
+    [[ $((count - 1)) -gt 0 ]] || die "No rows inside ${month} for ${station}."
     log "Monthly report: $((count - 1)) day rows written to ${outfile}"
     log "Done."
 }
@@ -465,6 +470,12 @@ cmd_stations() {
 }
 
 # --- Main ---
+# When sourced (the test suite does this in a subshell to reach the helpers
+# and the embedded Python) stop here; run commands only when executed.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+fi
+
 [[ $# -eq 0 ]] && usage
 
 COMMAND="$1"

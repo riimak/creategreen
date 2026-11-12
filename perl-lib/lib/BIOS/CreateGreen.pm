@@ -13,7 +13,7 @@ use Carp       qw(croak);
 use File::Spec ();
 use BIOS::CreateGreen::ResultSet;
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 # ── column name tables ───────────────────────────────────────────────
 # These match the header order in each file, 1:1.
@@ -61,14 +61,20 @@ my @REPORT_FIELDS = qw(
     imported_energy_kwh
 );
 
+# Meteo stations use the 21-column layout; every other station is a solar
+# plant in the 15-column SOLAXBIOS layout (SOLAXBIOS itself and the vendor
+# plants SOKO46, SOKOBAZEN, VETINST that Mars2 publishes from the BIOS feed).
 my %IS_METEO = map { $_ => 1 } qw(OS1BIOS OS2BIOS);
+
+my @STATION_IDS = qw(OS1BIOS OS2BIOS SOLAXBIOS SOKO46 SOKOBAZEN VETINST);
 
 # ── public: field name accessors ─────────────────────────────────────
 
 sub meteo_fields  { @METEO_FIELDS  }
 sub solax_fields  { @SOLAX_FIELDS  }
 sub report_fields { @REPORT_FIELDS }
-sub station_ids   { qw(OS1BIOS OS2BIOS SOLAXBIOS) }
+sub station_ids   { @STATION_IDS }
+sub solar_station_ids { grep { !$IS_METEO{$_} } @STATION_IDS }
 
 sub fields_for {
     my ($class_or_self, $station_id) = @_;
@@ -97,35 +103,70 @@ sub read_measurements {
     return $self->_read($file, \@fields);
 }
 
+# Monthly report of a solar station (default SOLAXBIOS, as before 0.03):
+# <station>-monthly-report.txt
 sub read_monthly_report {
-    my ($self) = @_;
+    my ($self, $station_id) = @_;
+    $station_id = 'SOLAXBIOS' unless defined $station_id;
 
-    my $file = $self->_filepath('solaxbios-monthly-report.txt');
+    my $file = $self->_filepath(lc($station_id) . '-monthly-report.txt');
 
     return $self->_read($file, \@REPORT_FIELDS);
 }
 
+# Everything bios-export.sh wrote into the directory: one entry per
+# <station>-measurements.txt keyed by station ID, and one <STATION>_REPORT
+# entry per <station>-monthly-report.txt. Stations are discovered from the
+# files (the ID comes from each file's header), so a plant added to
+# stations.conf shows up here without a code change.
 sub read_all {
     my ($self) = @_;
     my %out;
 
-    for my $sid ($self->station_ids) {
-        my $path = File::Spec->catfile(
-            $self->{dir}, lc($sid) . '-measurements.txt'
-        );
-        next unless -f $path;
-        $out{$sid} = $self->read_measurements($sid);
+    for my $found ($self->_station_files('measurements')) {
+        $out{ $found->{station_id} } = $self->read_measurements($found->{station_id});
     }
-
-    my $rpt = File::Spec->catfile($self->{dir}, 'solaxbios-monthly-report.txt');
-    if (-f $rpt) {
-        $out{SOLAXBIOS_REPORT} = $self->read_monthly_report;
+    for my $found ($self->_station_files('monthly-report')) {
+        $out{ $found->{station_id} . '_REPORT' } = $self->read_monthly_report($found->{station_id});
     }
 
     return \%out;
 }
 
 # ── internals ────────────────────────────────────────────────────────
+
+# Files named <station>-<kind>.txt in the directory, with the station ID
+# taken from the header line (file names are lower-cased by the exporter).
+# Known stations come first in their canonical order, then any others.
+sub _station_files {
+    my ($self, $kind) = @_;
+
+    opendir my $dh, $self->{dir} or croak "cannot read directory $self->{dir}: $!";
+    my @names = sort grep { /\A [a-z0-9_-]+ - \Q$kind\E \.txt \z/x } readdir $dh;
+    closedir $dh;
+
+    my %rank = map { $STATION_IDS[$_] => $_ } 0 .. $#STATION_IDS;
+    my @found;
+    for my $name (@names) {
+        my $path = File::Spec->catfile($self->{dir}, $name);
+        next unless -f $path;
+        open my $fh, '<', $path or next;
+        my $header = <$fh>;
+        close $fh;
+        next unless defined $header;
+        my ($sid) = split /;/, $header, 2;
+        next unless defined $sid and $sid =~ /\A [A-Za-z0-9_-]+ \z/x;
+        (my $stem = $name) =~ s/ - \Q$kind\E \.txt \z//x;
+        next unless lc($sid) eq $stem;    # header and file name must agree
+        push @found, { station_id => $sid, path => $path };
+    }
+
+    return sort {
+        (exists $rank{$a->{station_id}} ? $rank{$a->{station_id}} : @STATION_IDS)
+            <=> (exists $rank{$b->{station_id}} ? $rank{$b->{station_id}} : @STATION_IDS)
+        or $a->{station_id} cmp $b->{station_id}
+    } @found;
+}
 
 sub _filepath {
     my ($self, $name) = @_;
@@ -208,13 +249,16 @@ BIOS::CreateGreen - read CREATEGREEN / BIOS measurement files
             $rec->{Relativna_vlaznost} // '-';
     }
 
-    # solar inverter
+    # solar plants: SOLAXBIOS, SOKO46, SOKOBAZEN, VETINST (same 15 columns)
     my $solax = $cg->read_measurements('SOLAXBIOS');
+    my $soko  = $cg->read_measurements('SOKO46');
 
-    # monthly report
-    my $rpt = $cg->read_monthly_report;
+    # monthly report (SOLAXBIOS when no station is given)
+    my $rpt      = $cg->read_monthly_report;
+    my $soko_rpt = $cg->read_monthly_report('SOKO46');
 
-    # everything at once
+    # everything in the directory at once:
+    # $all->{SOKO46}, $all->{SOKO46_REPORT}, ... for every station file found
     my $all = $cg->read_all;
 
 =head1 DESCRIPTION
@@ -222,6 +266,10 @@ BIOS::CreateGreen - read CREATEGREEN / BIOS measurement files
 Parses the semicolon-delimited text files produced by C<bios-export.sh>.
 European decimal commas are converted to Perl numbers; empty fields
 become C<undef>.  Original raw strings available as C<raw_fieldname>.
+
+Meteo stations (C<OS1BIOS>, C<OS2BIOS>) have 21 columns; every other
+station is a solar plant with the 15-column SOLAXBIOS layout, so a plant
+that is new to C<stations.conf> is read correctly without a code change.
 
 Core modules only.  No CPAN dependencies.
 

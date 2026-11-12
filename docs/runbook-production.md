@@ -52,8 +52,10 @@ last and only runs when the other four succeed.
    (masked) or `FEED_API_KEY`; optional `FEED_TOKEN_SECRET`. Until set the
    feed answers 503. For the Solax-dialect devices in Mars2 the `TokenId`
    device parameter is `FEED_API_KEY`, so set that one (masked, 32+ random
-   characters). Then `ALERT_FEED_SILENT_MINUTES=15` once the Mars2 devices
-   poll. After the first live poll compare the counter's "Zadnje očitanje"
+   characters). `ALERT_FEED_SILENT_MINUTES` is `15` in the committed
+   dashboard values (Mars2 polls every 5 minutes; a CI variable of the same
+   name overrides it, `0` disables the rule).
+   After the first live poll compare the counter's "Zadnje očitanje"
    with our sample time; if it is off by the UTC offset set
    `FEED_SOLAX_TIMEZONE=UTC` (and `FEED_SOLAX_POWER_UNIT=kW` if values are
    1000× too large, `FEED_SOLAX_EMPTY=zero|omit` if nothing is read at all).

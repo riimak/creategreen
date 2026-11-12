@@ -124,3 +124,7 @@ extraEnv:
     value: "https://bios-multilevel.barrage.net"
   - name: ALERT_ENV_LABEL
     value: "production"
+  # Mars2 polls the feed API every 5 minutes (readout group `Http`); three
+  # missed cycles means the partner export of the vendor plants has stopped.
+  - name: ALERT_FEED_SILENT_MINUTES
+    value: "15"

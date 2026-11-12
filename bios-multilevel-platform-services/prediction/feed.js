@@ -146,6 +146,26 @@ const SOLAX_PATH = '/feed/solax/proxyApp/proxy/api/getRealtimeInfo.do';
 const SOLARMAN_TOKEN_PATH = '/feed/solarman/account/v1.0/token';
 const SOLARMAN_DATA_PATH = '/feed/solarman/device/v1.0/currentData';
 
+/*
+ * Mars2's Http driver composes the request URL from the device's BaseUrl and a
+ * relative endpoint. Depending on how it joins them the dialect segment can be
+ * lost (RFC 3986 relative resolution against a base without a trailing slash
+ * replaces the base's last segment) or a slash doubled or dropped. Accept every
+ * such spelling so a BaseUrl spelled slightly differently in Mars2 cannot turn
+ * into 404s. The dashboard proxy does the same before forwarding.
+ */
+const SOLAX_VARIANT = /^\/feed\/(?:solax\/?)?proxyApp\/proxy\/api\/getRealtimeInfo\.do$/;
+const SOLARMAN_VARIANT = /^\/feed\/(?:solarman\/?)?(account\/v1\.0\/token|device\/v1\.0\/currentData)$/;
+
+function canonicalFeedPath(pathname) {
+  if (!pathname.startsWith('/feed')) return pathname;
+  const collapsed = pathname.replace(/\/{2,}/g, '/');
+  if (SOLAX_VARIANT.test(collapsed)) return SOLAX_PATH;
+  const solarman = SOLARMAN_VARIANT.exec(collapsed);
+  if (solarman) return `/feed/solarman/${solarman[1]}`;
+  return collapsed;
+}
+
 /* ── Configuration ────────────────────────────────────────────────────────── */
 
 /** "SOKO46=HUAWEI:NE=201410062,VETINST=SOLIS:1298491919450654168" -> [{ code, source, vendor }] */
@@ -693,9 +713,16 @@ function createFeedHandler({ store, config, state, storeReady = () => true, log 
     return true;
   }
 
-  return async function handleFeed(req, res, url, json, jsonText) {
-    if (!url.pathname.startsWith('/feed/') && url.pathname !== '/feed') return false;
+  return async function handleFeed(req, res, requestUrl, json, jsonText) {
+    if (!requestUrl.pathname.startsWith('/feed/') && requestUrl.pathname !== '/feed') return false;
     res.setHeader('Cache-Control', 'no-store');
+    // Route (and log) the canonical spelling; the access log keeps the raw one.
+    let url = requestUrl;
+    const pathname = canonicalFeedPath(requestUrl.pathname);
+    if (pathname !== requestUrl.pathname) {
+      url = new URL(requestUrl.href);
+      url.pathname = pathname;
+    }
 
     if (!config.configured) {
       json(res, 503, { error: 'feed not configured', detail: 'set FEED_USERNAME/FEED_PASSWORD or FEED_API_KEY', success: false });
@@ -795,7 +822,7 @@ function createFeedHandler({ store, config, state, storeReady = () => true, log 
 
 module.exports = {
   LAYOUT, EXTRAS, TOKEN_TTL_SECONDS,
-  SOLAX_FIELDS, SOLARMAN_FIELDS, SOLAX_PATH, SOLARMAN_TOKEN_PATH, SOLARMAN_DATA_PATH,
+  SOLAX_FIELDS, SOLARMAN_FIELDS, SOLAX_PATH, SOLARMAN_TOKEN_PATH, SOLARMAN_DATA_PATH, canonicalFeedPath,
   parseFeedPlants, feedConfig, vendorOf,
   issueToken, verifyToken, isAuthorized, tokenIdAuthorized, solarmanLoginOk,
   pairsForPlant, computeCurrent, computeHistory,

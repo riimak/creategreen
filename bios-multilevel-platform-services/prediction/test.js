@@ -263,6 +263,26 @@ const feed = require('./feed');
   const plain = await call('GET', `${feed.SOLAX_PATH}?tokenId=k-1234567890&sn=SOKO46`);
   assert.strictEqual(plain.statusCode, 200);
   assert.strictEqual(state.requestsTotal, 6);
+
+  // However Mars2 joins BaseUrl and RealTimeInfoEndpoint, the Solax handler answers.
+  store.appendFeedRequest = async (row) => { rows.push(row); };
+  for (const spelling of [
+    '/feed/proxyApp/proxy/api/getRealtimeInfo.do',          // base without trailing slash resolved as a URI: "solax" replaced
+    '/feed/solax//proxyApp/proxy/api/getRealtimeInfo.do',   // base with trailing slash + "/" + endpoint
+    '/feed/solaxproxyApp/proxy/api/getRealtimeInfo.do',     // base + endpoint without a separator
+  ]) {
+    const r = await call('GET', `${spelling}?tokenId=k-1234567890&sn=SOKO46`);
+    assert.strictEqual(r.statusCode, 200, spelling);
+    assert.strictEqual(r.body.exception, 'no data', `${spelling} reached the Solax handler (empty fake store)`);
+    assert.strictEqual(rows[rows.length - 1].path, feed.SOLAX_PATH, `${spelling} is logged under the canonical path`);
+    assert.strictEqual(rows[rows.length - 1].sn, 'SOKO46');
+  }
+  assert.strictEqual(feed.canonicalFeedPath('/feed/solarman//account/v1.0/token'), feed.SOLARMAN_TOKEN_PATH);
+  assert.strictEqual(feed.canonicalFeedPath('/feed/device/v1.0/currentData'), feed.SOLARMAN_DATA_PATH);
+  assert.strictEqual(feed.canonicalFeedPath('/feed/solax/proxyApp/proxy/api/getHistory.do'), '/feed/solax/proxyApp/proxy/api/getHistory.do', 'other endpoints are not promoted');
+  assert.strictEqual(feed.canonicalFeedPath('/measurements//x'), '/measurements//x', 'outside the feed nothing changes');
+  const other = await call('GET', '/feed/solax/proxyApp/proxy/api/getHistory.do?tokenId=k-1234567890&sn=SOKO46', { 'x-feed-key': 'k-1234567890' });
+  assert.strictEqual(other.statusCode, 404, 'unknown feed paths still 404');
 })().catch((err) => { console.error(err); process.exit(1); });
 
 // /measurements?bucket=… server-side downsampling parameter.

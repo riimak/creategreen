@@ -2,6 +2,13 @@ import { proxyFusionSolarOAuth } from "./oauth-proxy.ts";
 import { applyDashboardSecurityHeaders } from "./security-headers.ts";
 import { type DbProbeResult, probePostgres } from "./db-probe.ts";
 import {
+  canonicalFeedPath,
+  FEED_SOLARMAN_DATA_PATH,
+  FEED_SOLARMAN_TOKEN_PATH,
+  FEED_SOLAX_PATH,
+  FEED_TOKEN_PATH,
+} from "./feed-path.ts";
+import {
   type CheckInput,
   formatStartup,
   type FreshnessPayload,
@@ -280,14 +287,14 @@ const BLOCKCHAIN_ALLOW_EXACT = new Set<string>([
 // Solarman-dialect token + currentData calls, which Solarman defines as
 // POST). The prediction service enforces the credentials; the proxy only
 // routes. The Solax-dialect GET carries its credential as ?tokenId=, so the
-// query string of feed requests is never logged.
-const FEED_TOKEN_PATH = "/prediction/feed/token";
+// query string of feed requests is never logged. Paths are matched after
+// canonicalFeedPath() (feed-path.ts), so the way Mars2 joins BaseUrl and
+// endpoint cannot produce a 404 here.
 const FEED_POST_PATHS = new Set<string>([
   FEED_TOKEN_PATH,
-  "/prediction/feed/solarman/account/v1.0/token",
-  "/prediction/feed/solarman/device/v1.0/currentData",
+  FEED_SOLARMAN_TOKEN_PATH,
+  FEED_SOLARMAN_DATA_PATH,
 ]);
-const FEED_SOLAX_PATH = "/prediction/feed/solax/proxyApp/proxy/api/getRealtimeInfo.do";
 const FEED_GET_PATH = /^\/prediction\/feed\/plants(?:\/[A-Z0-9_-]+\/(?:current|history|export))?$/;
 
 function isFeedPostPath(pathname: string): boolean {
@@ -943,7 +950,10 @@ function sseResponse(ip: string): Response {
 
 async function proxy(req: Request, kind: "prediction" | "blockchain", prefix: string): Promise<Response> {
   const url = new URL(req.url);
-  const feedPost = kind === "prediction" && isFeedPostPath(url.pathname);
+  // Feed paths are matched and forwarded in their canonical spelling; the
+  // access log still shows what the caller actually sent.
+  const pathname = kind === "prediction" ? canonicalFeedPath(url.pathname) : url.pathname;
+  const feedPost = kind === "prediction" && isFeedPostPath(pathname);
 
   // Read-only proxy. Anything else is rejected before it reaches the upstream
   // so a public caller can never write to the cluster-internal services. The
@@ -958,16 +968,16 @@ async function proxy(req: Request, kind: "prediction" | "blockchain", prefix: st
     return json({ error: `${kind} service is not configured` }, 502);
   }
 
-  if (!isProxyPathAllowed(kind, url.pathname)) {
+  if (!isProxyPathAllowed(kind, pathname)) {
     return json({ error: "endpoint not available" }, 404);
   }
 
-  const upstream = new URL(url.pathname.slice(prefix.length) || "/", base);
+  const upstream = new URL(pathname.slice(prefix.length) || "/", base);
   upstream.search = url.search;
-  const feed = kind === "prediction" && isFeedPath(url.pathname);
+  const feed = kind === "prediction" && isFeedPath(pathname);
   // Browser reads may be served from the last good copy when the upstream is
   // down; the Mars2 feed never is (Mars2 must see a failure, not old data).
-  const cacheKey = req.method === "GET" && !feed ? `${kind}${url.pathname}?${url.search}` : null;
+  const cacheKey = req.method === "GET" && !feed ? `${kind}${pathname}?${url.search}` : null;
 
   const upstreamHeaders = (res: Response): Headers => {
     // Copy upstream response headers but drop any CORS leakage from the

@@ -286,9 +286,20 @@ model to copy is `BIOS CREATEGREEN (Solax)` → `SRDFARETLA` + `Solax MT`
    their `Http/CounterCode` values and the `Solax` parameter category).
 2. Privremeni uređaji > Kreiraj novi uređaj from that template, per plant,
    with device parameters
-   `BaseUrl = https://bios-multilevel.barrage.net/prediction/feed/solax`,
+   `BaseUrl = https://bios-multilevel.barrage.net/prediction/feed/solax/`
+   (**trailing slash required**, see below),
    `RealTimeInfoEndpoint = proxyApp/proxy/api/getRealtimeInfo.do`,
    `TokenId = <FEED_API_KEY>`, `DeviceSn = <Mars2 code>`.
+
+   The Http driver resolves `RealTimeInfoEndpoint` against `BaseUrl` as a
+   relative URI (RFC 3986). Without the trailing slash the base's last
+   segment is replaced, the request goes to
+   `/prediction/feed/proxyApp/proxy/api/getRealtimeInfo.do` and Mars2 stores
+   nothing (observed 2026-11-12: three devices, 288 planned readouts a day,
+   zero records, no alarm anywhere in Mars2). Since the same day the dashboard
+   and the prediction service also accept that spelling, a doubled slash and
+   a missing separator (`canonicalFeedPath` in `dashboard/feed-path.ts` and
+   `prediction/feed.js`), so a BaseUrl typo cannot silently become 404s again.
 3. Create the plant node under **Solari**, add component **Mjerno mjesto**
    with ŠIFRA = the Mars2 code, then "Dodaj iz privremenih uređaja".
 4. Add a measurement-point node (component **Mjerna točka**, UREĐAJI = the
@@ -297,8 +308,10 @@ model to copy is `BIOS CREATEGREEN (Solax)` → `SRDFARETLA` + `Solax MT`
    category `CustomExport`, parameter `Position`). `Position` is **0-based**:
    column 1 `Grid.power.total` = `0` … column 15 `Inverter.AC.energy.out.daily`
    = `14`, identical to `Solax MT`.
-5. Poll every 5 minutes if the period is configurable (vendor data arrives
-   every 5 minutes; Mars2 pulls of the existing stations are 10 minutes).
+5. Polling needs no configuration: counters of a device with the `Http`
+   driver are included automatically in readout group `Http`
+   (Upravljanje očitanjima > Grupe; schedule `5 minutni`, 288 planned
+   readouts a day), the same group that polls `SOLAXBIOS`.
 
 Fallback: the same steps with a template from the `2206239131` Solarman
 device and `BaseUrl = …/prediction/feed/solarman`,

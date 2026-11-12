@@ -237,7 +237,9 @@ of those two dialects** from our API and clone the matching device as a
 template:
 
 1. **Solax dialect (preferred).** Template from `SRDFARETLA`; per plant a
-   temporary device with `BaseUrl = https://bios-multilevel.barrage.net/prediction/feed/solax`,
+   temporary device with `BaseUrl = https://bios-multilevel.barrage.net/prediction/feed/solax/`
+   (trailing slash — the driver resolves the endpoint against it as a
+   relative URI; see section 8),
    `RealTimeInfoEndpoint = proxyApp/proxy/api/getRealtimeInfo.do`,
    `TokenId = <FEED_API_KEY>`, `DeviceSn = <plant code>`. Our side answers the
    Solax `getRealtimeInfo.do` shape with the plant's 15 values in the Solax
@@ -258,14 +260,65 @@ template:
 Both dialects are implemented in `prediction/feed.js` (`/feed/solax/…`,
 `/feed/solarman/…`) and documented in [feed-contract.md](feed-contract.md).
 Which flow the driver runs is chosen by Mars2 from the parameter category;
-the device `Model` field is probably cosmetic — to be confirmed in the first
-live test (the prediction access log shows the polls).
+the device `Model` field is cosmetic (the live devices below poll with
+`Model = Solax`, `Proizvođač = Končar INEM`, `Vrsta = Električno brojilo`
+copied from `SRDFARETLA`).
+
+## 8. What was built (2026-11-12) and how the live system behaves
+
+Three plants were added with the Solax-dialect procedure above. All three
+export through `CustomDataExport/BIOS/<code>` with the `SOLAXBIOS` column
+layout (15 columns, `Position` 0–14).
+
+| Plant node | Mjerno mjesto code | Device node (name) | Mjerna točka node | Variable nodes (Position) |
+|---|---|---|---|---|
+| node/872 `SC Soko 46 kWp (Huawei)` | `SOKO46` | node/821 (`SOKO46BIOS`) | node/873 | 874 = 13 (`Inverter.AC.power.total`), 875 = 0 (`Grid.power.total`); the other 13 variables sit under node/873 (IDs not recorded) |
+| node/890 `SC SOKO Bazen 275.4 kWp (Huawei)` | `SOKOBAZEN` | node/838 (`SOKOBAZENBIOS`) | node/891 | 901 = 0, 893 = 1, 902 = 2, 903 = 3, 894 = 4, 895 = 5, 904 = 6, 896 = 7, 905 = 8, 897 = 9, 906 = 10, 898 = 11, 907 = 12, 900 = 13, 899 = 14 |
+| node/751 `Solis Veterinarski Institut` (pre-existing; empty placeholder child `SolisCloud` node/752 left in place) | `VETINST` | node/855 (`VETINSTBIOS`) | node/908 | 918 = 0, 910 = 1, 919 = 2, 920 = 3, 911 = 4, 912 = 5, 921 = 6, 913 = 7, 922 = 8, 914 = 9, 923 = 10, 915 = 11, 924 = 12, 917 = 13, 916 = 14 |
+
+Device parameters (category `Solax`) on all three: `BaseUrl =
+https://bios-multilevel.barrage.net/prediction/feed/solax/`, `TokenId =
+<FEED_API_KEY>`, `RealTimeInfoEndpoint = proxyApp/proxy/api/getRealtimeInfo.do`,
+`DeviceSn = <code>`. The device node names and the `SOKO46BIOS` serial carry a
+`BIOS` suffix from the first attempt; they are labels only, the export codes
+are the Mjerno mjesto codes.
+
+Findings from the first live run:
+
+- **`BaseUrl` must end with `/`.** With
+  `…/prediction/feed/solax` (no slash) Mars2 showed everything as healthy —
+  counters in the readout group, readouts planned, no alarm — and stored
+  nothing for hours. The Http driver resolves `RealTimeInfoEndpoint` against
+  `BaseUrl` as a relative URI, which drops the base's last segment, so the
+  requests went to `/prediction/feed/proxyApp/…` and were refused by the
+  dashboard's exact-match allow-list (404). `SRDFARETLA` never hit this
+  because its `BaseUrl` is a bare origin (`https://www.solaxcloud.com`).
+  Adding the slash made the next 5-minute readout succeed; our side now also
+  accepts the slash-less spellings (`canonicalFeedPath`).
+- **Polling period = 5 minutes, no configuration needed.** `Upravljanje
+  očitanjima > Grupe` has one group, `Http` (id 3, `Na temelju driver-a`,
+  schedule `5 minutni`); every counter of an `Http`-driver device is included
+  automatically (filter PUTANJA `Sadrži` "Solari/S" showed 48 rows = 16
+  counters × 3 devices). `Očitanja > Planirana očitanja` lists 288 readouts
+  per 24 h. The export confirms it: `SOLAXBIOS` has one record every 5
+  minutes around the clock (355 records in 30 h), vendor data is also 5-minutely.
+- **Nothing in Mars2 reports a failing poll.** `Nadzor i upravljanje >
+  Očitaj uređaj` answers "BROJ OČITANIH BROJAČA: 0" even for the working
+  `SRDFARETLA`; `Alarmi uređaji` / `Alarmi sustava` stayed empty;
+  `Administracija > Upravljanje instancama servisa` lists no instances. The
+  only places that show the truth are the export itself and our own side:
+  `GET /prediction/freshness` → `feed.requestsTotal`, `feed.lastRequestAt`,
+  `feed.recent`, and the dashboard access log (`GET <path> -> <status>`).
+- `CounterCode` matching is case-insensitive in practice (PascalCase codes,
+  camelCase JSON — values arrive).
+- A template made from `SRDFARETLA` keeps the `Solax` category and the flow.
+- Leftovers to decide on: temporary devices `SOKO46BIOS feed` and `Novi
+  Solarman uređaj` (50 Solarman counters each, both in the `Http` readout
+  group, polling nothing useful) and the placeholder node/752 `SolisCloud`.
+  Deleting needs the red ✖ / "Obriši čvor", which this work never used.
 
 ## Open points for the Mars2 team
 
-- Polling period of the Http driver (not visible in the UI).
-- Whether `CounterCode` matching is case-insensitive (the Solax codes are
-  PascalCase while the API returns camelCase — the driver evidently copes).
-- Whether a template made from `SRDFARETLA` keeps the `Solax` parameter
-  category name (if the flow is selected by that name, it must).
-- Node IDs of the new variables for the `Sumarne vrijednosti` formulas.
+- Node IDs of the new variables for the `Sumarne vrijednosti` formulas:
+  `Inverter.AC.power.total` is node 874 (SOKO46), 900 (SOKOBAZEN), 917
+  (VETINST) if the totals should include the new plants.

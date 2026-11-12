@@ -2,8 +2,9 @@
 # bios-cron.sh -- daily cron wrapper for bios-export.sh
 #
 # Intended to run at 00:00 UTC via crontab.  Fetches the last 72 hours
-# of measurements for all stations and regenerates the current month's
-# SOLAXBIOS report.
+# of measurements for every station in stations.conf and regenerates the
+# current month's report for every solar-layout station (SOLAXBIOS,
+# SOKO46, SOKOBAZEN, VETINST, ...).
 #
 # Each output file always contains the most recent 72 h window, as
 # required by the CREATEGREEN data contract (dr. Secerov / PMF NS).
@@ -13,14 +14,14 @@
 #   0 0 * * *  /path/to/bios-cron.sh >> ~/.local/log/bios-cron.log 2>&1
 #
 # Override defaults with environment variables:
-#   BIOS_OUTPUT_DIR  -- where files are written (default: ./output)
+#   BIOS_OUTPUT_DIR  -- where files are written (default: <script dir>/output)
 #   BIOS_SCRIPT_DIR  -- where bios-export.sh lives (default: script dir)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 EXPORT="${BIOS_SCRIPT_DIR:-$SCRIPT_DIR}/bios-export.sh"
-OUTPUT_DIR="${BIOS_OUTPUT_DIR:-$SCRIPT_DIR/../output}"
+OUTPUT_DIR="${BIOS_OUTPUT_DIR:-$SCRIPT_DIR/output}"
 
 log() { echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] $*"; }
 

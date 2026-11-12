@@ -633,12 +633,21 @@ else fail "report with YYYY/MM format exits non-zero"; fi
 note "── Section 22: stations.conf ──"
 
 STATIONS_OUT=$(bash "$SCRIPT_DIR/bios-export.sh" stations 2>/dev/null)
-assert_eq "stations: the three contract stations are active by default" \
-    "OS1BIOS OS2BIOS SOLAXBIOS" "$(echo "$STATIONS_OUT" | awk -F'\t' '{print $1}' | tr '\n' ' ' | sed 's/ $//')"
+assert_eq "stations: two meteo stations and four solar plants are active by default" \
+    "OS1BIOS OS2BIOS SOLAXBIOS SOKO46 SOKOBAZEN VETINST" "$(echo "$STATIONS_OUT" | awk -F'\t' '{print $1}' | tr '\n' ' ' | sed 's/ $//')"
 assert_contains "stations: SOLAXBIOS has the solar layout (15 columns)" \
     $'SOLAXBIOS\tsolar\t15 columns' "$STATIONS_OUT"
 assert_contains "stations: OS2BIOS has the meteo layout (21 columns)" \
     $'OS2BIOS\tmeteo\t21 columns' "$STATIONS_OUT"
+for sid in SOKO46 SOKOBAZEN VETINST; do
+    assert_contains "stations: ${sid} (vendor plant via the BIOS feed) has the solar layout (15 columns)" \
+        "${sid}"$'\tsolar\t15 columns' "$STATIONS_OUT"
+done
+assert_eq "stations: the unmapped Dvorana Kulturnog centra code stays disabled" \
+    "" "$(echo "$STATIONS_OUT" | awk -F'\t' '$1 == "Solarman"')"
+# bios-cron.sh produces one monthly report per solar-layout station.
+assert_eq "cron: one monthly report per solar-layout station (4)" \
+    "4" "$(echo "$STATIONS_OUT" | awk -F'\t' '$2 == "solar"' | wc -l | tr -d ' ')"
 
 # A custom file: comments, blank lines, CRLF and a new solar plant.
 printf '# comment\r\n\r\nOS2BIOS|meteo\r\nSOKO46|solar   # trailing comment\r\n' > "$WORK/stations.conf"

@@ -83,7 +83,10 @@ const state = {
 /* ── Feed API (Mars2 pulls the vendor plants from us; see feed.js) ──────────
  * Misconfiguration must not take the prediction service down: a bad
  * FEED_PLANTS keeps the feed disabled and reports the error on /freshness. */
-const feedState = { configured: false, plants: [], requestsTotal: 0, lastRequestAt: null, lastRequestPath: null, lastTokenAt: null, authFailures: 0, lastAuthFailureAt: null, configError: null };
+const feedState = {
+  configured: false, plants: [], requestsTotal: 0, lastRequestAt: null, lastRequestPath: null, lastTokenAt: null,
+  authFailures: 0, lastAuthFailureAt: null, configError: null, replica: process.env.HOSTNAME || require('os').hostname(),
+};
 let handleFeed = async () => false;
 try {
   const cfg = feedConfig(process.env);
@@ -91,13 +94,37 @@ try {
   feedState.plants = cfg.plants.map(p => p.code);
   feedState.authMethods = [cfg.username && cfg.password ? 'bearer' : null, cfg.apiKey ? 'x-feed-key' : null].filter(Boolean);
   feedState.dialects = { solax: { ...cfg.solax }, solarman: true };
-  handleFeed = createFeedHandler({
-    store: { listFeedInventory: (...a) => store.listFeedInventory(...a), latestSamples: (...a) => store.latestSamples(...a), bucketedSeries: (...a) => store.bucketedSeries(...a) },
-    config: cfg, state: feedState, storeReady: () => storeStatus.ready, log,
-  });
+  const feedStore = {
+    listFeedInventory: (...a) => store.listFeedInventory(...a), latestSamples: (...a) => store.latestSamples(...a), bucketedSeries: (...a) => store.bucketedSeries(...a),
+  };
+  if (typeof store.appendFeedRequest === 'function') feedStore.appendFeedRequest = (...a) => store.appendFeedRequest(...a);
+  handleFeed = createFeedHandler({ store: feedStore, config: cfg, state: feedState, storeReady: () => storeStatus.ready, log });
 } catch (error) {
   feedState.configError = error.message;
   log('error', `feed: disabled — ${error.message}`);
+}
+
+/**
+ * /freshness `feed`: the poll counters Mars2's silence is judged by come from
+ * feed_requests (shared by both replicas) when the database is up; the
+ * per-process counters stay visible under `local`. Without the database (JSON
+ * store, or PostgreSQL down) the process counters are all there is.
+ */
+async function feedFreshness() {
+  const { replica, ...local } = feedState;
+  const feed = {
+    ...feedState,
+    local: { replica, requestsTotal: local.requestsTotal, lastRequestAt: local.lastRequestAt, lastRequestPath: local.lastRequestPath, authFailures: local.authFailures, lastAuthFailureAt: local.lastAuthFailureAt },
+    shared: false,
+  };
+  if (!storeStatus.ready || typeof store.feedRequestSummary !== 'function') return feed;
+  try {
+    const summary = await S(store.feedRequestSummary({ recent: 10 }));
+    Object.assign(feed, summary, { shared: true });
+  } catch (error) {
+    feed.summaryError = error.message;
+  }
+  return feed;
 }
 
 /* ── Liveness semantics ──────────────────────────────────────────────────────
@@ -659,7 +686,7 @@ async function freshnessBody() {
     sources,
     sourcesError,
     inputSource: inputSourceInfo().type,
-    feed: { ...feedState },
+    feed: await feedFreshness(),
   };
 }
 
@@ -1303,13 +1330,22 @@ function startScheduler() {
     schedulerHandles.prune = setInterval(runPrune, 6 * 3600 * 1000);
   }
 
-  // Daily housekeeping of the monitor-check history behind the SLO panel.
-  if (typeof store.pruneMonitorChecks === 'function') {
+  // Daily housekeeping of the monitor-check history behind the SLO panel and
+  // of the feed request log (Mars2's polls).
+  if (typeof store.pruneMonitorChecks === 'function' || typeof store.pruneFeedRequests === 'function') {
     const keepDays = numberParam('MONITOR_CHECKS_RETENTION_DAYS', 90);
+    const keepFeedDays = numberParam('FEED_REQUESTS_RETENTION_DAYS', 30);
     schedulerHandles.housekeeping = setInterval(() => {
-      S(store.pruneMonitorChecks(keepDays))
-        .then(r => { if (r.deleted) log('info', `monitor_checks prune: deleted=${r.deleted} retentionDays=${keepDays}`); })
-        .catch(err => log('warn', `monitor_checks prune failed: ${err.message}`));
+      if (typeof store.pruneMonitorChecks === 'function') {
+        S(store.pruneMonitorChecks(keepDays))
+          .then(r => { if (r.deleted) log('info', `monitor_checks prune: deleted=${r.deleted} retentionDays=${keepDays}`); })
+          .catch(err => log('warn', `monitor_checks prune failed: ${err.message}`));
+      }
+      if (typeof store.pruneFeedRequests === 'function') {
+        S(store.pruneFeedRequests(keepFeedDays))
+          .then(r => { if (r.deleted) log('info', `feed_requests prune: deleted=${r.deleted} retentionDays=${keepFeedDays}`); })
+          .catch(err => log('warn', `feed_requests prune failed: ${err.message}`));
+      }
     }, 24 * 3600 * 1000);
   }
 }

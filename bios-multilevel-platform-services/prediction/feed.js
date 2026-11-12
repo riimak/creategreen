@@ -567,15 +567,40 @@ function createFeedHandler({ store, config, state, storeReady = () => true, log 
     return plants;
   }
 
-  function touch(path, ok) {
+  /** Caller address as seen through Cloudflare; the dashboard proxy strips X-Forwarded-For. */
+  function clientAddress(req) {
+    const h = req.headers || {};
+    const ip = h['cf-connecting-ip'] || h['x-real-ip'] || req.socket?.remoteAddress || null;
+    return ip ? String(ip).slice(0, 64) : null;
+  }
+
+  /**
+   * Count the call in process memory (per replica, visible on /freshness as
+   * `feed.local`) and, when the database is up, append it to feed_requests
+   * once the response has gone out so the row carries the real status code.
+   * Shared state is what makes "Mars2 last polled at" true across replicas.
+   */
+  function touch(req, res, url, ok, { sn = null } = {}) {
+    const at = new Date(now()).toISOString();
     state.requestsTotal = (state.requestsTotal || 0) + 1;
     if (ok) {
-      state.lastRequestAt = new Date(now()).toISOString();
-      state.lastRequestPath = path;
+      state.lastRequestAt = at;
+      state.lastRequestPath = url.pathname;
     } else {
-      state.lastAuthFailureAt = new Date(now()).toISOString();
+      state.lastAuthFailureAt = at;
       state.authFailures = (state.authFailures || 0) + 1;
     }
+    if (typeof store.appendFeedRequest !== 'function' || !storeReady()) return;
+    const entry = {
+      requestedAt: at, replica: state.replica || null, path: url.pathname, sn: sn ? String(sn).slice(0, 64) : null, ok,
+      clientIp: clientAddress(req), userAgent: req.headers?.['user-agent'] ? String(req.headers['user-agent']).slice(0, 200) : null,
+    };
+    const record = () => {
+      entry.status = res.statusCode;
+      Promise.resolve().then(() => store.appendFeedRequest(entry))
+        .catch(error => log('warn', `feed: could not record request in feed_requests: ${error.message}`));
+    };
+    if (typeof res.once === 'function') res.once('finish', record); else record();
   }
 
   function plantByCode(code) {
@@ -613,15 +638,15 @@ function createFeedHandler({ store, config, state, storeReady = () => true, log 
     const fail = (status, exception, extra) => json(res, status, { success: false, exception, result: null, ...extra });
     if (req.method !== 'GET') { fail(405, 'method not allowed'); return true; }
     const tokenId = url.searchParams.get('tokenId');
+    const sn = (url.searchParams.get('sn') || '').trim();
     if (!tokenIdAuthorized(config, tokenId, now()) && !isAuthorized(config, req.headers, now())) {
-      touch(url.pathname, false);
+      touch(req, res, url, false, { sn });
       res.setHeader('WWW-Authenticate', 'Bearer realm="bios-feed"');
       fail(401, 'invalid tokenId');
       return true;
     }
-    touch(url.pathname, true);
+    touch(req, res, url, true, { sn });
     if (!storeReady()) { unavailable(res, json, { success: false, exception: 'database unavailable', result: null }); return true; }
-    const sn = (url.searchParams.get('sn') || '').trim();
     const plant = plantByCode(sn);
     if (!plant) { fail(404, 'unknown sn', { codes: config.plants.map(p => p.code) }); return true; }
     const { current } = await plantCurrent(plant, [...LAYOUT, ...EXTRAS]);
@@ -642,7 +667,7 @@ function createFeedHandler({ store, config, state, storeReady = () => true, log 
     }
     if (url.pathname === SOLARMAN_TOKEN_PATH) {
       if (!solarmanLoginOk(config, body)) {
-        touch(url.pathname, false);
+        touch(req, res, url, false);
         fail(401, 2101021, 'invalid credentials');
         return true;
       }
@@ -651,15 +676,15 @@ function createFeedHandler({ store, config, state, storeReady = () => true, log 
       return true;
     }
     if (url.pathname !== SOLARMAN_DATA_PATH) { fail(404, 404, 'not found'); return true; }
+    const sn = String(body.deviceSn ?? '').trim();
     if (!isAuthorized(config, req.headers, now())) {
-      touch(url.pathname, false);
+      touch(req, res, url, false, { sn });
       res.setHeader('WWW-Authenticate', 'Bearer realm="bios-feed"');
       fail(401, 2101021, 'auth invalid token');
       return true;
     }
-    touch(url.pathname, true);
+    touch(req, res, url, true, { sn });
     if (!storeReady()) { unavailable(res, json, { code: '503', msg: 'database unavailable', success: false }); return true; }
-    const sn = String(body.deviceSn ?? '').trim();
     const plant = plantByCode(sn);
     if (!plant) { fail(404, 404, `unknown deviceSn; configured: ${config.plants.map(p => p.code).join(', ')}`); return true; }
     const { full, current } = await plantCurrent(plant, [...LAYOUT, ...EXTRAS]);
@@ -692,7 +717,7 @@ function createFeedHandler({ store, config, state, storeReady = () => true, log 
       const ok = config.username && creds.grantType === 'password'
         && constantTimeEqual(creds.userName, config.username) && constantTimeEqual(creds.password, config.password);
       if (!ok) {
-        touch(url.pathname, false);
+        touch(req, res, url, false);
         json(res, 400, { error: 'invalid_grant', error_description: 'The user name or password is incorrect.' });
         return true;
       }
@@ -702,13 +727,15 @@ function createFeedHandler({ store, config, state, storeReady = () => true, log 
     }
 
     if (req.method !== 'GET') { json(res, 405, { error: 'method not allowed' }); return true; }
+    const plantInPath = url.pathname.match(/^\/feed\/plants\/([A-Z0-9_-]+)\//);
+    const pathSn = plantInPath ? plantInPath[1] : null;
     if (!isAuthorized(config, req.headers, now())) {
-      touch(url.pathname, false);
+      touch(req, res, url, false, { sn: pathSn });
       res.setHeader('WWW-Authenticate', 'Bearer realm="bios-feed"');
       json(res, 401, { error: 'unauthorized' });
       return true;
     }
-    touch(url.pathname, true);
+    touch(req, res, url, true, { sn: pathSn });
 
     if (!storeReady()) { unavailable(res, json, { error: 'database unavailable' }); return true; }
 

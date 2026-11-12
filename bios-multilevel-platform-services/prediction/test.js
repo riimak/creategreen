@@ -210,6 +210,61 @@ const feed = require('./feed');
   assert.deepStrictEqual(feed.feedConfig({ FEED_PLANTS: '' }).solax, { powerUnit: 'W', empty: 'null', timeZone: 'Europe/Zagreb' });
 }
 
+/* ── Feed request log: every poll is written to the store once the response
+ * is out, with the real status, the plant code and the caller's address, so
+ * both replicas agree on "Mars2 last polled at". ──────────────────────────── */
+(async () => {
+  const { EventEmitter } = require('events');
+  const cfg = feed.feedConfig({ FEED_API_KEY: 'k-1234567890', FEED_PLANTS: 'SOKO46=HUAWEI:NE=1' });
+  const rows = [];
+  const store = {
+    listFeedInventory: async () => [{ source: 'HUAWEI:NE=1', name: 'Soko', capacityKwp: 46, visible: true, devices: [] }],
+    latestSamples: async () => [],
+    bucketedSeries: async () => [],
+    appendFeedRequest: async (row) => { rows.push(row); },
+  };
+  const state = { replica: 'prediction-a' };
+  const handler = feed.createFeedHandler({ store, config: cfg, state, now: () => Date.parse('2026-11-12T18:00:00Z') });
+  const call = async (method, target, headers = {}) => {
+    const url = new URL(target, 'http://feed.test');
+    const req = { method, headers: { 'user-agent': 'Mars2 Http driver', 'cf-connecting-ip': '185.253.189.12', ...headers }, socket: { remoteAddress: '10.0.0.9' } };
+    const res = new EventEmitter();
+    res.setHeader = () => {};
+    const json = (r, status, body) => { r.statusCode = status; r.body = body; setImmediate(() => r.emit('finish')); };
+    const handled = await handler(req, res, url, json, json);
+    assert.strictEqual(handled, true);
+    await new Promise(r => setImmediate(r));
+    return res;
+  };
+  const ok = await call('GET', `${feed.SOLAX_PATH}?tokenId=k-1234567890&sn=SOKO46`);
+  assert.strictEqual(ok.statusCode, 200);
+  const unknown = await call('GET', `${feed.SOLAX_PATH}?tokenId=k-1234567890&sn=NOPE`);
+  assert.strictEqual(unknown.statusCode, 404);
+  const denied = await call('GET', `${feed.SOLAX_PATH}?tokenId=wrong&sn=SOKO46`);
+  assert.strictEqual(denied.statusCode, 401);
+  const rest = await call('GET', '/feed/plants/SOKO46/current', { 'x-feed-key': 'k-1234567890' });
+  assert.strictEqual(rest.statusCode, 200);
+  assert.strictEqual(rows.length, 4, 'one row per feed call');
+  assert.deepStrictEqual(rows.map(r => [r.ok, r.status, r.sn]), [[true, 200, 'SOKO46'], [true, 404, 'NOPE'], [false, 401, 'SOKO46'], [true, 200, 'SOKO46']],
+    'status is the one actually sent, sn is the plant asked for');
+  assert.strictEqual(rows[0].path, feed.SOLAX_PATH);
+  assert.strictEqual(rows[0].clientIp, '185.253.189.12', 'Cloudflare connecting IP wins over the socket peer');
+  assert.strictEqual(rows[0].userAgent, 'Mars2 Http driver');
+  assert.strictEqual(rows[0].replica, 'prediction-a');
+  assert.strictEqual(rows[0].requestedAt, '2026-11-12T18:00:00.000Z');
+  assert.strictEqual(state.requestsTotal, 4, 'process counters keep working beside the log');
+  assert.strictEqual(state.authFailures, 1);
+  // A failing log never fails the feed call.
+  store.appendFeedRequest = async () => { throw new Error('db gone'); };
+  const stillOk = await call('GET', `${feed.SOLAX_PATH}?tokenId=k-1234567890&sn=SOKO46`);
+  assert.strictEqual(stillOk.statusCode, 200);
+  // Without a store method (JSON store) nothing is written and nothing breaks.
+  delete store.appendFeedRequest;
+  const plain = await call('GET', `${feed.SOLAX_PATH}?tokenId=k-1234567890&sn=SOKO46`);
+  assert.strictEqual(plain.statusCode, 200);
+  assert.strictEqual(state.requestsTotal, 6);
+})().catch((err) => { console.error(err); process.exit(1); });
+
 // /measurements?bucket=… server-side downsampling parameter.
 assert.strictEqual(parseBucketSeconds('1h'), 3600);
 assert.strictEqual(parseBucketSeconds('15m'), 900);
@@ -536,6 +591,9 @@ async function checkNoJsonFallback() {
     const after = await get('/freshness');
     assert.strictEqual(after.body.feed.authFailures, 5, 'solax wrong tokenId, solarman bad login and anonymous read are counted');
     assert.strictEqual(after.body.feed.lastRequestPath, '/feed/solarman/device/v1.0/currentData');
+    assert.strictEqual(after.body.feed.shared, false, 'no database: the counters are this process\'s own');
+    assert.strictEqual(after.body.feed.local.authFailures, 5);
+    assert.ok(after.body.feed.local.replica, 'replica id is reported');
 
     // Retries keep going (attempt counter grows) instead of giving up.
     await new Promise((r) => setTimeout(r, 2_500));

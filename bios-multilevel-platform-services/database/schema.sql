@@ -107,6 +107,24 @@ CREATE TABLE IF NOT EXISTS monitor_checks (
 );
 CREATE INDEX IF NOT EXISTS idx_monitor_checks_checked ON monitor_checks (checked_at DESC);
 
+-- One row per call to the feed API (Mars2 pulling the vendor plants). The
+-- prediction service runs two replicas and Mars2 hits whichever one the proxy
+-- picks, so "when did Mars2 last poll us" has to live here, not in process
+-- memory: /freshness feed.* and the mars2.poll.silent alert read this table.
+-- Low volume (a few calls per plant per 5 minutes); pruned by the leader.
+CREATE TABLE IF NOT EXISTS feed_requests (
+  id             BIGSERIAL PRIMARY KEY,
+  requested_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  replica        TEXT,
+  path           TEXT NOT NULL,
+  sn             TEXT,
+  ok             BOOLEAN NOT NULL,
+  status         SMALLINT,
+  client_ip      TEXT,
+  user_agent     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_feed_requests_at ON feed_requests (requested_at DESC);
+
 -- /status reads the newest run on every call.
 CREATE INDEX IF NOT EXISTS idx_runs_created ON prediction_runs (created_at DESC);
 

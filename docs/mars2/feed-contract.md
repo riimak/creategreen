@@ -309,8 +309,12 @@ variables then have to be named after the export columns by hand.
 
 Polling is visible on our side: `GET /prediction/freshness` reports
 `feed.lastRequestAt`, `feed.lastRequestPath` (which dialect Mars2 uses),
-`feed.requestsTotal`, `feed.dialects` (the Solax knobs in force) and auth
-failures, and the dashboard monitor alerts when polling stops
+`feed.lastRequestSn`, `feed.requestsTotal`, `feed.dialects` (the Solax knobs
+in force), auth failures and `feed.recent` (the last ten calls: time, path,
+`sn`, status, caller address, user agent). Every call is written to the
+`feed_requests` table, so the figures are the same on both prediction
+replicas (`feed.shared: true`); the per-process counters stay under
+`feed.local`. The dashboard monitor alerts when polling stops
 (`mars2.poll.silent`).
 
 ## Errors

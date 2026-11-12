@@ -835,6 +835,64 @@ function createPgPredictionStore(databaseUrl) {
     return { deleted: rowCount };
   }
 
+  /* ── Feed requests (Mars2's pulls of the vendor plants) ───────────────────
+   * One row per /feed call. Mars2 reaches whichever replica the proxy picks,
+   * so the "last poll" that /freshness reports and the mars2.poll.silent
+   * alert evaluates must be shared state, not a per-process counter. */
+  async function appendFeedRequest(entry) {
+    await pool.query({
+      text: `INSERT INTO feed_requests (requested_at, replica, path, sn, ok, status, client_ip, user_agent)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      values: [entry.requestedAt || new Date().toISOString(), entry.replica || null, String(entry.path || ''), entry.sn || null,
+        Boolean(entry.ok), Number.isFinite(Number(entry.status)) ? Number(entry.status) : null,
+        entry.clientIp || null, entry.userAgent || null],
+      query_timeout: 5_000,
+    });
+  }
+
+  /** Totals over the retained window plus the newest `recent` calls (who, what, result). */
+  async function feedRequestSummary({ recent = 10 } = {}) {
+    const limit = Math.min(100, Math.max(1, Number(recent) || 10));
+    const iso = (v) => v?.toISOString?.() || v || null;
+    const [totals, lastOk, rows] = await Promise.all([
+      pool.query({
+        text: `SELECT count(*)::int AS total,
+                      count(*) FILTER (WHERE ok)::int AS accepted,
+                      count(*) FILTER (WHERE NOT ok)::int AS auth_failures,
+                      max(requested_at) FILTER (WHERE ok) AS last_ok_at,
+                      max(requested_at) FILTER (WHERE NOT ok) AS last_failure_at
+                 FROM feed_requests`,
+        query_timeout: 5_000,
+      }),
+      pool.query({ text: 'SELECT path, sn FROM feed_requests WHERE ok ORDER BY requested_at DESC LIMIT 1', query_timeout: 5_000 }),
+      pool.query({
+        text: `SELECT requested_at, replica, path, sn, ok, status, client_ip, user_agent
+                 FROM feed_requests ORDER BY requested_at DESC LIMIT $1`,
+        values: [limit],
+        query_timeout: 5_000,
+      }),
+    ]);
+    const t = totals.rows[0] || {};
+    return {
+      requestsTotal: Number(t.total || 0),
+      accepted: Number(t.accepted || 0),
+      authFailures: Number(t.auth_failures || 0),
+      lastRequestAt: iso(t.last_ok_at),
+      lastAuthFailureAt: iso(t.last_failure_at),
+      lastRequestPath: lastOk.rows[0]?.path || null,
+      lastRequestSn: lastOk.rows[0]?.sn || null,
+      recent: rows.rows.map(r => ({
+        at: iso(r.requested_at), replica: r.replica, path: r.path, sn: r.sn, ok: r.ok,
+        status: r.status === null ? null : Number(r.status), clientIp: r.client_ip, userAgent: r.user_agent,
+      })),
+    };
+  }
+
+  async function pruneFeedRequests(days = 30) {
+    const { rowCount } = await pool.query('DELETE FROM feed_requests WHERE requested_at < now() - make_interval(days => $1)', [Math.max(7, Number(days) || 30)]);
+    return { deleted: rowCount };
+  }
+
   return {
     init, append, list, latest, listPaginated, listDataQualityWindow, checkpoint, setMeta, read, write, stats, prune,
     persistRawRecords, listRawMeasurements, rawMeasurementsStats, pruneRawMeasurements, sourceLabels, listKnownSources,
@@ -842,6 +900,7 @@ function createPgPredictionStore(databaseUrl) {
     listFeedInventory, distinctMetricsForSource, latestSamples, bucketedSeries,
     tryAcquireLeadership, leadershipHeartbeat, releaseLeadership,
     renewLease, appendMonitorCheck, monitorSummary, pruneMonitorChecks,
+    appendFeedRequest, feedRequestSummary, pruneFeedRequests,
     file: 'postgres',
   };
 }

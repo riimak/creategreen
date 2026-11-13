@@ -75,7 +75,7 @@ rows outside the month are ignored. Columns:
 | --- | --- |
 | Effective AC Output Time (min) | minutes with `Inverter.AC.power.total` > 0, counted between consecutive samples at most 10 min apart; one decimal |
 | Total Effective AC Output Time (min) | running total of the printed day values; one decimal |
-| Inverter output (kWh) | last `Inverter.AC.energy.out.daily` of the day; two decimals; empty when the day has no value (Mars2 writes the SOLAXBIOS daily value once a day at 22:00 UTC) |
+| Inverter output (kWh) | largest `Inverter.AC.energy.out.daily` of the day; two decimals; empty when the day has no value. The vendor plants' counter resets at local midnight (an hour before the UTC day ends), so the maximum is the day's yield; for `SOLAXBIOS` Mars2 writes one value per day about a day later (at 22:00 UTC of the following day), so the newest day or two stay empty until the cron regenerates the report |
 | Exported energy (kWh) | increase of `Grid.energy.toGrid.total` over the day; two decimals |
 | Imported energy (kWh) | increase of `Grid.energy.fromGrid.total` over the day; two decimals |
 

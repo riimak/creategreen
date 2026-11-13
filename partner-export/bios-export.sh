@@ -219,9 +219,14 @@ parse_response() {   # [from_epoch] [to_epoch]
 #                                         counted between consecutive samples
 #                                         at most 10 min apart
 #   Total Effective AC Output Time (min)  running total since the first day
-#   Inverter output (kWh)                 last Inverter.AC.energy.out.daily of the day
+#   Inverter output (kWh)                 largest Inverter.AC.energy.out.daily of the day
 #   Exported energy (kWh)                 increase of Grid.energy.toGrid.total over the day
 #   Imported energy (kWh)                 increase of Grid.energy.fromGrid.total over the day
+# Inverter output is the day's maximum, not its last value: the vendor
+# plants' daily counter resets at local midnight, one hour (two in summer)
+# before the UTC day ends, so the last sample of a UTC day is already the
+# new day's zero. For SOLAXBIOS Mars2 writes a single daily value (about a
+# day later), for which maximum and last are the same thing.
 # The two energy columns are cumulative meter registers: the increase is
 # summed between consecutive samples and a decrease (meter reset) is not
 # counted, so a day with a reset does not come out negative.
@@ -322,7 +327,7 @@ for day in sorted(days):
     cumulative = round(cumulative + minutes, 1)
 
     daily = column(entries, IDX_AC_ENERGY)
-    inverter_output = fmt(daily[-1], 2) if daily else ''
+    inverter_output = fmt(max(daily), 2) if daily else ''
     exported = increase(column(entries, IDX_TO_GRID))
     imported = increase(column(entries, IDX_FROM_GRID))
 

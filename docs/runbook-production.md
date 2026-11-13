@@ -55,9 +55,12 @@ last and only runs when the other four succeed.
    characters). `ALERT_FEED_SILENT_MINUTES` is `15` in the committed
    dashboard values (Mars2 polls every 5 minutes; a CI variable of the same
    name overrides it, `0` disables the rule).
-   `uploadTime` is sent in fixed UTC+2 (`FEED_SOLAX_TIMEZONE=Etc/GMT-2`),
-   the convention Mars2 applies to Solax readings; with `Europe/Zagreb` the
-   winter export timestamps were one hour early. Check after a change: the
+   `uploadTime` is sent in fixed UTC+2 (`FEED_SOLAX_TIMEZONE=Etc/GMT-2`).
+   Mars2 subtracts twice the Croatian UTC offset from a naive timestamp
+   (2 h in winter, 4 h in summer; `docs/mars2/admin-recon.md` §8), so this
+   is right until **29 Mar 2027**; on that date set
+   `FEED_SOLAX_TIMEZONE=Etc/GMT-4` unless Mars2 has been fixed, and back to
+   `Etc/GMT-2` on 31 Oct 2027. Check after any change on either side: the
    `CustomDataExport` row timestamp must equal our sample time
    (`/prediction/feed/plants/<code>/current` → `timestamp`).
    `FEED_SOLAX_POWER_UNIT=kW` if values are 1000× too large,

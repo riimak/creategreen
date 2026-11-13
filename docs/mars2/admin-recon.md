@@ -309,18 +309,33 @@ Findings from the first live run:
   only places that show the truth are the export itself and our own side:
   `GET /prediction/freshness` → `feed.requestsTotal`, `feed.lastRequestAt`,
   `feed.recent`, and the dashboard access log (`GET <path> -> <status>`).
-- **Two time conventions, both constant (measured 2026-11-12):**
-  (a) `CustomDataExport` reads `fromUTC`/`toUTC` as Croatian local time, so
-  a window ending "now" lacks the newest hour (two in summer) and a request
-  for `[F, T]` returns `[F-1h, T-1h]`; every client of ours (prediction
-  ingest, partner tool) therefore asks for 2 h more on each side and clips
-  the rows to the window it wanted. (b) The Solax dialect stamps a reading
-  with `uploadTime` read as fixed UTC+2 (what Solax Cloud sends for
-  `SOLAXBIOS`); a naive time in `Europe/Zagreb` came out one hour early in
-  winter, so the feed sends `uploadTime` in `Etc/GMT-2`. Proof: our SOKO46
-  sample 21:16:49Z (`consumeenergy` 36851.72) was exported as 20:16:49Z with
-  the same value; SOLAXBIOS rows match daylight (production 06:25Z–15:00Z
-  against sunrise 05:55Z / sunset 15:25Z).
+- **Mars2 converts local time to UTC twice** (measured 2026-11-12/13; this is
+  one mechanism behind several symptoms). A reading's naive timestamp is
+  converted local→UTC once when stored and once more when exported, so the
+  unix timestamp in `CustomDataExport` is the source's naive time minus
+  **2 × the Croatian UTC offset** (2 h in winter, 4 h in summer), and the
+  `fromUTC`/`toUTC` bounds are compared against the once-converted value.
+  Evidence, all from the export itself:
+  - Our SOKO46 sample 21:16:49Z (`consumeenergy` 36851.72), sent as
+    `uploadTime` 22:16:49 (Europe/Zagreb, UTC+1), came out as 20:16:49Z with
+    the same value: −2 h on a +1 h source. Sent as UTC+2 it comes out exact
+    (first poll after the change: 21:42:00Z, our sample 21:42:00Z).
+  - `SOLAXBIOS` production against sunrise/sunset in Zagreb: correct until
+    28 Mar 2026, **two hours early from 29 Mar (DST start) to 24 Oct**, and
+    correct again from 25 Oct (DST end). `OS2BIOS` radiation shows the same
+    (03:00Z on 10 Sep with sunrise at 04:35Z). Both sources evidently report
+    fixed UTC+2, so in winter −2 h happens to be right.
+  - Two-hour windows at midnight return rows from 23:00Z of the previous day
+    in March/November and from 22:00Z in July/October; the four-hour window
+    over the DST night (25 Oct) returned 24 rows instead of 48.
+  Consequences: every `CustomDataExport` timestamp between 29 Mar and 24 Oct
+  2026 is two hours early (also in our prediction DB and in the partner's
+  files for that period); the same will happen from **29 Mar 2027** to all
+  stations, including the feed plants unless the feed then sends
+  `uploadTime` as UTC+4 (or Mars2 is fixed). Our clients (prediction ingest,
+  partner tool) widen requests by 2 h on each side and clip on the returned
+  timestamps, so they are right whenever the timestamps are. The feed sends
+  `uploadTime` in `Etc/GMT-2` (correct now; `FEED_SOLAX_TIMEZONE` switches it).
 - `CounterCode` matching is case-insensitive in practice (PascalCase codes,
   camelCase JSON — values arrive).
 - A template made from `SRDFARETLA` keeps the `Solax` category and the flow.
@@ -331,6 +346,14 @@ Findings from the first live run:
 
 ## Open points for the Mars2 team
 
+- The double local→UTC conversion above: store and compare in UTC, convert
+  once on output, and handle each source's convention explicitly (Solax
+  Cloud and the meteo station send fixed UTC+2; the BIOS feed sends whatever
+  `FEED_SOLAX_TIMEZONE` says and can be changed within minutes). Until it is
+  fixed, all timestamps will be two hours early again from 29 Mar 2027.
+- Whether the rows of 2026-11-12 17:25Z–20:37Z for SOKO46, SOKOBAZEN and
+  VETINST (stored one hour early, before the feed switched to UTC+2) can be
+  deleted.
 - Node IDs of the new variables for the `Sumarne vrijednosti` formulas:
   `Inverter.AC.power.total` is node 874 (SOKO46), 900 (SOKOBAZEN), 917
   (VETINST) if the totals should include the new plants.

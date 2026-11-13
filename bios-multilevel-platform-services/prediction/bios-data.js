@@ -18,8 +18,16 @@ const SOLAX_FIELDS = [
   'Inverter_AC_energy_out_daily',
 ];
 
+// Mars2 station layouts: the meteo stations (OS1BIOS, OS2BIOS, ...) export the
+// 21 meteo columns; every other station — SOLAXBIOS and the plants Mars2
+// reads from the BIOS feed (SOKO46, SOKOBAZEN, VETINST) — exports the
+// 15-column SOLAXBIOS layout.
+function isMeteoStation(source) {
+  return /^OS\d*BIOS$/i.test(String(source || '').trim());
+}
+
 function fieldsFor(source) {
-  return String(source || '').toUpperCase().startsWith('SOLAX') ? SOLAX_FIELDS : METEO_FIELDS;
+  return isMeteoStation(source) ? METEO_FIELDS : SOLAX_FIELDS;
 }
 
 function parseNumber(raw) {
@@ -285,6 +293,7 @@ module.exports = {
   METEO_FIELDS,
   SOLAX_FIELDS,
   fieldsFor,
+  isMeteoStation,
   parseExportText,
   loadRecords,
   loadFromMars2Range,

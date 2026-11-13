@@ -115,8 +115,13 @@ extraEnv:
   # OS1BIOS is not listed: Mars2 has returned zero rows for it since April 2026
   # (every cycle logged rows=0), so it only produced a permanent "no
   # measurements" alert. Re-add it here once the station reports again.
+  # SOKO46, SOKOBAZEN and VETINST are the vendor plants as Mars2 exports them
+  # (it polls our feed API for them): the dashboard shows Mars2 and only Mars2,
+  # so these Mars2 stations are displayed instead of the raw FusionSolar /
+  # SolisCloud collector sources (which still feed Mars2; see
+  # DASHBOARD_VENDOR_SOURCES in server.js).
   - name: PREDICTION_STATIONS
-    value: "OS2BIOS,SOLAXBIOS"
+    value: "OS2BIOS,SOLAXBIOS,SOKO46,SOKOBAZEN,VETINST"
   - name: PREDICTION_INIT_MODE
     value: "resume"
   - name: PREDICTION_BACKFILL_HOURS

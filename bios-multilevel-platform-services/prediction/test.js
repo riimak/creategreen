@@ -384,6 +384,26 @@ assert.deepStrictEqual(
 assert.deepStrictEqual(mergeStationLists(['A'], []), ['A']);
 assert.deepStrictEqual(mergeStationLists(['A'], [{ source: '' }, { source: null }, {}]), ['A']);
 
+// The dashboard shows Mars2 stations only: collector sources (they contain ':')
+// are dropped from the station list unless DASHBOARD_VENDOR_SOURCES=true.
+{
+  const { dashboardStations, isVendorSource, isSolarSource } = require('./server');
+  const { fieldsFor, isMeteoStation, METEO_FIELDS: MF, SOLAX_FIELDS: SF } = require('./bios-data');
+  const all = ['OS2BIOS', 'SOLAXBIOS', 'SOKO46', 'SOKOBAZEN', 'VETINST', 'HUAWEI:NE=1', 'HUAWEI:NE=1:device:42', 'SOLIS:1298', 'SOLIS:1298:device:SN1'];
+  delete process.env.DASHBOARD_VENDOR_SOURCES;
+  assert.deepStrictEqual(dashboardStations(all), ['OS2BIOS', 'SOLAXBIOS', 'SOKO46', 'SOKOBAZEN', 'VETINST'], 'only Mars2 stations by default');
+  process.env.DASHBOARD_VENDOR_SOURCES = 'true';
+  assert.deepStrictEqual(dashboardStations(all), all, 'opt-in keeps the collector sources');
+  delete process.env.DASHBOARD_VENDOR_SOURCES;
+  assert.ok(isVendorSource('HUAWEI:NE=1') && isVendorSource('SOLIS:1:device:x') && !isVendorSource('SOKO46') && !isVendorSource('Solarman'));
+  // Layouts: OSnBIOS are meteo, every other Mars2 station is the 15-column solar layout.
+  assert.ok(isMeteoStation('OS1BIOS') && isMeteoStation('OS2BIOS') && isMeteoStation('os2bios'));
+  assert.ok(!isMeteoStation('SOLAXBIOS') && !isMeteoStation('SOKO46') && !isMeteoStation('Solarman') && !isMeteoStation(''));
+  assert.strictEqual(fieldsFor('OS2BIOS'), MF);
+  for (const s of ['SOLAXBIOS', 'SOKO46', 'SOKOBAZEN', 'VETINST', 'Solarman']) assert.strictEqual(fieldsFor(s), SF, `${s} uses the solar layout`);
+  assert.ok(isSolarSource('SOKO46') && isSolarSource('SOLAXBIOS') && !isSolarSource('OS2BIOS'), '/freshness solar flag follows the layout');
+}
+
 assert.deepStrictEqual(
   observedMetricList([
     { metric: 'huawei.plant.daily_yield_kwh' },

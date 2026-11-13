@@ -1,5 +1,5 @@
 const http = require('http');
-const { loadRecords, seriesFor, fieldsFor, METEO_FIELDS, SOLAX_FIELDS } = require('./bios-data');
+const { loadRecords, seriesFor, fieldsFor, isMeteoStation, METEO_FIELDS, SOLAX_FIELDS } = require('./bios-data');
 const { forecast, anomalies, isSolarNight } = require('./model');
 const { createStore: createJsonStore } = require('./store');
 const { METRICS, metricInfo, targetInfo } = require('./metrics');
@@ -88,10 +88,14 @@ const feedState = {
   authFailures: 0, lastAuthFailureAt: null, configError: null, replica: process.env.HOSTNAME || require('os').hostname(),
 };
 let handleFeed = async () => false;
+// Mars2 code -> collector source ("SOKO46" -> "HUAWEI:NE=201410062"), so the
+// dashboard can label the Mars2 station with the plant's display name.
+let feedPlantSources = new Map();
 try {
   const cfg = feedConfig(process.env);
   feedState.configured = cfg.configured;
   feedState.plants = cfg.plants.map(p => p.code);
+  feedPlantSources = new Map(cfg.plants.map(p => [p.code, p.source]));
   feedState.authMethods = [cfg.username && cfg.password ? 'bearer' : null, cfg.apiKey ? 'x-feed-key' : null].filter(Boolean);
   feedState.dialects = { solax: { ...cfg.solax }, solarman: true };
   const feedStore = {
@@ -326,7 +330,27 @@ function numberParam(name, fallback) {
 }
 
 function isSolarSource(source) {
-  return String(source || '').toUpperCase().startsWith('SOLAX');
+  return !isMeteoStation(source);
+}
+
+/* The dashboard shows Mars2 and only Mars2 (decision 2026-11-13): the vendor
+ * plants are displayed from the rows Mars2 exports for SOKO46/SOKOBAZEN/
+ * VETINST, not from the FusionSolar/SolisCloud collectors. The collectors keep
+ * writing their "HUAWEI:…" / "SOLIS:…" sources because the feed API that Mars2
+ * polls is built from them, but those sources are no longer listed to the
+ * dashboard. Mars2 station codes never contain ':'; collector sources always
+ * do ("HUAWEI:NE=…", "SOLIS:…", "…:device:…"). DASHBOARD_VENDOR_SOURCES=true
+ * lists them again. */
+function isVendorSource(source) {
+  return String(source || '').includes(':');
+}
+
+function listVendorSources() {
+  return String(process.env.DASHBOARD_VENDOR_SOURCES || '').trim().toLowerCase() === 'true';
+}
+
+function dashboardStations(sources) {
+  return listVendorSources() ? sources : sources.filter(source => !isVendorSource(source));
 }
 
 /** Count unique nominal sampling intervals so dense Mars2 rows do not inflate "observed" vs expected slot count. */
@@ -779,10 +803,10 @@ const STATS_REFRESH_MS = 5 * 60 * 1000;
 function applyMeasurementStats(body, stats) {
   if (!body || !stats) return body;
   body.stats = stats;
-  body.stations = mergeStationLists(stationIds(), [
+  body.stations = dashboardStations(mergeStationLists(stationIds(), [
     ...(body.stations || []).map(source => ({ source })),
     ...(stats.perStation || []),
-  ]);
+  ]));
   body.metrics = {
     ...(body.metrics || {}),
     observed: observedMetricList(stats.perMetric),
@@ -818,11 +842,15 @@ async function computeMeasurementsMeta() {
   const stationLabels = typeof store.sourceLabels === 'function'
     ? await S(store.sourceLabels())
     : {};
+  // The Mars2 code of a feed plant gets the plant's own display name.
+  for (const [code, source] of feedPlantSources) {
+    if (!stationLabels[code] && stationLabels[source]) stationLabels[code] = stationLabels[source];
+  }
   const knownSources = typeof store.listKnownSources === 'function'
     ? await S(store.listKnownSources())
     : [];
   const body = {
-    stations: mergeStationLists(stationIds(), knownSources.map(source => ({ source }))),
+    stations: dashboardStations(mergeStationLists(stationIds(), knownSources.map(source => ({ source })))),
     stationLabels,
     metrics: {
       meteo: METEO_FIELDS,
@@ -1217,10 +1245,7 @@ async function handle(req, res) {
         maxHorizonHours: MAX_HORIZON_HOURS,
         models: ['linear-regression', 'seasonal-hourly-baseline'],
         metrics: METRICS,
-        fields: {
-          OS1BIOS: fieldsFor('OS1BIOS'),
-          SOLAXBIOS: fieldsFor('SOLAXBIOS'),
-        },
+        fields: Object.fromEntries(stationIds().map(source => [source, fieldsFor(source)])),
       });
     }
     if (req.method === 'GET' && url.pathname === '/forecast') {
@@ -1466,5 +1491,5 @@ if (require.main === module) {
 
 module.exports = {
   handle, runForecast, runAnomalies, runCycle, dataQuality, slaSummary, mergeStationLists, observedMetricList, measurementsMeta,
-  cycleHealth, freshnessBody, parseBucketSeconds,
+  cycleHealth, freshnessBody, parseBucketSeconds, dashboardStations, isVendorSource, isSolarSource,
 };

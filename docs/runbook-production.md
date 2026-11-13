@@ -69,6 +69,13 @@ last and only runs when the other four succeed.
    `FEED_SOLAX_EMPTY=zero|omit` if nothing is read at all.
    Contract: `docs/mars2/feed-contract.md`; admin model:
    `docs/mars2/admin-recon.md`.
+   **The dashboard shows Mars2 and only Mars2**: `PREDICTION_STATIONS`
+   lists `OS2BIOS,SOLAXBIOS,SOKO46,SOKOBAZEN,VETINST` and the prediction
+   service ingests all of them from `CustomDataExport`; the FusionSolar and
+   SolisCloud collectors keep running because the feed Mars2 polls is built
+   from their rows, but their `HUAWEI:…`/`SOLIS:…` sources are not listed to
+   the dashboard (`DASHBOARD_VENDOR_SOURCES=true` on the prediction service
+   lists them again).
 4. **Zabbix** (DevOps): web scenario on `https://bios-multilevel.barrage.net/health`
    expecting HTTP 200 and the string `"healthy": true`, and on
    `/prediction/freshness` expecting `"ok": true`; 1-minute interval, alert

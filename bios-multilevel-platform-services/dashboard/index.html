@@ -3649,11 +3649,15 @@ let lastSoilingHint = null;
 
 // Friendly station label: "SOLAXBIOS" → "Solarna elektrana" (HR) / "Solar plant" (EN).
 const STATION_LABEL = {
-  hr: { SOLAXBIOS: 'Solarna elektrana (BIOS)', Solarman: 'Solarna elektrana (Dvorana)', OS1BIOS: 'Meteo postaja 1', OS2BIOS: 'Meteo postaja 2' },
-  en: { SOLAXBIOS: 'Solar plant (BIOS)', Solarman: 'Solar plant (Dvorana)', OS1BIOS: 'Meteo station 1', OS2BIOS: 'Meteo station 2' },
+  hr: { SOLAXBIOS: 'Solarna elektrana (BIOS)', Solarman: 'Solarna elektrana (Dvorana)', OS1BIOS: 'Meteo postaja 1', OS2BIOS: 'Meteo postaja 2',
+        SOKO46: 'SC Soko 46 kWp', SOKOBAZEN: 'SC SOKO Bazen 275,4 kWp', VETINST: 'Veterinarski institut' },
+  en: { SOLAXBIOS: 'Solar plant (BIOS)', Solarman: 'Solar plant (Dvorana)', OS1BIOS: 'Meteo station 1', OS2BIOS: 'Meteo station 2',
+        SOKO46: 'SC Soko 46 kWp', SOKOBAZEN: 'SC SOKO Bazen 275.4 kWp', VETINST: 'Veterinary Institute' },
 };
-// Labels for dynamically discovered sources (Huawei plants and devices),
-// served by /prediction/measurements/meta as stationLabels.
+// Labels for sources discovered at runtime, served by
+// /prediction/measurements/meta as stationLabels (the Mars2 codes of the
+// feed plants carry the plant's display name; collector sources are listed
+// only when DASHBOARD_VENDOR_SOURCES=true on the prediction service).
 let dynamicStationLabels = {};
 function stationLabel(code){
   return STATION_LABEL[currentLang]?.[code] || dynamicStationLabels[code] || code;

@@ -505,6 +505,21 @@ assert_eq "imported energy over a reset = (1232-1195) + (380-2) + 0,5 + 0,5 = 41
 assert_eq "exported energy over a reset = 0 + (3-1) = 2,00" \
     "2,00" "$(echo "$RESET_ROW" | cut -d';' -f6)"
 
+# The vendor plants' daily yield counter resets at local midnight (23:00Z in
+# winter): the last samples of a UTC day already carry the new day's zero.
+# Inverter output is therefore the day's maximum. SOKO46 on 2026-11-12 made
+# 27,32 kWh and its 23:57:52Z row says 0.
+MIDNIGHT_FIX='"SOKO46!'
+MIDNIGHT_FIX+="$((MARCH1_00+43200));-5;16831,66;36840;;;;;;;;;;;3200;21,10xa"   # 12:00Z producing
+MIDNIGHT_FIX+="$((MARCH1_00+57600));-7;16831,66;36845;;;;;;;;;;;0;27,320xa"     # 16:00Z done for the day
+MIDNIGHT_FIX+="$((MARCH1_00+82800));-8;16831,66;36850;;;;;;;;;;;0;27,320xa"     # 23:00Z local midnight
+MIDNIGHT_FIX+="$((MARCH1_00+86100));-4;16831,66;36851;;;;;;;;;;;0;00xa"         # 23:55Z counter reset
+MIDNIGHT_FIX+='"'
+MIDNIGHT_ROW=$(echo "$MIDNIGHT_FIX" | python3 "$WORK/report.py" | tail -1)
+assert_eq "inverter output is the day's maximum (27,32), not the post-reset last value (0)" \
+    "27,32" "$(echo "$MIDNIGHT_ROW" | cut -d';' -f5)"
+assert_eq "report row count unaffected by the reset row" "1" "$(echo "$MIDNIGHT_FIX" | python3 "$WORK/report.py" | tail -n +2 | wc -l | tr -d ' ')"
+
 # A counter that never has a value that day leaves the cell empty; a single
 # sample gives 0,00.
 ONE_FIX='"SOLAXBIOS!'"$((MARCH1_00+300))"';-10;;17838;;;;;;;;;;;0;0xa"'

@@ -330,12 +330,12 @@ Findings from the first live run:
     over the DST night (25 Oct) returned 24 rows instead of 48.
   Consequences: every `CustomDataExport` timestamp between 29 Mar and 24 Oct
   2026 is two hours early (also in our prediction DB and in the partner's
-  files for that period); the same will happen from **29 Mar 2027** to all
-  stations, including the feed plants unless the feed then sends
-  `uploadTime` as UTC+4 (or Mars2 is fixed). Our clients (prediction ingest,
-  partner tool) widen requests by 2 h on each side and clip on the returned
-  timestamps, so they are right whenever the timestamps are. The feed sends
-  `uploadTime` in `Etc/GMT-2` (correct now; `FEED_SOLAX_TIMEZONE` switches it).
+  files for that period), and the same will happen from 29 Mar 2027 to all
+  stations until Mars2 is fixed. **Policy (2026-11-13): BIOS mirrors Mars2
+  exactly, bug included** — the feed keeps sending `uploadTime` in fixed
+  UTC+2 like Solax Cloud, so the feed plants behave like `SOLAXBIOS` in
+  every season, and nothing is corrected in our database. The fix belongs
+  in Mars2 (see the open points below).
 - `CounterCode` matching is case-insensitive in practice (PascalCase codes,
   camelCase JSON — values arrive).
 - A template made from `SRDFARETLA` keeps the `Solax` category and the flow.

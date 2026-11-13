@@ -216,11 +216,10 @@ GET /prediction/feed/solax/proxyApp/proxy/api/getRealtimeInfo.do?tokenId=<FEED_A
   and two hours early all summer. Measured 2026-11-12 with `Europe/Zagreb`
   (UTC+1): our SOKO46 sample 21:16:49Z (`consumeenergy` 36851.72) appeared
   as 20:16:49Z with the same value; with UTC+2 the exported timestamp equals
-  the sample time (21:42:00Z = 21:42:00Z). **From 29 Mar 2027 (DST) the
-  value has to become UTC+4 (`Etc/GMT-4`) unless Mars2 is fixed first** —
-  the export timestamps of the feed plants should be compared with
-  `/prediction/feed/plants/<code>/current` → `timestamp` after any change on
-  either side.
+  the sample time (21:42:00Z = 21:42:00Z). Fixed UTC+2 is kept **in every
+  season**: the agreed policy is that BIOS data is exactly what Mars2
+  holds, so the feed plants must behave like `SOLAXBIOS` (right in winter,
+  two hours early in summer until Mars2 is fixed), not better than it.
 - Missing quantities are `null` (Solax itself sends `powerdc3: null`);
   `FEED_SOLAX_EMPTY=zero|omit` if Mars2's deserializer objects.
 - `inverterType` is `"0"` (there is no Solax inverter), `inverterStatus`

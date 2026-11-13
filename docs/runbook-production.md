@@ -55,14 +55,16 @@ last and only runs when the other four succeed.
    characters). `ALERT_FEED_SILENT_MINUTES` is `15` in the committed
    dashboard values (Mars2 polls every 5 minutes; a CI variable of the same
    name overrides it, `0` disables the rule).
-   `uploadTime` is sent in fixed UTC+2 (`FEED_SOLAX_TIMEZONE=Etc/GMT-2`).
-   Mars2 subtracts twice the Croatian UTC offset from a naive timestamp
-   (2 h in winter, 4 h in summer; `docs/mars2/admin-recon.md` §8), so this
-   is right until **29 Mar 2027**; on that date set
-   `FEED_SOLAX_TIMEZONE=Etc/GMT-4` unless Mars2 has been fixed, and back to
-   `Etc/GMT-2` on 31 Oct 2027. Check after any change on either side: the
-   `CustomDataExport` row timestamp must equal our sample time
-   (`/prediction/feed/plants/<code>/current` → `timestamp`).
+   `uploadTime` is sent in fixed UTC+2 (`FEED_SOLAX_TIMEZONE=Etc/GMT-2`),
+   the same convention Solax Cloud uses for `SOLAXBIOS`. **Policy (Ivan,
+   2026-11-13): the BIOS data must be exactly what Mars2 holds, Mars2's time
+   handling included** — so the feed plants come out of Mars2 like every
+   other station (right in winter, two hours early in summer while Mars2
+   converts local→UTC twice, `docs/mars2/admin-recon.md` §8). Do not
+   compensate for that on our side; the fix belongs in Mars2. Only change
+   `FEED_SOLAX_TIMEZONE` if Solax Cloud's convention changes, and verify by
+   comparing a `CustomDataExport` row of SOLAXBIOS and of a feed plant with
+   their true sample times on the same day.
    `FEED_SOLAX_POWER_UNIT=kW` if values are 1000× too large,
    `FEED_SOLAX_EMPTY=zero|omit` if nothing is read at all.
    Contract: `docs/mars2/feed-contract.md`; admin model:

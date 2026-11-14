@@ -4299,6 +4299,7 @@ function startRealtime(){
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   fallbackPoll();
+  loadSloPanel();
   const active = getActiveTab();
   if (active === 'measurements') refreshMeasurements();
   else if (active === 'predictions') refreshPredictions();
@@ -5156,8 +5157,12 @@ startRealtime();
 fallbackPoll();
 refreshSoiling();
 setInterval(refreshSoiling, 60_000);
+/* Match ALERT_CHECK_SECONDS (default 60s): checks land in monitor_checks every
+ * minute, and the footer advertises that cadence. A 10-minute UI poll made the
+ * card look frozen while availability / freshness / error budget were already
+ * moving on the server. Also refresh on tab focus (see visibilitychange). */
 loadSloPanel();
-setInterval(loadSloPanel, 10 * 60_000);
+setInterval(loadSloPanel, 60_000);
 
 // Apply initial tab from URL hash; defaults to overview.
 applyTab(location.hash.slice(1) || 'overview');

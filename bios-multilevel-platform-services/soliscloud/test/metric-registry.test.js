@@ -130,6 +130,84 @@ test('inverter day points treat power as watts despite the kW unit string', () =
   assert.strictEqual(byMetric['solis.inverter.temperature_c'].value, 41.2);
 });
 
+test('derives per-MPPT DC power for an S5-GC50K from inverterList pow fields', () => {
+  // Real shape (Veterinarski Institut, 2026-11-26 09:28 local): pow1..pow32 in W,
+  // inputs paired per MPPT (PV1+PV2, ..., PV9+PV10), PV11+ unused.
+  const raw = {
+    id: '1308675217950043347',
+    sn: '1812000257060075',
+    stationId: '1298491919450654168',
+    productModel: '1200',
+    power: 50,
+    powerStr: 'kW',
+    pac: 2.35,
+    pacStr: 'kW',
+    dataTimestamp: String(TS),
+    pow1: 321.92, pow2: 0, pow3: 319.8, pow4: 0, pow5: 320.32, pow6: 0,
+    pow7: 323, pow8: 80.75, pow9: 315.24, pow10: 394.05, pow11: 0, pow12: 0,
+  };
+  const device = normalizeInverter(raw);
+  assert.strictEqual(device.model, '1200');
+  const { measurements, skipped } = inverterMeasurements(raw, device);
+  const byMetric = Object.fromEntries(measurements.map((m) => [m.metric, m.value]));
+  assert.ok(Math.abs(byMetric['solis.inverter.mppt1_power_kw'] - 0.32192) < 1e-9);
+  assert.ok(Math.abs(byMetric['solis.inverter.mppt2_power_kw'] - 0.3198) < 1e-9);
+  assert.ok(Math.abs(byMetric['solis.inverter.mppt3_power_kw'] - 0.32032) < 1e-9);
+  assert.ok(Math.abs(byMetric['solis.inverter.mppt4_power_kw'] - 0.40375) < 1e-9);
+  assert.ok(Math.abs(byMetric['solis.inverter.mppt5_power_kw'] - 0.70929) < 1e-9);
+  assert.strictEqual('solis.inverter.mppt6_power_kw' in byMetric, false, 'five MPPTs on this model');
+  assert.strictEqual(byMetric['solis.inverter.active_power_kw'], 2.35);
+  assert.ok(measurements.every((m) => m.ts === TS_ISO && m.source === deviceSourceKey('1298491919450654168', '1812000257060075')));
+  assert.deepStrictEqual(skipped, []);
+});
+
+test('derives per-MPPT DC power for inverter day points from uPv/iPv', () => {
+  const device = { deviceSn: '1812000257060075', stationId: '1298491919450654168', model: '1200' };
+  const point = {
+    dataTimestamp: String(TS),
+    pac: 13510,
+    pacStr: 'kW',
+    uPv1: 837.7, iPv1: 2.6, uPv2: 837.7, iPv2: 0.1,
+    uPv3: 846, iPv3: 2.6, uPv4: 846, iPv4: 0,
+    uPv5: 849.9, iPv5: 2.6, uPv6: 849.9, iPv6: 0.1,
+    uPv7: 849.8, iPv7: 2.6, uPv8: 849.8, iPv8: 0.1,
+    uPv9: 837.9, iPv9: 2.7, uPv10: 837.9, iPv10: 2.7,
+    uPv11: 0.3, iPv11: 0, uPv12: 0.3, iPv12: 0.1,
+  };
+  const { measurements } = inverterDayMeasurements(point, device);
+  const byMetric = Object.fromEntries(measurements.map((m) => [m.metric, m.value]));
+  assert.ok(Math.abs(byMetric['solis.inverter.mppt1_power_kw'] - (837.7 * 2.6 + 837.7 * 0.1) / 1000) < 1e-9);
+  assert.ok(Math.abs(byMetric['solis.inverter.mppt2_power_kw'] - (846 * 2.6) / 1000) < 1e-9);
+  assert.ok(Math.abs(byMetric['solis.inverter.mppt5_power_kw'] - (837.9 * 2.7 * 2) / 1000) < 1e-9);
+  assert.strictEqual(byMetric['solis.inverter.active_power_kw'], 13.51);
+  assert.strictEqual('solis.inverter.mppt6_power_kw' in byMetric, false);
+});
+
+test('unknown inverter models and missing inputs produce no MPPT metrics', () => {
+  const ts = String(TS);
+  // Hybrid S6-EH3P (productModel 3330): layout not on file -> only the mapped fields.
+  const hybrid = inverterMeasurements(
+    { dataTimestamp: ts, pac: 1, pacStr: 'kW', pow1: 337.08, pow2: 166.9 },
+    { deviceSn: 'H', stationId: '42', model: '3330' },
+  );
+  assert.deepStrictEqual(hybrid.measurements.map((m) => m.metric), ['solis.inverter.active_power_kw']);
+  // Known model, but the record has no pow fields at all (older payload): nothing derived.
+  const bare = inverterMeasurements(
+    { dataTimestamp: ts, pac: 1, pacStr: 'kW' },
+    { deviceSn: 'S', stationId: '42', model: '1200' },
+  );
+  assert.deepStrictEqual(bare.measurements.map((m) => m.metric), ['solis.inverter.active_power_kw']);
+  // Known model, partial inputs: MPPTs with at least one numeric input are reported, others not.
+  const partial = inverterMeasurements(
+    { dataTimestamp: ts, pow1: 100, pow2: 'x', pow3: null, pow4: undefined, pow9: 0, pow10: 0 },
+    { deviceSn: 'S', stationId: '42', model: 1200 },
+  );
+  assert.deepStrictEqual(partial.measurements.map((m) => [m.metric, m.value]), [
+    ['solis.inverter.mppt1_power_kw', 0.1],
+    ['solis.inverter.mppt5_power_kw', 0],
+  ]);
+});
+
 test('source keys require identifiers', () => {
   assert.throws(() => sourceKey(''), /stationId is required/);
   assert.throws(() => deviceSourceKey('42', ''), /deviceSn is required/);

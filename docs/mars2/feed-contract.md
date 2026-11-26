@@ -137,14 +137,40 @@ Mars2 template cannot be pointed at this API: the partner's
 | 5 | `Inverter.Meter2.AC.power.total` | kW | gauge | — | — |
 | 6–8 | `Inverter.AC.EPS.power.R/S/T` | kW | gauge | — | — |
 | 9 | `Inverter.DC.Battery.power.total` | kW | gauge | sum of `huawei.battery.*` / `huawei.ess.charge_discharge_power_kw` | sum of `solis.inverter.battery_power_kw` |
-| 10–13 | `Inverter.DC.PV.power.MPPT1–4` | kW | gauge | — | — |
+| 10–13 | `Inverter.DC.PV.power.MPPT1–4` | kW | gauge | sum of `huawei.string_inverter.mppt<N>_power_kw` across inverters | sum of `solis.inverter.mppt<N>_power_kw` across inverters |
 | 14 | `Inverter.AC.power.total` | kW | gauge | sum of `huawei.string_inverter.active_power_kw` / `huawei.residential_inverter.active_power_kw` across devices | `solis.plant.current_power_kw` |
 | 15 | `Inverter.AC.energy.out.daily` | kWh | daily | `huawei.plant.daily_yield_kwh` | `solis.plant.daily_yield_kwh` |
 
 "—" columns are always `null`/empty for that vendor. Vendor metrics that do
 not fit the layout (monthly/total yield, consumption, battery daily energy,
-inverter temperature) are in `raw` and in the metric registries
+inverter temperature, total DC power `huawei.string_inverter.dc_power_kw`)
+are in `raw` and in the metric registries
 (`fusionsolar/metric-registry.js`, `soliscloud/metric-registry.js`).
+
+### MPPT columns (added 2026-11-26)
+
+Neither vendor publishes per-MPPT power directly. Both publish every PV input
+of an inverter (Huawei `pvN_u`/`pvN_i` on `getDevRealKpi` and the history
+endpoint, Solis `powN` on `inverterList` and `uPvN`/`iPvN` on `inverterDay`);
+inputs wired to one MPPT are paralleled and report one voltage, so the
+collectors derive `mppt<N>_power_kw` per inverter as the sum of `u × i` (or
+`powN`) over that MPPT's inputs. The input→MPPT grouping is per model and is
+only applied to models on file (`STRING_INVERTER_LAYOUTS` /
+`INVERTER_LAYOUTS`); other models get no MPPT metrics rather than a guess.
+
+| Model | Plants | MPPTs × inputs | Verified |
+| --- | --- | --- | --- |
+| Huawei SUN2000-50KTL-M3 | SOKO46 (1 inverter), SOKOBAZEN (5) | 4 × 2: PV1+PV2 → MPPT1 … PV7+PV8 → MPPT4 | 2026-11-26: paired inputs share a voltage, Σ u·i tracks `mppt_power` within 3 %, per-pair power equals the 5-min deltas of `mppt_N_cap` |
+| Solis S5-GC50K (`productModel` 1200) | VETINST (3) | 5 × 2: PV1+PV2 → MPPT1 … PV9+PV10 → MPPT5 | 2026-11-26: `uPv1=uPv2 … uPv9=uPv10`, `powN = uPvN·iPvN` |
+
+Because the layout has one column per MPPT index while a plant has several
+inverters, column `MPPT<N>` is MPPT N **summed over the plant's inverters**
+(the same rule as `Inverter.AC.power.total`). The four columns therefore add up
+to the plant's DC input power — except for VETINST, whose S5-GC50K have a fifth
+MPPT that the SOLAXBIOS layout cannot carry (it stays in `raw` as
+`solis.inverter.mppt5_power_kw`). MPPT history exists from the deploy date
+onward; the collectors' backfill checkpoints were already complete, so earlier
+days have no MPPT values unless the backfill is re-run.
 
 ### Sign conventions (verified 2026-11-08)
 

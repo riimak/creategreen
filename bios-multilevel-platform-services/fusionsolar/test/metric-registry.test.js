@@ -147,6 +147,85 @@ test('daily plant energy fields deterministically take precedence over day alias
   assert.equal(REGISTRY.plant.daily_use_energy.destinationUnit, 'kWh');
 });
 
+test('derives per-MPPT DC power for a SUN2000-50KTL-M3 from its paired PV inputs', () => {
+  // Shape and values of a real record for SC Soko 46 kWp (history, 2026-11-25
+  // 11:00Z): inputs sharing an MPPT report one voltage; PV7/PV8 are unused.
+  const payload = {
+    active_power: 5.268,
+    day_cap: 20.1,
+    total_cap: 23538.91,
+    mppt_power: 5.429,
+    pv1_u: 671.5, pv1_i: 1.86, pv2_u: 671.5, pv2_i: 1.5,
+    pv3_u: 669.3, pv3_i: 1.88, pv4_u: 669.3, pv4_i: 1.48,
+    pv5_u: 669.8, pv5_i: 1.67, pv6_u: 669.8, pv6_i: 0,
+    pv7_u: 0, pv7_i: 0, pv8_u: 0, pv8_i: 0,
+    pv9_u: 0, pv9_i: 0,
+    pv27_u: null, pv27_i: null,
+    mppt_1_cap: 10244.68, mppt_2_cap: 10175.96, mppt_3_cap: 4746.7, mppt_4_cap: 0,
+    temperature: 21.3,
+  };
+  const result = normalizeKpis({
+    source: 'HUAWEI:NE=201410062:device:1000000201410162',
+    deviceType: '1',
+    timestamp: 1795690800000,
+    payload,
+    model: 'SUN2000-50KTL-M3',
+  });
+  const byMetric = Object.fromEntries(result.measurements.map((m) => [m.metric, m.value]));
+  const kw = (...pairs) => pairs.reduce((sum, [u, i]) => sum + u * i, 0) / 1000;
+  assert.equal(byMetric['huawei.string_inverter.mppt1_power_kw'], kw([671.5, 1.86], [671.5, 1.5]));
+  assert.equal(byMetric['huawei.string_inverter.mppt2_power_kw'], kw([669.3, 1.88], [669.3, 1.48]));
+  assert.equal(byMetric['huawei.string_inverter.mppt3_power_kw'], kw([669.8, 1.67]));
+  assert.equal(byMetric['huawei.string_inverter.mppt4_power_kw'], 0, 'an unused MPPT reports 0, not nothing');
+  assert.equal(byMetric['huawei.string_inverter.dc_power_kw'], 5.429, 'mppt_power is the inverter DC total');
+  assert.equal(byMetric['huawei.string_inverter.active_power_kw'], 5.268);
+  assert.equal(Object.keys(byMetric).length, 8, 'no mppt5+ for a 4-MPPT model');
+  assert.ok(result.measurements.every((m) => m.ts === '2026-11-26T11:00:00.000Z' && m.isMissing === false));
+  // The PV inputs the derivation consumed are not "skipped"; everything else unmapped still is.
+  assert.deepEqual(result.skipped, [
+    'pv9_u', 'pv9_i', 'pv27_u', 'pv27_i',
+    'mppt_1_cap', 'mppt_2_cap', 'mppt_3_cap', 'mppt_4_cap', 'temperature',
+  ]);
+  assert.equal(REGISTRY['1'].mppt_power.sourceUnit, 'kW');
+  assert.equal(REGISTRY['1'].mppt_power.endpoint, '/thirdData/getDevRealKpi');
+});
+
+test('does not guess an MPPT layout for unknown or absent inverter models', () => {
+  const payload = { active_power: 1, pv1_u: 600, pv1_i: 1, pv2_u: 600, pv2_i: 1 };
+  for (const model of [undefined, null, '', 'SUN2000-100KTL-M1']) {
+    const result = normalizeKpis({
+      source: 'HUAWEI:NE=1:device:X',
+      deviceType: 1,
+      timestamp: 1795690800000,
+      payload,
+      model,
+    });
+    assert.deepEqual(result.measurements.map((m) => m.metric), ['huawei.string_inverter.active_power_kw']);
+    assert.deepEqual(result.skipped, ['pv1_u', 'pv1_i', 'pv2_u', 'pv2_i']);
+  }
+  // Only string inverters (type 1) carry PV inputs; a meter payload with pv fields is left alone.
+  const meter = normalizeKpis({
+    source: 'HUAWEI:NE=1:device:M',
+    deviceType: 47,
+    timestamp: 1795690800000,
+    payload: { active_power: 1200, pv1_u: 600, pv1_i: 1 },
+    model: 'SUN2000-50KTL-M3',
+  });
+  assert.deepEqual(meter.measurements.map((m) => m.metric), ['huawei.power_sensor.active_power_kw']);
+  // An MPPT whose inputs carry no numeric voltage/current yields nothing rather than 0.
+  const partial = normalizeKpis({
+    source: 'HUAWEI:NE=1:device:X',
+    deviceType: '1',
+    timestamp: 1795690800000,
+    payload: { pv1_u: 600, pv1_i: 2, pv2_u: 600, pv2_i: 2, pv3_u: null, pv3_i: null, pv4_u: 'n/a', pv4_i: 1 },
+    model: 'sun2000-50ktl-m3',
+  });
+  assert.deepEqual(partial.measurements.map((m) => [m.metric, m.value]), [
+    ['huawei.string_inverter.mppt1_power_kw', 2.4],
+  ]);
+  assert.deepEqual(partial.skipped, ['pv3_u', 'pv3_i', 'pv4_u', 'pv4_i']);
+});
+
 test('converts documented meter watts to kW without coercing invalid values', () => {
   const result = normalizeKpis({
     source: 'HUAWEI:device-17',

@@ -1,0 +1,315 @@
+# Longhorn early-warning watch for the Mars2 Postgres PVC.
+# Alerts Slack on degraded/faulted/under-replicated transitions (before database.down).
+#
+# Apply:
+#   kubectl --context=production.zag -n bios-multilevel-databases apply -f manifests.yaml
+#   kubectl --context=production.zag -n bios-multilevel-databases create secret generic longhorn-watch-slack \
+#     --from-literal=SLACK_WEBHOOK_URL="$SLACK_WEBHOOK_URL" --dry-run=client -o yaml | kubectl apply -f -
+#
+# Requires cluster ability to bind a Role in longhorn-system (or a ClusterRole).
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: longhorn-watch
+  namespace: bios-multilevel-databases
+  labels:
+    app.kubernetes.io/name: longhorn-watch
+    app.kubernetes.io/part-of: bios-multilevel
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bios-longhorn-watch
+  labels:
+    app.kubernetes.io/name: longhorn-watch
+    app.kubernetes.io/part-of: bios-multilevel
+rules:
+  - apiGroups: ["longhorn.io"]
+    resources: ["volumes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: bios-longhorn-watch
+  labels:
+    app.kubernetes.io/name: longhorn-watch
+    app.kubernetes.io/part-of: bios-multilevel
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: bios-longhorn-watch
+subjects:
+  - kind: ServiceAccount
+    name: longhorn-watch
+    namespace: bios-multilevel-databases
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: longhorn-watch
+  namespace: bios-multilevel-databases
+  labels:
+    app.kubernetes.io/name: longhorn-watch
+    app.kubernetes.io/part-of: bios-multilevel
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["longhorn-watch-state"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: longhorn-watch
+  namespace: bios-multilevel-databases
+  labels:
+    app.kubernetes.io/name: longhorn-watch
+    app.kubernetes.io/part-of: bios-multilevel
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: longhorn-watch
+subjects:
+  - kind: ServiceAccount
+    name: longhorn-watch
+    namespace: bios-multilevel-databases
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: longhorn-watch-code
+  namespace: bios-multilevel-databases
+  labels:
+    app.kubernetes.io/name: longhorn-watch
+    app.kubernetes.io/part-of: bios-multilevel
+data:
+  check.py: |
+    from __future__ import annotations
+    from typing import Any
+
+    def evaluate(volume: dict[str, Any], *, min_replicas: int = 2) -> list[str]:
+        status = volume.get("status") or {}
+        spec = volume.get("spec") or {}
+        state = (status.get("state") or "").lower()
+        robust = (status.get("robustness") or "").lower()
+        problems: list[str] = []
+        if state in ("", "detached") or robust == "faulted":
+            problems.append("longhorn.faulted")
+        elif robust == "degraded":
+            problems.append("longhorn.degraded")
+        elif state != "attached" or robust not in ("healthy", "unknown"):
+            if state != "attached":
+                problems.append("longhorn.faulted")
+            elif robust not in ("healthy",):
+                problems.append("longhorn.degraded")
+        n = int(spec.get("numberOfReplicas") or 0)
+        if n and n < min_replicas:
+            problems.append("longhorn.under_replicated")
+        return problems
+
+    def format_slack(
+        problems: list[str],
+        *,
+        volume_name: str,
+        state: str,
+        robustness: str,
+        replicas: int,
+        previous: list[str] | None = None,
+    ) -> str | None:
+        prev = previous or []
+        if problems == prev:
+            return None
+        if not problems and prev:
+            return (
+                f":white_check_mark: Longhorn volume `{volume_name}` recovered "
+                f"(state={state} robustness={robustness} replicas={replicas})."
+            )
+        if problems:
+            keys = ", ".join(problems)
+            return (
+                f":warning: Longhorn `{volume_name}` — {keys} "
+                f"(state={state} robustness={robustness} numberOfReplicas={replicas}). "
+                f"Postgres PVC may lose HA or go down; check longhorn-system."
+            )
+        return None
+  run.py: |
+    from __future__ import annotations
+    import json, os, ssl, urllib.error, urllib.request
+    import check
+
+    VOLUME_NAME = os.environ.get("VOLUME_NAME", "pvc-d9743216-49aa-4042-a43e-259238f3e18f")
+    MIN_REPLICAS = int(os.environ.get("MIN_REPLICAS") or "2")
+    STATE_CONFIGMAP = os.environ.get("STATE_CONFIGMAP", "longhorn-watch-state")
+    STATE_NAMESPACE = os.environ.get("STATE_NAMESPACE", "bios-multilevel-databases")
+    WEBHOOK = (os.environ.get("SLACK_WEBHOOK_URL") or "").strip()
+    TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+
+    def api_base() -> str:
+        host = os.environ["KUBERNETES_SERVICE_HOST"]
+        port = os.environ.get("KUBERNETES_SERVICE_PORT_HTTPS") or os.environ["KUBERNETES_SERVICE_PORT"]
+        return f"https://{host}:{port}"
+
+    def ssl_ctx() -> ssl.SSLContext:
+        return ssl.create_default_context(cafile=CA_PATH)
+
+    def request(method: str, path: str, body: dict | None = None) -> dict:
+        token = open(TOKEN_PATH).read()
+        data = None if body is None else json.dumps(body).encode("utf-8")
+        req = urllib.request.Request(
+            api_base() + path,
+            data=data,
+            method=method,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json",
+                **({"Content-Type": "application/json"} if body is not None else {}),
+            },
+        )
+        with urllib.request.urlopen(req, context=ssl_ctx(), timeout=30) as resp:
+            raw = resp.read().decode("utf-8")
+            return json.loads(raw) if raw else {}
+
+    def load_previous() -> list:
+        try:
+            cm = request("GET", f"/api/v1/namespaces/{STATE_NAMESPACE}/configmaps/{STATE_CONFIGMAP}")
+            return json.loads(cm.get("data", {}).get("previous.json") or "{}").get("problems") or []
+        except Exception as e:
+            print("load previous failed:", e)
+            return []
+
+    def save_previous(problems: list) -> None:
+        payload = {
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": {"name": STATE_CONFIGMAP, "namespace": STATE_NAMESPACE},
+            "data": {"previous.json": json.dumps({"problems": problems})},
+        }
+        path = f"/api/v1/namespaces/{STATE_NAMESPACE}/configmaps/{STATE_CONFIGMAP}"
+        try:
+            request("PUT", path, payload)
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                raise
+            request("POST", f"/api/v1/namespaces/{STATE_NAMESPACE}/configmaps", payload)
+
+    def post_slack(text: str) -> None:
+        if not WEBHOOK:
+            print("SLACK_WEBHOOK_URL unset; not posting")
+            return
+        req = urllib.request.Request(
+            WEBHOOK,
+            data=json.dumps({"text": text}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                print("slack status", resp.status)
+        except Exception as e:
+            print("slack post failed:", e)
+
+    def main() -> None:
+        vol = request(
+            "GET",
+            f"/apis/longhorn.io/v1beta2/namespaces/longhorn-system/volumes/{VOLUME_NAME}",
+        )
+        problems = check.evaluate(vol, min_replicas=MIN_REPLICAS)
+        status = vol.get("status") or {}
+        spec = vol.get("spec") or {}
+        name = (vol.get("metadata") or {}).get("name") or VOLUME_NAME
+        state = status.get("state") or ""
+        robust = status.get("robustness") or ""
+        replicas = int(spec.get("numberOfReplicas") or 0)
+        previous = load_previous()
+        print(f"problems={problems} previous={previous} state={state} robust={robust}")
+        msg = check.format_slack(
+            problems,
+            volume_name=name,
+            state=state,
+            robustness=robust,
+            replicas=replicas,
+            previous=previous,
+        )
+        if msg:
+            print("slack:", msg)
+            post_slack(msg)
+        save_previous(problems)
+
+    if __name__ == "__main__":
+        main()
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: longhorn-watch-state
+  namespace: bios-multilevel-databases
+  labels:
+    app.kubernetes.io/name: longhorn-watch
+    app.kubernetes.io/part-of: bios-multilevel
+data:
+  previous.json: '{"problems":[]}'
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: longhorn-watch
+  namespace: bios-multilevel-databases
+  labels:
+    app.kubernetes.io/name: longhorn-watch
+    app.kubernetes.io/part-of: bios-multilevel
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: longhorn-watch
+        spec:
+          serviceAccountName: longhorn-watch
+          restartPolicy: Never
+          containers:
+            - name: watch
+              image: python:3.12-alpine
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: VOLUME_NAME
+                  value: pvc-d9743216-49aa-4042-a43e-259238f3e18f
+                - name: MIN_REPLICAS
+                  value: "3"
+                - name: STATE_CONFIGMAP
+                  value: longhorn-watch-state
+                - name: STATE_NAMESPACE
+                  value: bios-multilevel-databases
+                - name: SLACK_WEBHOOK_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: longhorn-watch-slack
+                      key: SLACK_WEBHOOK_URL
+                      optional: true
+              volumeMounts:
+                - name: code
+                  mountPath: /app
+              workingDir: /app
+              command: ["python3", "run.py"]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 128Mi
+          volumes:
+            - name: code
+              configMap:
+                name: longhorn-watch-code

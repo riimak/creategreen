@@ -344,13 +344,67 @@ Findings from the first live run:
   group, polling nothing useful) and the placeholder node/752 `SolisCloud`.
   Deleting needs the red ✖ / "Obriši čvor", which this work never used.
 
+## 9. Infrastructure findings and the time-zone workaround (2026-11-26)
+
+Checked over RDP (Barrage has local Administrator on the Windows hosts; the
+DB host only accepts SSH keys we do not have):
+
+- `core.mars2.barrage.net` (172.21.239.194, Windows Server 2025): service
+  `M2Server$BIOS` = `C:\MARS_BIOS\M2Server.exe -instance "BIOS"`, logs in
+  `C:\MARS_BIOS\logs\<yyyyMMdd>\*.txt` (`Drivers.Http.txt`,
+  `ReadoutManager.txt`, …), config `C:\MARS_BIOS\database.config`.
+- `web.mars2.barrage.net` (172.21.239.196, Windows Server 2025): IIS site
+  `mars_bios`, app pool `mars_bios`, `C:\inetpub\MARS_BIOS`, bindings `*:81`
+  and `*:82`; `Web.config` points at `http://core.mars2.barrage.net:6232`.
+- `db.mars2.barrage.net` (172.21.239.195, Ubuntu 22.04, PostgreSQL 18):
+  databases `BIOSProdM2DB` (schema `dbo`: `VariableDatas`, `RawDatas`,
+  `Variables`, `Counters`, `Nodes`, `MeasurementPointVariables`, …) and
+  `BIOSProdRawDB` (`RawNumericData`), Npgsql 6.0.13 + EF6. Session time zone
+  `Etc/UTC`; every timestamp column is `timestamp without time zone`, so the
+  database converts nothing.
+- Where the double conversion lives (probe run on core against the DB, OS1
+  `T` record): source naive 12:00 (UTC+2) → stored `Timestamp` 11:00 (core
+  subtracts the OS offset on write) → exported 10:00Z (web subtracts it
+  again on read). A string scan of all Mars2 assemblies on both hosts finds
+  only `DateTime.ToUniversalTime`/`ToLocalTime` (`HttpDriver.dll`,
+  `Web.dll`, `M2DataAccess.dll`, `BusinessLogic.dll`, `Kit.dll`) and no
+  `TimeZoneInfo.FindSystemTimeZoneById` or hard-coded zone names, so both
+  conversions use the Windows time zone and nothing else.
+- **Workaround applied 2026-11-26 16:28–16:33 CET (Barrage, I. Rimac):**
+  both Windows hosts were switched from `Central European Standard Time`
+  (DST on) to the fixed zone `W. Central Africa Standard Time` (UTC+1, no
+  DST) with `tzutil /s "W. Central Africa Standard Time"`, then
+  `M2Server$BIOS` was restarted (core, 16:28:41) and the `mars_bios` app
+  pool recycled (web, 16:32:29). Verified in a fresh process on both hosts:
+  `TimeZoneInfo.Local` offset +01:00 for Jan 2027 and Jul 2027. Export
+  before/after identical; first rows ingested after the restart (15:33:35Z
+  SOKO46/SOKOBAZEN, 15:34:03Z VETINST, 15:30:01Z SOLAXBIOS) exported with the
+  correct timestamps. Effect: the export stays `source − 2 h` all year, which
+  is exact for every current source (all send fixed UTC+2), so the −2 h
+  summer shift will not recur from 29 Mar 2027. Side effects in summer:
+  Windows clock, log timestamps and server-side day boundaries on the two
+  hosts run 1 h behind CEST. Revert with `tzutil /s "Central European
+  Standard Time"` plus the same restart/recycle once Končar fixes the code.
+  Not changed: the DB host, `FEED_SOLAX_TIMEZONE` (stays `Etc/GMT-2`), and
+  the already stored 29 Mar–24 Oct 2026 rows (still −2 h).
+- Pre-existing, unrelated: `Drivers.Http.txt` logs `Error while reading data
+  from device ID 4 … Authentication failed: missing or empty token fields`
+  every 5 minutes (12×/h all day on 2026-11-26).
+- OS1BIOS wind direction (`Smjer vjetra`, node/396) was exported ×10⁶ because
+  the measurement-point variable had *Mjerna veličina* "Meteo - Masena
+  koncentracija (ug/m3)" (g→µg unit conversion at export). Changed to "Meteo -
+  Stupanj (deg)" on 2026-11-26; the export is corrected retroactively because
+  the conversion happens on read (min 0 / max 337.5 since 14 Nov). OS2BIOS
+  (node/413) was already correct.
+
 ## Open points for the Mars2 team
 
 - The double local→UTC conversion above: store and compare in UTC, convert
   once on output, and handle each source's convention explicitly (Solax
   Cloud and the meteo station send fixed UTC+2; the BIOS feed sends whatever
   `FEED_SOLAX_TIMEZONE` says and can be changed within minutes). Until it is
-  fixed, all timestamps will be two hours early again from 29 Mar 2027.
+  fixed the two Windows hosts stay on the fixed UTC+1 zone described in §9;
+  revert it when the code is fixed.
 - Whether the rows of 2026-11-12 17:25Z–20:37Z for SOKO46, SOKOBAZEN and
   VETINST (stored one hour early, before the feed switched to UTC+2) can be
   deleted.

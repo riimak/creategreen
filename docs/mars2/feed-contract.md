@@ -160,8 +160,17 @@ only applied to models on file (`STRING_INVERTER_LAYOUTS` /
 
 | Model | Plants | MPPTs × inputs | Verified |
 | --- | --- | --- | --- |
-| Huawei SUN2000-50KTL-M3 | SOKO46 (1 inverter), SOKOBAZEN (5) | 4 × 2: PV1+PV2 → MPPT1 … PV7+PV8 → MPPT4 | 2026-11-26: paired inputs share a voltage, Σ u·i tracks `mppt_power` within 3 %, per-pair power equals the 5-min deltas of `mppt_N_cap` |
+| Huawei SUN2000-50KTL-M3 | SOKO46 (1 inverter), SOKOBAZEN (5) | 4 × 2: PV1+PV2 → MPPT1 … PV7+PV8 → MPPT4 | 2026-11-26 on all six units: paired inputs share a voltage, PV9+ are 0 V; Σ u·i tracks `mppt_power` within 3 % at midday, per-pair power equals the 5-min deltas of `mppt_N_cap` |
 | Solis S5-GC50K (`productModel` 1200) | VETINST (3) | 5 × 2: PV1+PV2 → MPPT1 … PV9+PV10 → MPPT5 | 2026-11-26: `uPv1=uPv2 … uPv9=uPv10`, `powN = uPvN·iPvN` |
+
+Accuracy: the values are string-sensor products, not the inverter's DC power
+meter. At daylight power (≥ ~1.5 A per string) Σ MPPT1–4 tracks Huawei's
+`mppt_power` within ~3 %; at very low irradiance Huawei reports 0 A for strings
+below roughly 0.5 A, so Σ MPPT can under-read the DC total by 20–40 % while the
+inverter makes < 5 % of its rating (seen 2026-11-26 10:25Z: 2.0 kW from
+strings vs `mppt_power` 2.6 kW on a 50 kW unit). Solis currents come in 0.1 A
+steps, i.e. ±80 W per string. Huawei's DC total is kept as
+`huawei.string_inverter.dc_power_kw` in `raw` for cross-checks.
 
 Because the layout has one column per MPPT index while a plant has several
 inverters, column `MPPT<N>` is MPPT N **summed over the plant's inverters**

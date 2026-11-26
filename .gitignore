@@ -1,4 +1,7 @@
 .env
+partner-export/incoming/
+partner-export/_*.py
+partner-export/_*.sh
 .claude/
 /node_modules/
 **/node_modules/

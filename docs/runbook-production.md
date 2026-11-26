@@ -122,6 +122,37 @@ inside the pod; container restarts cannot fix a mount.
    refills itself (72 h re-pull); Huawei/Solis live readings for the outage
    window are lost.
 
+### PostgreSQL CrashLoop with Longhorn volume `faulted` / `detached`
+
+Symptom: Postgres logs `Input/output error` / CrashLoop; Slack
+`database.down`; Longhorn volume
+`pvc-d9743216-49aa-4042-a43e-259238f3e18f` shows `state: detached`,
+`robustness: faulted`, replicas `stopped` with `failedAt` set. Pod delete
+alone will not help — the volume will not attach until a replica is salvaged.
+
+1. Confirm: `kubectl --context=production.zag -n longhorn-system get volumes.longhorn.io pvc-d9743216-49aa-4042-a43e-259238f3e18f`
+   and `… get replicas.longhorn.io -l longhornvolume=pvc-d9743216-…`.
+2. Scale the StatefulSet to 0 so the volume can detach fully:
+   `kubectl --context=production.zag -n bios-multilevel-databases scale sts bios-multilevel-postgres-prod-postgresql --replicas=0`.
+3. Clear `failedAt` on the best replica and request salvage (helper:
+   `partner-export/_pg_do_salvage.sh`), or in the Longhorn UI: Salvage the
+   replica that still has data on disk.
+4. Scale STS back to 1; wait until volume is `attached` and Postgres
+   `pg_isready`. Expect `robustness: degraded` until a second replica rebuilds.
+5. If a rebuild replica stays `stopped` with `rebuildRetryCount` climbing,
+   check whether the cluster is jammed: Longhorn manager logs
+   `reaches or exceeds the concurrent limit value 2`. Raise
+   `concurrent-replica-rebuild-per-node-limit` temporarily (e.g. to 10),
+   delete our non-running replica, wait for healthy, then restore the limit
+   (`partner-export/_pg_longhorn_clear_rebuild_jam.sh`). Soft anti-affinity
+   helpers: `_pg_longhorn_ha.sh delete-stopped`,
+   `_pg_longhorn_rebuild_other_node.sh`.
+6. Target: `numberOfReplicas: 3` and `robustness: healthy` with three
+   `running` replicas on distinct nodes.
+7. Early warning: CronJob `longhorn-watch` in `bios-multilevel-databases`
+   (`deploy/longhorn-watch/`) posts Slack on `longhorn.degraded` /
+   `longhorn.faulted` before the dashboard’s `database.down`.
+
 ### Prediction on the JSON store / OOM loop
 
 No longer possible: with `DATABASE_URL` set the service waits for PostgreSQL
@@ -192,12 +223,18 @@ Delete the forwarder pod when done.
 
 ## Asks for DevOps (cluster-level, outside this repository)
 
-1. **Longhorn**: the PostgreSQL volume `pvc-d9743216-49aa-4042-a43e-259238f3e18f`
-   has 2 replicas; one failed on 2026-11-07 05:33 UTC and took the database
-   down for 29 h (read-only remount). Please set 3 replicas, remove the stale
-   `stopped` replica on n02, and fix the recurring backup job, which has
-   failed with `failed to acquire lock backupstore/.../lock-*.lck` since
-   2026-11-06 (last good backup 2026-11-06 ~03:00 UTC).
+1. **Longhorn (still open after 2026-11-17)**: Postgres volume
+   `pvc-d9743216-49aa-4042-a43e-259238f3e18f` must stay at **3 replicas**
+   and `robustness: healthy`. Recurring backups still fail with
+   MinIO timeouts (`dial tcp … minio.production.barrage.net:443: i/o timeout`)
+   and earlier `failed to acquire lock backupstore/.../lock-*.lck` (last good
+   backup ~2026-11-10; RPO is days). Fix reachability to the backup bucket and
+   clear stale locks so nightly jobs complete; retain ≥2 usable backups. Watch
+   free space on n04 Longhorn disk (~99 Gi free of ~393 Gi as of the 11-17
+   incident).
+   Default StorageClass / volume template should default to ≥3 replicas for
+   database PVCs. n03 rebuilds for this volume have been flaky (replica
+   `desireState=running` but never gets an instance-manager process).
 2. **etcd**: `etcdserver: leader changed` several times an hour; kube-apiserver
    pods have ~1000 restarts each; Kyverno admission controller restarted 1775
    times in one week; 4 of 5 deploy pipelines on 2026-11-08 failed mid-way.
@@ -219,3 +256,8 @@ Delete the forwarder pod when done.
 - 2026-11-08: covering primary key on `raw_measurements` (44 s → 8 ms reads),
   stats without table scans, feed API for Mars2, two replicas per public
   service, SLO evidence, external probe.
+- 2026-11-17: same SPOF — sole usable Longhorn replica on n04 failed
+  (`failedAt` 21:44 UTC) → volume faulted/detached → Postgres I/O CrashLoop.
+  Salvaged replica, STS restart; volume returned `attached/degraded`. Hardening:
+  rebuild + `numberOfReplicas: 3`, `deploy/longhorn-watch` CronJob, runbook
+  salvage section. DevOps backup-lock ask still open from 11-07.

@@ -29,6 +29,21 @@ Push to `production`. Deploy jobs retry twice (etcd leader churn makes single
 retry the failed job in GitLab or push an empty commit. The dashboard job is
 last and only runs when the other four succeed.
 
+If a deploy job dies in the middle of `helm upgrade` (runner or API failure)
+the release is left `pending-upgrade` and every later upgrade — including the
+GitLab retry — fails with "another operation (install/upgrade/rollback) is in
+progress". Check with
+`kubectl -n bios-multilevel-production get secrets -l owner=helm,name=<release> --show-labels`.
+If the Deployment has already rolled out to the new image, delete the pending
+record `sh.helm.release.v1.<release>.v<N>` (back it up first with `get secret
+-o yaml`) and re-run the job: the next upgrade records v<N+1> as `deployed`
+without restarting pods. If the rollout did not finish, `helm rollback
+<release> <N-1>` first. Happened 2026-11-26 (prediction v90).
+
+`production` is a true merge of the working branch since `9e3ee3b`
+(2026-11-26): fast-forward it (`git push barrage <branch>:production`) rather
+than cherry-picking onto a `deploy-*` branch.
+
 ### One-time setup still open
 
 1. **Registry deploy token** (pods cannot pull images between pipelines because

@@ -103,6 +103,13 @@ const REGISTRY = Object.freeze({
       'huawei.string_inverter.total_yield_kwh',
       'kWh',
     ),
+    // Total DC input power of the inverter (all MPPTs), kW.
+    mppt_power: inverterEntry(
+      '1',
+      'mppt_power',
+      'huawei.string_inverter.dc_power_kw',
+      'kW',
+    ),
   }),
   '38': Object.freeze({
     active_power: inverterEntry(
@@ -240,6 +247,71 @@ const REGISTRY = Object.freeze({
   }),
 });
 
+// Per-MPPT DC power (huawei.string_inverter.mppt<N>_power_kw), derived.
+//
+// The string-inverter KPIs (getDevRealKpi and the history endpoint, devTypeId 1)
+// carry no per-MPPT power: only the total `mppt_power`, the cumulative energy
+// per MPPT (`mppt_N_cap`) and voltage/current per PV input (`pvN_u`, `pvN_i`).
+// Inputs wired to the same MPPT are paralleled and report one voltage, so the
+// power of an MPPT is the sum of u*i over its inputs. Which inputs share an
+// MPPT is fixed by the inverter model:
+//
+//   SUN2000-50KTL-M3: 4 MPPTs, 2 inputs each (PV1+PV2 -> MPPT1 ... PV7+PV8 -> MPPT4).
+//   Verified 2026-11-26 on SC Soko 46 kWp (NE=201410162): PV1/PV2, PV3/PV4 and
+//   PV5/PV6 report identical voltages, sum(u*i) follows `mppt_power` within 3 %,
+//   and the per-pair power equals the 5-minute deltas of `mppt_1..3_cap`.
+//
+// Models not listed here get no derived MPPT metrics (their PV fields stay in
+// `skipped`), rather than a guessed grouping.
+const STRING_INVERTER_LAYOUTS = Object.freeze({
+  'SUN2000-50KTL-M3': Object.freeze({ mppts: 4, inputsPerMppt: 2 }),
+});
+
+function stringInverterLayout(model) {
+  const key = typeof model === 'string' ? model.trim().toUpperCase() : '';
+  return STRING_INVERTER_LAYOUTS[key] || null;
+}
+
+function mpptPowerMetric(mppt) {
+  return `huawei.string_inverter.mppt${mppt}_power_kw`;
+}
+
+/**
+ * Per-MPPT power from the PV input voltages and currents of one string
+ * inverter record. Returns the measurements and the payload fields they used,
+ * so callers can leave those out of the "skipped" diagnostics. An MPPT whose
+ * inputs all lack a numeric u or i yields nothing (not 0).
+ */
+function deriveStringInverterMppt({ source, deviceType, ts, payload, model }) {
+  const measurements = [];
+  const consumed = [];
+  if (String(deviceType) !== '1') return { measurements, consumed };
+  const layout = stringInverterLayout(model);
+  if (!layout) return { measurements, consumed };
+  for (let mppt = 1; mppt <= layout.mppts; mppt += 1) {
+    let watts = 0;
+    let inputs = 0;
+    for (let k = 0; k < layout.inputsPerMppt; k += 1) {
+      const n = (mppt - 1) * layout.inputsPerMppt + k + 1;
+      const u = finiteNumber(payload[`pv${n}_u`]);
+      const i = finiteNumber(payload[`pv${n}_i`]);
+      if (u == null || i == null) continue;
+      consumed.push(`pv${n}_u`, `pv${n}_i`);
+      watts += u * i;
+      inputs += 1;
+    }
+    if (inputs === 0) continue;
+    measurements.push({
+      source,
+      metric: mpptPowerMetric(mppt),
+      ts,
+      value: watts / 1000,
+      isMissing: false,
+    });
+  }
+  return { measurements, consumed };
+}
+
 function sourceKey(plantCode) {
   const normalized = requiredText(plantCode, 'plantCode');
   return `HUAWEI:${normalized}`;
@@ -300,6 +372,7 @@ function normalizeKpis({
   deviceType,
   timestamp,
   payload,
+  model = null,
 } = {}) {
   const normalizedSource = requiredText(source, 'source');
   const ts = timestampIso(timestamp);
@@ -308,10 +381,19 @@ function normalizeKpis({
   }
 
   const mappings = REGISTRY[String(deviceType)] || {};
-  const measurements = [];
+  const derived = deriveStringInverterMppt({
+    source: normalizedSource,
+    deviceType,
+    ts,
+    payload,
+    model,
+  });
+  const consumed = new Set(derived.consumed);
+  const measurements = [...derived.measurements];
   const skipped = [];
   for (const [field, rawValue] of Object.entries(payload)) {
     if (shadowedPlantAlias(deviceType, field, payload)) continue;
+    if (consumed.has(field)) continue;
     const mapping = mappings[field];
     const numericValue = finiteNumber(rawValue);
     if (!mapping || numericValue == null) {
@@ -387,6 +469,8 @@ function optionalText(value) {
 
 module.exports = {
   REGISTRY,
+  STRING_INVERTER_LAYOUTS,
+  mpptPowerMetric,
   normalizePlant,
   normalizeDevice,
   normalizeKpis,

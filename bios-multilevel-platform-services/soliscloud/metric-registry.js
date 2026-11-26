@@ -45,6 +45,68 @@ const INVERTER_DAY_FIELDS = [
   { field: 'inverterTemperature', units: null, metric: 'solis.inverter.temperature_c' },
 ];
 
+// Per-MPPT DC power (solis.inverter.mppt<N>_power_kw), derived.
+//
+// inverterList (live) carries the DC power of every PV input as pow1..pow32 in
+// watts (inverterDetail labels them powNStr = "W"; verified 2026-11-26 against
+// uPvN * iPvN on the Veterinarski Institut inverters) and inverterDay points
+// carry uPvN / iPvN (V, A) per input. Inputs on one MPPT are paralleled and
+// report the same voltage, so MPPT power is the sum over its inputs. The
+// grouping is fixed by the model (productModel code, as stored in devices):
+//
+//   "1200" = S5-GC50K: 5 MPPTs, 2 inputs each (PV1+PV2 -> MPPT1 ... PV9+PV10 -> MPPT5).
+//   Verified 2026-11-26: uPv1=uPv2, uPv3=uPv4, uPv5=uPv6, uPv7=uPv8, uPv9=uPv10
+//   on all three inverters, uPv11.. = 0.
+//
+// Models not listed here get no derived MPPT metrics rather than a guess.
+const INVERTER_LAYOUTS = Object.freeze({
+  1200: Object.freeze({ machine: 'S5-GC50K', mppts: 5, inputsPerMppt: 2 }),
+});
+
+function inverterLayout(model) {
+  const key = model == null ? '' : String(model).trim();
+  return INVERTER_LAYOUTS[key] || null;
+}
+
+function mpptPowerMetric(mppt) {
+  return `solis.inverter.mppt${mppt}_power_kw`;
+}
+
+/**
+ * Per-MPPT power for one inverter record. `inputWatts(n)` returns the DC power
+ * of PV input n in watts or null when the record lacks it. An MPPT with no
+ * usable input yields nothing (not 0).
+ */
+function deriveMppt(record, device, source, ts, inputWatts) {
+  const layout = inverterLayout(device?.model);
+  if (!layout) return [];
+  const measurements = [];
+  for (let mppt = 1; mppt <= layout.mppts; mppt += 1) {
+    let watts = 0;
+    let inputs = 0;
+    for (let k = 0; k < layout.inputsPerMppt; k += 1) {
+      const n = (mppt - 1) * layout.inputsPerMppt + k + 1;
+      const w = inputWatts(record, n);
+      if (w == null) continue;
+      watts += w;
+      inputs += 1;
+    }
+    if (inputs === 0) continue;
+    measurements.push({ source, metric: mpptPowerMetric(mppt), ts, value: watts / 1000, isMissing: false });
+  }
+  return measurements;
+}
+
+function liveInputWatts(record, n) {
+  return finiteNumber(record[`pow${n}`]);
+}
+
+function dayInputWatts(record, n) {
+  const u = finiteNumber(record[`uPv${n}`]);
+  const i = finiteNumber(record[`iPv${n}`]);
+  return u == null || i == null ? null : u * i;
+}
+
 function sourceKey(stationId) {
   return `SOLIS:${requiredIdentifier(stationId, 'stationId')}`;
 }
@@ -151,13 +213,19 @@ function stationMeasurements(raw, station) {
 function inverterMeasurements(raw, device) {
   const ts = recordTimestamp(raw);
   if (!ts) return { measurements: [], skipped: ['dataTimestamp'] };
-  return mapFields(raw, INVERTER_FIELDS, deviceSourceKey(device.stationId, device.deviceSn), ts);
+  const source = deviceSourceKey(device.stationId, device.deviceSn);
+  const result = mapFields(raw, INVERTER_FIELDS, source, ts);
+  result.measurements.push(...deriveMppt(raw, device, source, ts, liveInputWatts));
+  return result;
 }
 
 function inverterDayMeasurements(point, device) {
   const ts = recordTimestamp(point);
   if (!ts) return { measurements: [], skipped: ['dataTimestamp'] };
-  return mapFields(point, INVERTER_DAY_FIELDS, deviceSourceKey(device.stationId, device.deviceSn), ts);
+  const source = deviceSourceKey(device.stationId, device.deviceSn);
+  const result = mapFields(point, INVERTER_DAY_FIELDS, source, ts);
+  result.measurements.push(...deriveMppt(point, device, source, ts, dayInputWatts));
+  return result;
 }
 
 function requiredIdentifier(value, name) {
@@ -181,6 +249,8 @@ module.exports = {
   STATION_FIELDS,
   INVERTER_FIELDS,
   INVERTER_DAY_FIELDS,
+  INVERTER_LAYOUTS,
+  mpptPowerMetric,
   sourceKey,
   deviceSourceKey,
   normalizeStation,

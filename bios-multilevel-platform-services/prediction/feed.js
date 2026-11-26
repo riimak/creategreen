@@ -77,10 +77,16 @@ const LAYOUT = Object.freeze([
   { position: 9, key: 'Inverter.DC.Battery.power.total', unit: 'kW', kind: 'gauge',
     huawei: { scope: 'devices', agg: 'sum', verified: false, metrics: ['huawei.battery.charge_discharge_power_kw', 'huawei.ess.charge_discharge_power_kw'] },
     solis: { scope: 'devices', agg: 'sum', verified: false, metrics: ['solis.inverter.battery_power_kw'] } },
-  { position: 10, key: 'Inverter.DC.PV.power.MPPT1', unit: 'kW', kind: 'gauge', huawei: null, solis: null },
-  { position: 11, key: 'Inverter.DC.PV.power.MPPT2', unit: 'kW', kind: 'gauge', huawei: null, solis: null },
-  { position: 12, key: 'Inverter.DC.PV.power.MPPT3', unit: 'kW', kind: 'gauge', huawei: null, solis: null },
-  { position: 13, key: 'Inverter.DC.PV.power.MPPT4', unit: 'kW', kind: 'gauge', huawei: null, solis: null },
+  // DC power per MPPT. The vendors publish it per inverter (derived from the PV
+  // input voltages/currents in the collectors' metric registries); the layout
+  // has one column per MPPT index and a plant has 1-5 inverters, so column N is
+  // MPPT N summed over the plant's inverters and the four columns add up to the
+  // plant's DC power — except on Solis S5-GC50K, whose fifth MPPT has no column.
+  ...[1, 2, 3, 4].map(n => ({
+    position: 9 + n, key: `Inverter.DC.PV.power.MPPT${n}`, unit: 'kW', kind: 'gauge',
+    huawei: { scope: 'devices', agg: 'sum', metrics: [`huawei.string_inverter.mppt${n}_power_kw`] },
+    solis: { scope: 'devices', agg: 'sum', metrics: [`solis.inverter.mppt${n}_power_kw`] },
+  })),
   { position: 14, key: 'Inverter.AC.power.total', unit: 'kW', kind: 'gauge',
     huawei: { scope: 'devices', agg: 'sum', metrics: ['huawei.string_inverter.active_power_kw', 'huawei.residential_inverter.active_power_kw'] },
     solis: { scope: 'plant', metrics: ['solis.plant.current_power_kw'] } },

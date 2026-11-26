@@ -421,6 +421,7 @@ function createSynchronizer({
                 deviceType,
                 timestamp,
                 payload: record.dataItemMap,
+                model: deviceModel(device),
               });
               measurements.push(...normalized.measurements);
               skipped += normalized.skipped.length;
@@ -662,6 +663,7 @@ function createSynchronizer({
           deviceType: device.deviceType,
           timestamp: Number(record.collectTime),
           payload: record.dataItems,
+          model: deviceModel(device),
         }).measurements);
       } catch {
         skipped.push(invalidRecordDiagnostic(`device:${device.deviceId}`, { index }));
@@ -862,6 +864,12 @@ function groupBy(rows, keyFor) {
 function deviceSource(plant, device) {
   if (!plant?.sourceKey) throw new Error('device plant source is missing');
   return `${plant.sourceKey}:device:${device.deviceId}`;
+}
+
+/** Inverter model for the per-MPPT derivation: Device List `model`, else `invType`. */
+function deviceModel(device) {
+  const model = device?.model || device?.metadata?.invType;
+  return typeof model === 'string' && model.trim() ? model.trim() : null;
 }
 
 function parseRetryAfter(response, now) {

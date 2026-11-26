@@ -74,6 +74,10 @@ const feed = require('./feed');
     { source: 'HUAWEI:NE=1:device:B', metric: 'huawei.residential_inverter.active_power_kw', value: 99, timestamp: at(6) }, // same device twice -> counted once
     { source: 'HUAWEI:NE=1:device:M', metric: 'huawei.grid_meter.active_power_kw', value: -3.1, timestamp: at(200) },     // stale gauge
     { source: 'HUAWEI:NE=1:device:M', metric: 'huawei.grid_meter.positive_active_energy_kwh', value: 5000, timestamp: at(200) }, // counters tolerate 26 h
+    { source: 'HUAWEI:NE=1:device:A', metric: 'huawei.string_inverter.mppt1_power_kw', value: 2.05, timestamp: at(5) },
+    { source: 'HUAWEI:NE=1:device:B', metric: 'huawei.string_inverter.mppt1_power_kw', value: 1.95, timestamp: at(6) },
+    { source: 'HUAWEI:NE=1:device:A', metric: 'huawei.string_inverter.mppt3_power_kw', value: 1.01, timestamp: at(5) },
+    { source: 'HUAWEI:NE=1:device:A', metric: 'huawei.string_inverter.mppt4_power_kw', value: 0, timestamp: at(5) },
   ];
   const current = feed.computeCurrent(huawei, inventory, samples, { now });
   assert.strictEqual(current.values['Inverter.AC.energy.out.daily'], 123.4);
@@ -84,8 +88,15 @@ const feed = require('./feed');
   assert.strictEqual(current.values['Grid.energy.toGrid.total'], 5000, 'cumulative counter within 26 h window');
   assert.strictEqual(current.details['Grid.energy.toGrid.total'].verified, true, 'feed-in direction verified against SOLAXBIOS night data');
   assert.strictEqual(current.details['Inverter.DC.Battery.power.total'].verified, false, 'battery sign convention still unverified');
-  assert.strictEqual(current.values['Inverter.DC.PV.power.MPPT1'], null);
-  assert.strictEqual(current.details['Inverter.DC.PV.power.MPPT1'].mapped, false);
+  // MPPT columns: the same MPPT index summed over the plant's inverters; an MPPT
+  // no inverter reported stays empty, a reported 0 (night) is 0.
+  assert.strictEqual(current.values['Inverter.DC.PV.power.MPPT1'], 4, 'MPPT1 = sum of MPPT1 over inverters A and B');
+  assert.strictEqual(current.details['Inverter.DC.PV.power.MPPT1'].mapped, true);
+  assert.strictEqual(current.details['Inverter.DC.PV.power.MPPT1'].samples, 2);
+  assert.strictEqual(current.values['Inverter.DC.PV.power.MPPT2'], null, 'no inverter reported MPPT2');
+  assert.strictEqual(current.values['Inverter.DC.PV.power.MPPT3'], 1.01);
+  assert.strictEqual(current.values['Inverter.DC.PV.power.MPPT4'], 0, 'a reported 0 is 0, not empty');
+  assert.strictEqual(current.details['Inverter.Meter2.AC.power.total'].mapped, false, 'columns without a vendor source stay unmapped');
   assert.strictEqual(current.details['Inverter.AC.power.total'].timestamp, at(6), 'oldest used sample is the honest timestamp');
   assert.strictEqual(current.timestamp, at(5));
   assert.strictEqual(Object.keys(current.values).length, 15);
@@ -97,11 +108,16 @@ const feed = require('./feed');
     { source: 'SOLIS:9', metric: 'solis.plant.total_grid_sell_kwh', value: 777, timestamp: at(3) },
     { source: 'SOLIS:9:device:S1', metric: 'solis.inverter.battery_soc_percent', value: 40, timestamp: at(3) },
     { source: 'SOLIS:9:device:S2', metric: 'solis.inverter.battery_soc_percent', value: 60, timestamp: at(4) },
+    { source: 'SOLIS:9:device:S1', metric: 'solis.inverter.mppt2_power_kw', value: 0.64, timestamp: at(3) },
+    { source: 'SOLIS:9:device:S2', metric: 'solis.inverter.mppt2_power_kw', value: 0.36, timestamp: at(4) },
+    { source: 'SOLIS:9:device:S1', metric: 'solis.inverter.mppt5_power_kw', value: 0.8, timestamp: at(3) }, // fifth MPPT: no column
   ], { now });
   assert.strictEqual(solisCurrent.values['Inverter.AC.power.total'], 4.2, 'solis uses the plant-level power');
   assert.strictEqual(solisCurrent.values['Grid.energy.toGrid.total'], 777);
   assert.strictEqual(solisCurrent.values['BMS.energy.SOC'], 50, 'SOC averaged across devices');
   assert.strictEqual(solisCurrent.values['Grid.power.total'], null, 'solis has no plant grid power');
+  assert.strictEqual(solisCurrent.values['Inverter.DC.PV.power.MPPT2'], 1, 'MPPT2 summed over the Solis inverters');
+  assert.strictEqual(solisCurrent.values['Inverter.DC.PV.power.MPPT1'], null);
 
   // History: gauge avg summed across devices, daily counter max, cumulative last.
   const rows = [
@@ -160,7 +176,10 @@ const feed = require('./feed');
   assert.strictEqual(solax.result.yieldtotal, 98765.4);
   assert.strictEqual(solax.result.feedinenergy, 5000);
   assert.strictEqual(solax.result.feedinpower, null, 'stale gauge is null, never 0');
-  assert.strictEqual(solax.result.powerdc3, null);
+  assert.strictEqual(solax.result.powerdc1, 4000, 'MPPT1 in W like Solax powerdc1');
+  assert.strictEqual(solax.result.powerdc2, null, 'MPPT nobody reported stays null');
+  assert.strictEqual(solax.result.powerdc3, 1010);
+  assert.strictEqual(solax.result.powerdc4, 0);
   assert.strictEqual(solax.result.uploadTime, '2026-11-08 11:55:00', 'newest used sample, naive wall clock');
   assert.strictEqual(solax.result.inverterStatus, '102');
   assert.strictEqual(typeof solax.result.inverterType, 'string');
